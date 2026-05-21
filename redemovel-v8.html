@@ -321,7 +321,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
       <div class="frow">
         <select class="fi" id="f-com" onchange="renderM()" style="display:none"><option value="">Todos os comerciais</option></select>
         <select class="fi" id="f-tp" onchange="renderM()"><option value="">Todos os tipos</option><option value="novo">Novo Serviço</option><option value="refid">Refidelização</option><option value="upgrade">Upgrade</option></select>
-        <select class="fi" id="f-st" onchange="renderM()"><option value="">Todos os estados</option><option value="pendente">Pendente</option><option value="ganho">Ganho</option><option value="perdido">Perdido</option></select>
+        <select class="fi" id="f-st" onchange="renderM()"><option value="">Todos os estados</option><option value="pendente">Pendente</option><option value="ganho">Ganho</option><option value="perdido">Perdido</option><option value="substituida">Substituída</option></select>
         <input class="fi" id="f-sr" placeholder="🔍 Pesquisar…" oninput="renderM()">
       </div>
     </div>
@@ -628,7 +628,19 @@ function selCTA(o){
   document.querySelector('input[value="'+o+'"]').checked=true;
 }
 
-function addSvc(){SV.push({id:++SID,type:'number',ref:'',tariff:'',note:'',duracao:lastDuracao});renderSV();}
+function addSvc(){SV.push({id:++SID,type:'number',ref:'',tariff:'',note:'',duracao:lastDuracao,refs:[]});renderSV();}
+function addRef(id){
+  const s=SV.find(s=>s.id===id);
+  if(s){if(!s.refs)s.refs=[];s.refs.push('');renderSV();}
+}
+function updRef(id,idx,v){
+  const s=SV.find(s=>s.id===id);
+  if(s&&s.refs){s.refs[idx]=v;markU();}
+}
+function rmRef(id,idx){
+  const s=SV.find(s=>s.id===id);
+  if(s&&s.refs){s.refs.splice(idx,1);renderSV();}
+}
 function setLastDuracao(v){lastDuracao=v;markU();}
 function upSvcDur(id,v){
   const s=SV.find(s=>s.id===id);
@@ -648,10 +660,22 @@ function renderSV(){
     const opts=TF.map(t=>'<option value="'+eh(t.name)+'"'+(s.tariff===t.name?' selected':'')+'>'+eh(t.name)+'</option>').join('');
     const durOpts=['6','12','18','24','30','36','42','48'].map(v=>'<option value="'+v+'"'+(s.duracao===v?' selected':'')+'>'+v+' m</option>').join('');
     const div=document.createElement('div');div.className='svr';
+    // Extra refs for number type
+    let extraRefs='';
+    if(s.type==='number'&&s.refs&&s.refs.length>0){
+      s.refs.forEach((r,i)=>{
+        extraRefs+='<div style="display:flex;gap:4px;align-items:center;margin-top:4px">'
+          +'<input class="fs" style="flex:1" placeholder="Ex: 912 345 679" value="'+eh(r)+'" oninput="updRef('+s.id+','+i+',this.value)">'
+          +'<button style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:5px;width:24px;height:24px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0" onclick="rmRef('+s.id+','+i+')">×</button>'
+          +'</div>';
+      });
+    }
+    const addRefBtn=s.type==='number'?'<button class="asb" style="margin-top:4px;padding:5px;font-size:11px" onclick="addRef('+s.id+')">＋ Número</button>':'';
     div.innerHTML='<div class="svf"><div class="ttg"><button class="ttb'+(s.type==='number'?' act':'')+'" onclick="stSvc('+s.id+',\'number\')">📱 Número</button><button class="ttb'+(s.type==='qty'?' act':'')+'" onclick="stSvc('+s.id+',\'qty\')">🔢 Quantidade</button></div>'
       +(s.type==='number'?'<input class="fs" placeholder="Ex: 912 345 678" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">':'<input class="fs" type="number" min="1" placeholder="Qtd. (ex: 10)" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">')
-      +'<select class="fs" onchange="upSvc('+s.id+',\'tariff\',this.value)"><option value="">— Tarifário —</option>'+opts+'</select>'
-      +'<div style="display:flex;gap:6px;align-items:center"><select class="fs" style="flex:1" onchange="upSvcDur('+s.id+',this.value)"><option value="">— Duração —</option>'+durOpts+'</select><input class="fs" style="flex:1" placeholder="Nota opcional…" value="'+eh(s.note)+'" oninput="upSvc('+s.id+',\'note\',this.value)"></div>'
+      +extraRefs+addRefBtn
+      +'<select class="fs" style="margin-top:4px" onchange="upSvc('+s.id+',\'tariff\',this.value)"><option value="">— Tarifário —</option>'+opts+'</select>'
+      +'<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><select class="fs" style="flex:1" onchange="upSvcDur('+s.id+',this.value)"><option value="">— Duração —</option>'+durOpts+'</select><input class="fs" style="flex:1" placeholder="Nota opcional…" value="'+eh(s.note)+'" oninput="upSvc('+s.id+',\'note\',this.value)"></div>'
       +'</div><button class="rmb" onclick="rmSvc('+s.id+')" style="margin-top:52px">×</button>';
     el.appendChild(div);
   });
@@ -713,7 +737,17 @@ function genPrev(){
     const t=TF.find(x=>x.name===s.tariff);
     const desc=t?getTD(t):'';
     const ref=s.type==='number'?(s.ref||'—'):(s.ref?s.ref+'×':'—');
-    rows+='<tr><td><span class="tref">'+eh(ref)+'</span></td><td><div class="tname">'+eh(s.tariff)+'</div>'+(desc?'<div class="tdesc">'+eh(desc)+'</div>':'')+(s.note?'<div class="tdesc" style="color:#E60000;margin-top:3px">ℹ '+eh(s.note)+'</div>':'')+'</td><td style="text-align:center;font-size:12px;color:#555;white-space:nowrap">'+(s.duracao?s.duracao+' m':'—')+'</td></tr>';
+    // If number type with extra refs, show each on own row
+    if(s.type==='number'&&s.refs&&s.refs.length>0){
+      const allRefs=[s.ref,...s.refs].filter(Boolean);
+      allRefs.forEach((r,ri)=>{
+        rows+='<tr><td><span class="tref">'+eh(r)+'</span></td>'
+          +(ri===0?'<td rowspan="'+allRefs.length+'"><div class="tname">'+eh(s.tariff)+'</div>'+(desc?'<div class="tdesc">'+eh(desc)+'</div>':'')+(s.note?'<div class="tdesc" style="color:#E60000;margin-top:3px">ℹ '+eh(s.note)+'</div>':'')+'</td><td rowspan="'+allRefs.length+'" style="text-align:center;font-size:12px;color:#555;white-space:nowrap">'+(s.duracao?s.duracao+' m':'—')+'</td>':'')
+          +'</tr>';
+      });
+    } else {
+      rows+='<tr><td><span class="tref">'+eh(ref)+'</span></td><td><div class="tname">'+eh(s.tariff)+'</div>'+(desc?'<div class="tdesc">'+eh(desc)+'</div>':'')+(s.note?'<div class="tdesc" style="color:#E60000;margin-top:3px">ℹ '+eh(s.note)+'</div>':'')+'</td><td style="text-align:center;font-size:12px;color:#555;white-space:nowrap">'+(s.duracao?s.duracao+' m':'—')+'</td></tr>';
+    }
   });
   if(!hasSvc)rows='<tr><td colspan="2" style="color:#bbb;text-align:center;padding:18px">Sem serviços adicionados</td></tr>';
   const tb=TIPO==='novo'?'<span class="ptyb ptn">🆕 Novo Serviço</span>':TIPO==='refid'?'<span class="ptyb ptr">🔄 Refidelização</span>':TIPO==='upgrade'?'<span class="ptyb ptu">⬆ Upgrade</span>':'';
@@ -746,7 +780,15 @@ function saveP(){
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
   const cNm=document.getElementById('sc').value;
-  const tarif=SV.filter(s=>s.tariff).map(s=>{const ref=s.type==='number'?(s.ref||''):(s.ref?s.ref+'×':'');const dur=s.duracao?'['+s.duracao+'m]':'';return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'');}).join('; ');
+  const tarif=SV.filter(s=>s.tariff).map(s=>{
+    const dur=s.duracao?'['+s.duracao+'m]':'';
+    if(s.type==='number'&&s.refs&&s.refs.length>0){
+      const allRefs=[s.ref,...s.refs].filter(Boolean);
+      return allRefs.map(r=>r+' '+s.tariff+(dur?' '+dur:'')).join('; ');
+    }
+    const ref=s.type==='number'?(s.ref||''):(s.ref?s.ref+'×':'');
+    return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'');
+  }).join('; ');
   document.getElementById('mo-save-b').innerHTML='<div style="display:flex;flex-direction:column;gap:14px;font-size:13px"><p style="color:var(--muted);margin-bottom:4px">Confirme antes de gravar:</p><div style="background:var(--mid);border-radius:var(--r);padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">CLIENTE</div><div style="font-weight:600">'+eh(cli)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">TIPO</div><div style="margin-top:4px">'+TB(TIPO)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">COMERCIAL</div><div>'+eh(cNm)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">MENSALIDADE</div><div style="font-weight:700;color:var(--red)">'+(mens?parseFloat(mens).toFixed(2).replace('.',',')+' € + IVA':'—')+'</div></div></div>'+(tarif?'<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">SERVIÇOS</div><div style="font-size:12px;line-height:1.6">'+eh(tarif)+'</div></div>':'')+'</div>';
   openM('mo-save');
 }
@@ -757,13 +799,27 @@ async function confirmSave(){
   const data=new Date().toLocaleDateString('pt-PT');
   const cNm=document.getElementById('sc').value||CU?.nome||'';
   const cli=document.getElementById('cn').value.trim();
-  const tarif=SV.filter(s=>s.tariff).map(s=>{const ref=s.type==='number'?(s.ref||''):(s.ref?s.ref+'×':'');const dur=s.duracao?'['+s.duracao+'m]':'';return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'');}).join('; ');
+  const tarif=SV.filter(s=>s.tariff).map(s=>{
+    const dur=s.duracao?'['+s.duracao+'m]':'';
+    if(s.type==='number'&&s.refs&&s.refs.length>0){
+      const allRefs=[s.ref,...s.refs].filter(Boolean);
+      return allRefs.map(r=>r+' '+s.tariff+(dur?' '+dur:'')).join('; ');
+    }
+    const ref=s.type==='number'?(s.ref||''):(s.ref?s.ref+'×':'');
+    return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'');
+  }).join('; ');
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
   const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA};
   LD.push(entry);SAVED=true;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
-  setBtn(true);renderM();
+  setBtn(true);
+  // Mark original as substituída if editing
+  if(window._editingOriginalId){
+    await updSt(window._editingOriginalId,'substituida');
+    window._editingOriginalId=null;
+  }
+  renderM();
   try{await fetch(SU,{method:'POST',body:JSON.stringify(entry)});}catch(e){}
   toast('✓','Proposta gravada com sucesso');
 }
@@ -1011,7 +1067,8 @@ function renderM(){
   if(fT)data=data.filter(p=>p.tipo===fT);
   if(fS)data=data.filter(p=>p.estado===fS);
   if(fR)data=data.filter(p=>p.cliente?.toLowerCase().includes(fR)||p.tarif?.toLowerCase().includes(fR));
-  const tot=data.length,gan=data.filter(p=>p.estado==='ganho').length,pen=data.filter(p=>p.estado==='pendente').length;
+  const dataActive=data.filter(p=>p.estado!=='substituida');
+  const tot=dataActive.length,gan=dataActive.filter(p=>p.estado==='ganho').length,pen=dataActive.filter(p=>p.estado==='pendente').length;
   const tx=tot>0?Math.round(gan/tot*100):0;
   document.getElementById('m-stats').innerHTML='<div class="sc"><div class="sv">'+tot+'</div><div class="sl">Total</div></div><div class="sc cg"><div class="sv">'+gan+'</div><div class="sl">Ganhos</div></div><div class="sc co"><div class="sv">'+pen+'</div><div class="sl">Pendentes</div></div><div class="sc cb"><div class="sv">'+tx+'%</div><div class="sl">Taxa Sucesso</div></div>';
   const tbody=document.getElementById('m-body');tbody.innerHTML='';
@@ -1025,15 +1082,17 @@ function renderM(){
       +'<td>'+TB(p.tipo)+'</td>'
       +'<td>'+mens+'</td>'
       +'<td>'
-        +'<select class="suse" onchange="updSt(\'' +p.id+ '\',this.value)">'
+        +'<select class="suse" onchange="updSt(\'' +p.id+ '\',this.value)"'+(p.estado==='substituida'?' disabled':'')+' style="'+(p.estado==='substituida'?'opacity:.5':'')+'">'
           +'<option value="pendente"'+(p.estado==='pendente'?' selected':'')+'>⏳ Pendente</option>'
           +'<option value="ganho"'+(p.estado==='ganho'?' selected':'')+'>✅ Ganho</option>'
           +'<option value="perdido"'+(p.estado==='perdido'?' selected':'')+'>❌ Perdido</option>'
+          +'<option value="substituida"'+(p.estado==='substituida'?' selected':'')+'>🔄 Substituída</option>'
         +'</select>'
       +'</td>'
       +'<td style="white-space:nowrap;display:flex;gap:4px">'
         +'<button class="btn btn-g btn-sm" style="padding:5px 10px" onclick="viewL(\'' +p.id+ '\')">👁</button>'
-        +'<button class="btn btn-g btn-sm" style="padding:5px 10px" onclick="editL(\'' +p.id+ '\')">✏️</button>'
+        +(p.estado==='pendente'?'<button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--orange);border-color:var(--orange)" onclick="editL(\'' +p.id+ '\')">✏️</button>':'')
+        +(p.estado==='ganho'||p.estado==='perdido'?'<button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--blue);border-color:var(--blue)" onclick="dupL(\'' +p.id+ '\')">📋</button>':'')
       +'</td>';
     tbody.appendChild(tr);
   });
@@ -1117,7 +1176,52 @@ function editL(id){
   ss.textContent='● Edição — por gravar';
   setBtn(false);
 
+  // Store original ID to mark as substituída when saved
+  window._editingOriginalId = id;
   toast('✏️','Proposta carregada para edição — grave para criar nova versão');
+}
+
+function dupL(id){
+  const p=LD.find(x=>x.id===id);
+  if(!p){toast('⚠','Proposta não encontrada');return;}
+  // Navigate to proposta page
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('act'));
+  document.querySelector('[onclick*="proposta"]').classList.add('act');
+  document.querySelectorAll('.pg').forEach(pg=>pg.classList.remove('act'));
+  document.getElementById('pg-proposta').classList.add('act');
+  // Fill comercial
+  const selCom=document.getElementById('sc');
+  for(let i=0;i<selCom.options.length;i++){if(selCom.options[i].value===p.comercial){selCom.selectedIndex=i;break;}}
+  fillCom();
+  // Fill tipo
+  if(p.tipo)setTipo(p.tipo);
+  // Fill cliente
+  document.getElementById('cn').value=p.cliente||'';
+  document.getElementById('cli-search').value=p.cliente||'';
+  // Fill mensalidade (reset - duplicate starts fresh on price)
+  document.getElementById('cm').value='';
+  // Fill CTA
+  selCTA(p.cta||'b');
+  // Fill services
+  SV=[];SID=0;
+  if(p.tarif){
+    const parts=p.tarif.split(';').map(s=>s.trim()).filter(Boolean);
+    parts.forEach(part=>{
+      const id2=++SID;
+      const qtyMatch=part.match(/^(\d+)×\s*(.+?)(?:\s*\[\d+m\])?$/);
+      const numMatch=part.match(/^([\d\s]+)\s+(.+?)(?:\s*\[\d+m\])?$/);
+      const durMatch=part.match(/\[(\d+)m\]/);
+      const dur=durMatch?durMatch[1]:lastDuracao;
+      if(qtyMatch){SV.push({id:id2,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:'',duracao:dur,refs:[]});}
+      else if(numMatch){SV.push({id:id2,type:'number',ref:numMatch[1].trim(),tariff:numMatch[2].trim(),note:'',duracao:dur,refs:[]});}
+      else{SV.push({id:id2,type:'number',ref:'',tariff:part.replace(/\s*\[\d+m\]$/,'').trim(),note:'',duracao:dur,refs:[]});}
+    });
+  }
+  if(!SV.length)addSvc(); else renderSV();
+  // Clear original tracking - duplicate does NOT mark anything as substituída
+  window._editingOriginalId = null;
+  SAVED=false;markU();
+  toast('📋','Proposta duplicada — ajuste os dados e grave');
 }
 
 function renderDB(){
@@ -1126,6 +1230,7 @@ function renderDB(){
   let data=LD;
   if(mes)data=data.filter(p=>p.data?.slice(3,10)===mes);
   if(tp)data=data.filter(p=>p.tipo===tp);
+  data=data.filter(p=>p.estado!=='substituida');
   const tot=data.length,gan=data.filter(p=>p.estado==='ganho').length;
   const tx=tot>0?Math.round(gan/tot*100):0;
   const nv=data.filter(p=>p.tipo==='novo').length,rf=data.filter(p=>p.tipo==='refid').length,up=data.filter(p=>p.tipo==='upgrade').length;
@@ -1215,7 +1320,7 @@ function IN(n){if(!n)return'?';return n.split(' ').slice(0,2).map(w=>w[0]).join(
 function RL(r){return r==='master'?'Master':r==='coordenador'?'Coordenador':'Comercial'}
 function RB(r){return r==='master'?'br':r==='coordenador'?'bb':'bx'}
 function TB(t){return t==='novo'?'<span class="bdg bg">🆕 Novo</span>':t==='refid'?'<span class="bdg bo">🔄 Refid.</span>':t==='upgrade'?'<span class="bdg bb">⬆ Upgrade</span>':'<span class="bdg bx">—</span>'}
-function EB(e){return e==='ganho'?'<span class="bdg bg">✅ Ganho</span>':e==='perdido'?'<span class="bdg br">❌ Perdido</span>':'<span class="bdg bo">⏳ Pendente</span>'}
+function EB(e){return e==='ganho'?'<span class="bdg bg">✅ Ganho</span>':e==='perdido'?'<span class="bdg br">❌ Perdido</span>':e==='substituida'?'<span class="bdg bx">🔄 Substituída</span>':'<span class="bdg bo">⏳ Pendente</span>'}
 function toast(icon,msg){const t=document.getElementById('toast');document.getElementById('ti').textContent=icon;document.getElementById('tm').textContent=msg;t.className='toast on';setTimeout(()=>t.className='toast',3500)}
 
 init();
