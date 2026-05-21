@@ -319,6 +319,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
     <div class="phdr">
       <div><div class="ptit">As Minhas Propostas</div><div class="psub">Histórico e acompanhamento</div></div>
       <div class="frow">
+        <select class="fi" id="f-com" onchange="renderM()" style="display:none"><option value="">Todos os comerciais</option></select>
         <select class="fi" id="f-tp" onchange="renderM()"><option value="">Todos os tipos</option><option value="novo">Novo Serviço</option><option value="refid">Refidelização</option><option value="upgrade">Upgrade</option></select>
         <select class="fi" id="f-st" onchange="renderM()"><option value="">Todos os estados</option><option value="pendente">Pendente</option><option value="ganho">Ganho</option><option value="perdido">Perdido</option></select>
         <input class="fi" id="f-sr" placeholder="🔍 Pesquisar…" oninput="renderM()">
@@ -508,10 +509,10 @@ async function loadLogAndClients(){
     const r2=await fetch(SU+'?sheet=Clientes&t='+Date.now());
     if(r2.ok){
       const data=await r2.json();
-      const isCoord=CU.funcao==='coordenador'||CU.funcao==='master';
+      const isCoord=CU.funcao==='coordenador'||CU.funcao==='master'||CU.funcao==='backoffice';
       // Each client: Nome, Ncont, Codpost, Area, Vendedor, Vendnm
       CL=data.map(row=>({nome:row['Nome']||'',ncont:row['Ncont']||'',codpost:row['Codpost']||'',area:row['Area']||'',vendedor:String(row['Vendedor']||''),vendnm:row['Vendnm']||''})).filter(c=>c.nome);
-      if(!isCoord&&CU.vendedor){
+      if(!isCoord&&CU.funcao!=='backoffice'&&CU.vendedor){
         CL=CL.filter(c=>String(c.vendedor)===String(CU.vendedor));
       }
       console.log('Clients loaded:',CL.length);
@@ -526,7 +527,13 @@ function setupApp(){
   const av=document.getElementById('hav');
   av.innerHTML=u.fotoURL?'<img src="'+u.fotoURL+'" alt="">':IN(u.nome);
   const isC=u.funcao==='coordenador'||u.funcao==='master';
-  document.querySelectorAll('.nb-coord').forEach(el=>el.classList.toggle('hid',!isC));
+  const isBO=u.funcao==='backoffice';
+  document.querySelectorAll('.nb-coord').forEach(el=>el.classList.toggle('hid',!isC&&!isBO));
+  // Backoffice: hide Nova Proposta and Equipa
+  if(isBO){
+    document.querySelector('[onclick*="proposta"]')?.classList.add('hid');
+    document.querySelector('[onclick*="equipa"]')?.classList.add('hid');
+  }
   const sel=document.getElementById('sc');sel.innerHTML='';
   const list=u.funcao==='comercial'?[u]:CM;
   list.forEach(c=>{const o=document.createElement('option');o.value=c.nome;o.textContent=c.nome;sel.appendChild(o);});
@@ -536,7 +543,16 @@ function setupApp(){
     if(sel.options[i].value===u.nome){sel.selectedIndex=i;break;}
   }
   if(!TF.length)TF=BT;
-  fillCom();addSvc();renderM();renderDB();
+  if(u.funcao==='backoffice'){
+    // Backoffice lands on Minhas Propostas
+    document.querySelectorAll('.pg').forEach(p=>p.classList.remove('act'));
+    document.getElementById('pg-minhas').classList.add('act');
+    document.querySelectorAll('.nb').forEach(b=>b.classList.remove('act'));
+    document.querySelector('[onclick*="minhas"]')?.classList.add('act');
+    renderM();renderDB();
+  } else {
+    fillCom();addSvc();renderM();renderDB();
+  }
 }
 
 function doLogout(){
@@ -709,7 +725,12 @@ function genPrev(){
   +'<div class="psl">Serviços Propostos</div>'
   +'<table class="ptbl"><thead><tr><th style="width:110px">Referência</th><th>Tarifário / Características</th><th style="width:80px;text-align:center">Duração</th></tr></thead><tbody>'+rows+'</tbody></table>'
   +((mens)?'<div class="pcond"><div><div class="pclbl">Mensalidade</div><div class="pcval">'+parseFloat(mens).toFixed(2).replace('.',',')+'<span class="pcunit"> €+IVA</span></div></div></div>':'')
-  +'<div class="pcta">'+ctaTxt+'</div>'
+  +'<div style="border:2px solid #E60000;border-radius:6px;overflow:hidden;margin-bottom:22px">'
+  +'<div style="background:#E60000;padding:6px 14px;display:flex;align-items:center;gap:8px">'
+  +(CTA==='a'?'<span style="color:white;font-size:11px;font-weight:800;letter-spacing:.08em">✍ ASSINATURA</span>':'<span style="color:white;font-size:11px;font-weight:800;letter-spacing:.08em">📄 PAPER FREE</span>')
+  +'</div>'
+  +'<div style="padding:12px 16px;background:#FFF5F5;font-size:13px;color:#333;line-height:1.6">'+ctaTxt+'</div>'
++'</div>'
   +'<p class="ptxt">Os descontos e condições propostos são válidos pelo período indicado, a contar da data da sua implementação.</p>'
   +'<div class="pnote">📋 Para detalhe completo dos tarifários, consulte <strong>vodafone.pt/business</strong></div></div>'
   +'<div class="pft"><div class="pfl"><img src="'+CLEAN+'" class="pfrdm" alt="Redemóvel"><div><div class="pfan">'+eh(com?.nome||'Redemóvel')+'</div><div class="pfac">'+eh([com?.telefone,com?.email].filter(Boolean).join(' · '))+'</div></div></div><img src="'+VDF+'" class="pfvdf" alt="Vodafone"></div>';
@@ -869,9 +890,12 @@ body{margin:0;padding:16px;background:#D8D8D8;font-family:Arial,Helvetica,sans-s
         </table>
         ${condBlk}
         <!-- CTA -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px">
-          <tr><td style="background:#E60000;border-radius:6px;padding:13px 18px">
-            <p style="color:white;font-size:13px;line-height:1.6;margin:0;font-family:Arial,Helvetica,sans-serif">${ctaTxt}</p>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;border:2px solid #E60000;border-radius:6px;overflow:hidden">
+          <tr><td style="background:#E60000;padding:6px 14px">
+            <p style="color:white;font-size:11px;font-weight:800;letter-spacing:.08em;margin:0;font-family:Arial,Helvetica,sans-serif">${CTA==='a'?'✍ ASSINATURA':'📄 PAPER FREE'}</p>
+          </td></tr>
+          <tr><td style="background:#FFF5F5;padding:12px 16px">
+            <p style="color:#333;font-size:13px;line-height:1.6;margin:0;font-family:Arial,Helvetica,sans-serif">${ctaTxt}</p>
           </td></tr>
         </table>
         <p style="font-size:12px;color:#555;line-height:1.7;margin:0 0 12px;font-family:Arial,Helvetica,sans-serif">Os descontos e condições propostos são válidos pelo período indicado, a contar da data da sua implementação.</p>
@@ -964,11 +988,26 @@ function copyTxt(){
 
 function renderM(){
   if(!CU)return;
-  const isC=CU.funcao==='coordenador'||CU.funcao==='master';
+  const isC=CU.funcao==='coordenador'||CU.funcao==='master'||CU.funcao==='backoffice';
   let data=isC?LD:LD.filter(p=>p.comercial===CU.nome);
+  // Populate and show comercial filter for coord/master/backoffice
+  const fCom=document.getElementById('f-com');
+  if(fCom){
+    if(isC){
+      fCom.style.display='block';
+      const curVal=fCom.value;
+      const names=[...new Set(LD.map(p=>p.comercial).filter(Boolean))].sort();
+      fCom.innerHTML='<option value="">Todos os comerciais</option>';
+      names.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;if(n===curVal)o.selected=true;fCom.appendChild(o);});
+    } else {
+      fCom.style.display='none';
+    }
+  }
+  const fComVal=isC?(fCom?.value||''):'';
   const fT=document.getElementById('f-tp')?.value||'';
   const fS=document.getElementById('f-st')?.value||'';
   const fR=document.getElementById('f-sr')?.value?.toLowerCase()||'';
+  if(fComVal)data=data.filter(p=>p.comercial===fComVal);
   if(fT)data=data.filter(p=>p.tipo===fT);
   if(fS)data=data.filter(p=>p.estado===fS);
   if(fR)data=data.filter(p=>p.cliente?.toLowerCase().includes(fR)||p.tarif?.toLowerCase().includes(fR));
