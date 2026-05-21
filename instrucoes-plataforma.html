@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guia do Utilizador — Plataforma de Propostas Redemóvel</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
+:root{--red:#E60000;--teal:#1A8080;--dark:#1A1A1A;--mid:#F5F5F5;--border:#E0E0E0;--text:#333;--muted:#666;--r:8px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',Arial,sans-serif;background:#F8F8F8;color:var(--text);font-size:14px;line-height:1.7}
+
+/* HEADER */
+.doc-header{background:white;border-bottom:4px solid var(--red);padding:24px 40px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+.doc-header-logos{display:flex;align-items:center;gap:16px}
+.rdm-name{font-size:20px;font-weight:700;color:var(--teal);letter-spacing:-.3px}
+.rdm-name span{color:var(--red)}
+.doc-header-right{text-align:right;font-size:12px;color:var(--muted)}
+.doc-title-bar{font-size:11px;color:var(--red);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+
+/* LAYOUT */
+.doc-body{max-width:860px;margin:0 auto;padding:40px 24px 80px}
+
+/* TOC */
+.toc{background:white;border:1px solid var(--border);border-radius:var(--r);padding:24px 28px;margin-bottom:36px;break-inside:avoid}
+.toc-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px}
+.toc-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+.toc-list a{text-decoration:none;color:var(--text);font-size:13px;display:flex;align-items:center;gap:8px;transition:color .15s}
+.toc-list a:hover{color:var(--red)}
+.toc-num{display:inline-block;width:20px;height:20px;background:var(--red);color:white;border-radius:50%;font-size:10px;font-weight:700;text-align:center;line-height:20px;flex-shrink:0}
+
+/* SECTIONS */
+.section{background:white;border:1px solid var(--border);border-radius:var(--r);padding:28px 32px;margin-bottom:20px}
+.section-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--mid)}
+.section-num{width:32px;height:32px;background:var(--red);color:white;border-radius:50%;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.section-title{font-size:17px;font-weight:700;color:var(--dark)}
+.section-intro{font-size:13.5px;color:var(--muted);margin-bottom:20px;line-height:1.7}
+
+/* STEPS */
+.steps{display:flex;flex-direction:column;gap:14px}
+.step{display:flex;gap:14px;align-items:flex-start}
+.step-num{width:26px;height:26px;background:var(--red);color:white;border-radius:50%;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-body{flex:1}
+.step-title{font-weight:600;font-size:14px;margin-bottom:3px}
+.step-desc{font-size:13px;color:var(--muted);line-height:1.65}
+
+/* CARDS */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:16px 0}
+.card{background:var(--mid);border-radius:var(--r);padding:16px;border-left:3px solid var(--red)}
+.card-icon{font-size:22px;margin-bottom:6px}
+.card-title{font-weight:700;font-size:13px;margin-bottom:4px}
+.card-desc{font-size:12px;color:var(--muted);line-height:1.5}
+
+/* METRIC CARDS */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:16px 0}
+.metric{background:var(--mid);border-radius:var(--r);padding:14px 16px;text-align:center}
+.metric-val{font-size:26px;font-weight:700;color:var(--red);margin-bottom:2px}
+.metric-lbl{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.metric-desc{font-size:11px;color:var(--muted);margin-top:4px}
+
+/* NOTE */
+.note{background:#FFF8F0;border:1px solid #FFD9B0;border-radius:var(--r);padding:12px 16px;font-size:13px;color:#7A4F00;margin:14px 0;display:flex;gap:10px;align-items:flex-start}
+.note-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+.tip{background:#F0FFF4;border:1px solid #A8E6BC;border-radius:var(--r);padding:12px 16px;font-size:13px;color:#1A5C30;margin:14px 0;display:flex;gap:10px;align-items:flex-start}
+
+/* TYPE BADGES */
+.type-row{display:flex;flex-direction:column;gap:10px;margin:14px 0}
+.type-item{display:flex;align-items:flex-start;gap:12px}
+.tbdg{padding:3px 10px;border-radius:4px;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;margin-top:2px}
+.tbdg-novo{background:#E8F5E9;color:#2E7D32}
+.tbdg-refid{background:#FFF3E0;color:#E65100}
+.tbdg-upg{background:#E3F2FD;color:#1565C0}
+.type-desc{font-size:13px;color:var(--text)}
+
+/* DASH EXPLAINER */
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+.dash-item{background:var(--mid);border-radius:var(--r);padding:14px 16px}
+.dash-item-title{font-weight:700;font-size:13px;color:var(--dark);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.dash-item-desc{font-size:12px;color:var(--muted);line-height:1.6}
+
+/* STATUS */
+.status-row{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.status-item{display:flex;align-items:center;gap:10px;font-size:13px}
+.sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* SEND OPTIONS */
+.send-options{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0}
+.send-opt{background:var(--mid);border-radius:var(--r);padding:16px;text-align:center}
+.send-icon{font-size:24px;margin-bottom:8px}
+.send-title{font-weight:700;font-size:13px;margin-bottom:4px}
+.send-desc{font-size:11px;color:var(--muted)}
+.send-rec{font-size:10px;font-weight:700;color:var(--red);margin-top:6px}
+
+/* URL BOX */
+.url-box{background:#1A1A1A;border-radius:var(--r);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;margin:16px 0;gap:16px}
+.url-text{color:#4CAF50;font-family:'DM Mono',monospace;font-size:13px;font-weight:500;word-break:break-all}
+.url-copy{background:var(--red);color:white;border:none;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0;font-family:'DM Sans',sans-serif}
+.url-copy:hover{background:#FF4444}
+
+/* TIPS */
+.tips-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+.tip-item{background:var(--mid);border-radius:var(--r);padding:12px 14px;display:flex;gap:10px;align-items:flex-start}
+.tip-icon{font-size:18px;flex-shrink:0}
+.tip-text{font-size:12px;color:var(--text);line-height:1.5}
+.tip-text strong{display:block;font-weight:700;margin-bottom:2px;font-size:13px}
+
+/* FOOTER */
+.doc-footer{text-align:center;padding:32px;color:var(--muted);font-size:12px;border-top:1px solid var(--border);margin-top:40px}
+
+@media print{
+  body{background:white}
+  .doc-header{position:relative;box-shadow:none}
+  .section{break-inside:avoid;border:1px solid #ddd}
+  .url-copy{display:none}
+}
+@media(max-width:600px){
+  .dash-grid,.send-options,.tips-grid{grid-template-columns:1fr}
+  .doc-header{padding:16px 20px;flex-direction:column;gap:10px;text-align:center}
+  .doc-body{padding:20px 16px 60px}
+  .section{padding:20px}
+}
+</style>
+</head>
+<body>
+
+<header class="doc-header">
+  <div class="doc-header-logos">
+    <div style="font-size:22px;font-weight:700;font-family:Georgia,serif;color:#1A8080">redem<span style="color:#E60000">o</span>vel<sup style="font-size:12px;color:#aaa;font-weight:400">®</sup></div>
+    <div style="width:1px;height:28px;background:#ddd"></div>
+    <div style="font-size:11px;color:#E60000;font-weight:700;letter-spacing:.04em">AGENTE AUTORIZADO VODAFONE BUSINESS</div>
+  </div>
+  <div class="doc-header-right">
+    <div class="doc-title-bar">Guia do Utilizador</div>
+    <div style="margin-top:3px;font-size:13px;font-weight:600">Plataforma de Propostas</div>
+  </div>
+</header>
+
+<div class="doc-body">
+
+  <!-- TOC -->
+  <div class="toc">
+    <div class="toc-title">Índice</div>
+    <ul class="toc-list">
+      <li><a href="#acesso"><span class="toc-num">1</span> Acesso à Plataforma</a></li>
+      <li><a href="#dashboard"><span class="toc-num">2</span> Dashboard — Como Interpretar</a></li>
+      <li><a href="#proposta"><span class="toc-num">3</span> Criar uma Nova Proposta</a></li>
+      <li><a href="#envio"><span class="toc-num">4</span> Enviar a Proposta</a></li>
+      <li><a href="#acompanhamento"><span class="toc-num">5</span> Acompanhamento e Edição</a></li>
+      <li><a href="#dicas"><span class="toc-num">6</span> Dicas Importantes</a></li>
+    </ul>
+  </div>
+
+  <!-- SECTION 1: ACESSO -->
+  <div class="section" id="acesso">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div class="section-title">Acesso à Plataforma</div>
+    </div>
+    <p class="section-intro">A plataforma funciona directamente no browser — não é necessário instalar nada. Guarda o link nos favoritos para acesso rápido.</p>
+    <div class="url-box">
+      <span class="url-text" id="url-text">https://redemovel.github.io/redemovel-propostas/redemovel-v8.html</span>
+      <button class="url-copy" onclick="copyURL()">📋 Copiar link</button>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Selecciona o teu nome</div>
+          <div class="step-desc">No campo Utilizador, escolhe o teu nome na lista.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Introduz a tua password</div>
+          <div class="step-desc">Usa a password fornecida pelo teu coordenador. É pessoal — não partilhes com ninguém.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Clica em Entrar</div>
+          <div class="step-desc">Entras directamente no Dashboard com o histórico de propostas já carregado.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: DASHBOARD -->
+  <div class="section" id="dashboard">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div class="section-title">Dashboard — Como Interpretar</div>
+    </div>
+    <p class="section-intro">O Dashboard é a página principal após o login. Mostra a performance da equipa em tempo real — quanto mais actualizares os estados das propostas, mais útil e rigoroso fica.</p>
+
+    <div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--dark)">📊 Estatísticas do Topo</div>
+    <div class="metrics">
+      <div class="metric"><div class="metric-val">12</div><div class="metric-lbl">Total</div><div class="metric-desc">Propostas registadas</div></div>
+      <div class="metric"><div class="metric-val">5</div><div class="metric-lbl">Ganhos</div><div class="metric-desc">Clientes que aceitaram</div></div>
+      <div class="metric"><div class="metric-val">42%</div><div class="metric-lbl">Taxa Sucesso</div><div class="metric-desc">Ganhos ÷ Total</div></div>
+      <div class="metric"><div class="metric-val">3</div><div class="metric-lbl">Novos</div><div class="metric-desc">Novos serviços</div></div>
+      <div class="metric"><div class="metric-val">6</div><div class="metric-lbl">Refidelizações</div><div class="metric-desc">Renovações</div></div>
+      <div class="metric"><div class="metric-val">3</div><div class="metric-lbl">Upgrades</div><div class="metric-desc">Melhorias</div></div>
+    </div>
+
+    <div style="font-weight:600;font-size:13px;margin:18px 0 10px;color:var(--dark)">📋 Secções do Dashboard</div>
+    <div class="dash-grid">
+      <div class="dash-item">
+        <div class="dash-item-title">📊 Gráfico por Comercial</div>
+        <div class="dash-item-desc">Barras horizontais que comparam o volume de propostas de cada elemento. Quanto maior a barra, mais propostas registadas.</div>
+      </div>
+      <div class="dash-item">
+        <div class="dash-item-title">📊 Gráfico por Tipo</div>
+        <div class="dash-item-desc">Mostra a distribuição entre Novo Serviço (verde), Refidelização (laranja) e Upgrade (azul).</div>
+      </div>
+      <div class="dash-item">
+        <div class="dash-item-title">🏆 Ranking</div>
+        <div class="dash-item-desc">Lista ordenada por propostas ganhas. Mostra o total, ganhos e taxa de sucesso de cada comercial. Os três primeiros têm destaque 🥇🥈🥉.</div>
+      </div>
+      <div class="dash-item">
+        <div class="dash-item-title">📅 Comparativo Mensal</div>
+        <div class="dash-item-desc">Tabela com os últimos 3 meses. O número entre parênteses a verde indica ganhos. Ex: <strong>4 (2✓)</strong> = 4 propostas, 2 ganhas.</div>
+      </div>
+    </div>
+
+    <div class="note">
+      <span class="note-icon">⚠️</span>
+      <span>O Dashboard só é rigoroso se actualizares o estado das propostas (Pendente → Ganho ou Perdido) assim que tiveres resposta do cliente. Sem esta actualização, a taxa de sucesso não reflecte a realidade.</span>
+    </div>
+  </div>
+
+  <!-- SECTION 3: PROPOSTA -->
+  <div class="section" id="proposta">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div class="section-title">Criar uma Nova Proposta</div>
+    </div>
+    <p class="section-intro">Clica em <strong>📝 Nova Proposta</strong> no menu superior. Preenche os campos da esquerda — a proposta vai sendo gerada à direita em tempo real.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Tipo de Proposta</div>
+          <div class="step-desc">Escolhe o tipo adequado à situação do cliente:</div>
+          <div class="type-row" style="margin-top:10px">
+            <div class="type-item"><span class="tbdg tbdg-novo">🆕 Novo Serviço</span><span class="type-desc">Cliente sem serviços Vodafone ou que vai adicionar novas linhas/soluções</span></div>
+            <div class="type-item"><span class="tbdg tbdg-refid">🔄 Refidelização</span><span class="type-desc">Renovação das condições de um contrato existente para o próximo período</span></div>
+            <div class="type-item"><span class="tbdg tbdg-upg">⬆️ Upgrade</span><span class="type-desc">Melhoria das condições actuais ainda durante a vigência do contrato, sem penalização</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Cliente</div>
+          <div class="step-desc">Escreve o nome ou NIF no campo de pesquisa — aparece a lista dos teus clientes. Selecciona para preencher automaticamente. Se for um cliente novo, clica em <strong>"＋ Novo cliente"</strong> e preenche manualmente.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Mensalidade e Duração</div>
+          <div class="step-desc">Introduz o valor mensal sem IVA. Selecciona a duração (6 a 48 meses). O padrão é 24 meses.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">Serviços Propostos</div>
+          <div class="step-desc">Clica em <strong>＋ Adicionar serviço</strong> para cada linha. Escolhe entre número individual (ex: 912 345 678) ou quantidade (ex: 10×). Selecciona o tarifário na lista. Podes adicionar uma nota (ex: "Para recepção").</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <div class="step-title">Fecho da Proposta</div>
+          <div class="step-desc"><strong>✍ Assinatura</strong> — o cliente assina o documento anexo. <strong>📄 Paper Free</strong> — basta responder ao email com anuência (recomendado para a maioria dos casos).</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <div class="step-title">Pré-visualizar e Gravar</div>
+          <div class="step-desc">Clica em <strong>👁 Pré-visualizar</strong> para ver a proposta final. Revê o conteúdo. Clica em <strong>💾 Gravar</strong>, confirma o resumo — os botões de envio activam-se.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 4: ENVIO -->
+  <div class="section" id="envio">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <div class="section-title">Enviar a Proposta</div>
+    </div>
+    <p class="section-intro">Após gravar, tens três formas de enviar. O botão <strong>✉ Email</strong> é o método recomendado — garante o melhor aspecto visual.</p>
+
+    <div class="send-options">
+      <div class="send-opt">
+        <div class="send-icon">✉</div>
+        <div class="send-title">Email</div>
+        <div class="send-desc">Abre janela com a proposta formatada. Copia o assunto e o conteúdo e cola no Outlook ou eM Client.</div>
+        <div class="send-rec">✓ Recomendado</div>
+      </div>
+      <div class="send-opt">
+        <div class="send-icon">⬇</div>
+        <div class="send-title">PDF</div>
+        <div class="send-desc">Abre janela de impressão. Guarda como PDF para anexar ao email.</div>
+      </div>
+      <div class="send-opt">
+        <div class="send-icon">📋</div>
+        <div class="send-title">Copiar Texto</div>
+        <div class="send-desc">Copia o texto simples da proposta para colar directamente num email.</div>
+      </div>
+    </div>
+
+    <div style="font-weight:600;font-size:13px;margin:18px 0 10px;color:var(--dark)">Como usar o Email</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Copia o Assunto</div>
+          <div class="step-desc">Na janela de email, clica em <strong>📋 Copiar Assunto</strong>. Cola no campo "Assunto" do teu email no Outlook — já está correctamente formatado com o NIF e nome do cliente.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Selecciona e copia o conteúdo</div>
+          <div class="step-desc">Clica em <strong>📋 Seleccionar Tudo</strong>. O conteúdo fica seleccionado. Copia com Ctrl+C.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Cola no Outlook</div>
+          <div class="step-desc">Abre o Outlook, cria novo email, clica no corpo da mensagem e cola com Ctrl+V. O layout chega ao cliente exactamente como vês — com logo, cores e formatação correctas.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 5: ACOMPANHAMENTO -->
+  <div class="section" id="acompanhamento">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div class="section-title">Acompanhamento e Edição</div>
+    </div>
+    <p class="section-intro">Clica em <strong>📋 Minhas Propostas</strong> para veres e gerir o teu histórico completo.</p>
+
+    <div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--dark)">Actualizar o estado de uma proposta</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px">Assim que souberes o resultado, actualiza directamente na tabela com o selector de estado:</p>
+    <div class="status-row">
+      <div class="status-item"><div class="sdot" style="background:#F59E0B"></div><strong>⏳ Pendente</strong>&nbsp;— aguarda resposta do cliente (estado inicial de todas as propostas)</div>
+      <div class="status-item"><div class="sdot" style="background:#22C55E"></div><strong>✅ Ganho</strong>&nbsp;— cliente aceitou e vai avançar com a proposta</div>
+      <div class="status-item"><div class="sdot" style="background:#E60000"></div><strong>❌ Perdido</strong>&nbsp;— cliente recusou ou não foi possível avançar</div>
+    </div>
+
+    <div style="font-weight:600;font-size:13px;margin:18px 0 10px;color:var(--dark)">Editar uma proposta</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">Clica em ✏️ na linha da proposta</div>
+          <div class="step-desc">Todos os dados carregam automaticamente no formulário de Nova Proposta.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">Faz as alterações necessárias</div>
+          <div class="step-desc">Ajusta o que for preciso — tipo, serviços, mensalidade, duração ou fecho.</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">Pré-visualiza e grava</div>
+          <div class="step-desc">A nova versão é gravada como entrada independente. A proposta original mantém-se no histórico.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tip">
+      <span class="note-icon">💡</span>
+      <span>Podes filtrar as propostas por tipo (Novo/Refid/Upgrade), estado (Pendente/Ganho/Perdido) ou pesquisar por nome de cliente usando os filtros no topo da tabela.</span>
+    </div>
+  </div>
+
+  <!-- SECTION 6: DICAS -->
+  <div class="section" id="dicas">
+    <div class="section-header">
+      <div class="section-num">6</div>
+      <div class="section-title">Dicas Importantes</div>
+    </div>
+    <div class="tips-grid">
+      <div class="tip-item"><div class="tip-icon">💾</div><div class="tip-text"><strong>Grava sempre antes de enviar</strong>Os botões de Email e PDF só ficam activos depois de gravares a proposta.</div></div>
+      <div class="tip-item"><div class="tip-icon">🔄</div><div class="tip-text"><strong>Actualiza o estado</strong>Marca como Ganho ou Perdido assim que souberes a resposta — mantém o Dashboard rigoroso.</div></div>
+      <div class="tip-item"><div class="tip-icon">🔒</div><div class="tip-text"><strong>Clientes são pessoais</strong>Cada comercial só vê os seus próprios clientes na pesquisa — os dados dos colegas estão protegidos.</div></div>
+      <div class="tip-item"><div class="tip-icon">📡</div><div class="tip-text"><strong>Tarifários actualizados</strong>Quando a Redemóvel actualizar os tarifários, as alterações reflectem-se automaticamente na plataforma.</div></div>
+      <div class="tip-item"><div class="tip-icon">📱</div><div class="tip-text"><strong>Funciona em qualquer dispositivo</strong>A plataforma abre no browser do telemóvel, tablet ou computador — sem instalar nada.</div></div>
+      <div class="tip-item"><div class="tip-icon">✏️</div><div class="tip-text"><strong>Podes editar propostas</strong>Vai a Minhas Propostas, clica em ✏️ para carregar e ajustar qualquer proposta já enviada.</div></div>
+    </div>
+  </div>
+
+  <div class="doc-footer">
+    <div style="font-size:16px;font-weight:700;color:#1A8080;font-family:Georgia,serif;margin-bottom:6px">redem<span style="color:#E60000">o</span>vel<sup style="font-size:10px;color:#aaa;font-weight:400">®</sup></div>
+    <div>Agente Autorizado Vodafone Business &nbsp;·&nbsp; São João da Madeira</div>
+    <div style="margin-top:6px">Suporte: <a href="mailto:rbastos@redemovel.pt" style="color:var(--red)">rbastos@redemovel.pt</a></div>
+  </div>
+
+</div>
+
+<script>
+function copyURL(){
+  const url='https://redemovel.github.io/redemovel-propostas/redemovel-v8.html';
+  navigator.clipboard.writeText(url).then(()=>{
+    const btn=document.querySelector('.url-copy');
+    btn.textContent='✓ Copiado!';btn.style.background='#22C55E';
+    setTimeout(()=>{btn.textContent='📋 Copiar link';btn.style.background='#E60000'},2000);
+  });
+}
+</script>
+</body>
+</html>
