@@ -500,6 +500,90 @@ function showLoad(msg,det,pct){
 function hideLoad(){const ov=document.getElementById('lov');if(ov)ov.classList.remove('show');}
 
 async function loadLogAndClients(){
+  // STAGE 1: Load Log first, then open dashboard immediately
+  showLoading('A carregar propostas…');
+  try{
+    const r=await fetch(SU+'?sheet=Log&t='+Date.now());
+    if(r.ok){
+      const raw=await r.text();
+      let data=[];
+      try{data=JSON.parse(raw);}catch(e){console.error('Log parse error:',e);}
+      LD=data.map(row=>{
+        const v=Object.values(row);
+        const id=String(v[0]||'');
+        if(!id||!id.startsWith('P')) return null;
+        const rawD=String(v[1]||'');
+        let dt=rawD;
+        if(rawD.length>12){try{const d=new Date(rawD);if(!isNaN(d))dt=d.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});}catch(e){}}
+        return {id,data:dt,comercial:String(v[2]||''),cliente:String(v[3]||''),tipo:String(v[4]||'').toLowerCase(),tarif:String(v[5]||''),mensalidade:String(v[6]||''),duracao:String(v[7]||''),estado:String(v[8]||'pendente').toLowerCase(),notas:String(v[9]||''),cta:String(v[10]||'b')};
+      }).filter(x=>x&&x.id);
+      console.log('Log loaded:',LD.length,'entries');
+    }
+  }catch(e){console.error('Log load error:',e);}
+  
+  // Hide loading and render dashboard immediately
+  hideLoading();
+  renderM();
+  renderDB();
+  if(LD.length>0) toast('✓',LD.length+' propostas carregadas');
+
+  // STAGE 2: Load Clients + Tariffs silently in background
+  loadBackgroundData();
+}
+
+async function loadBackgroundData(){
+  // Load clients silently
+  try{
+    const r2=await fetch(SU+'?sheet=Clientes&t='+Date.now());
+    if(r2.ok){
+      const data=await r2.json();
+      const isCoord=CU&&(CU.funcao==='coordenador'||CU.funcao==='master'||CU.funcao==='backoffice');
+      CL=data.map(row=>({nome:row['Nome']||'',ncont:row['Ncont']||'',codpost:row['Codpost']||'',area:row['Area']||'',vendedor:String(row['Vendedor']||''),vendnm:row['Vendnm']||''})).filter(c=>c.nome);
+      if(!isCoord&&CU?.vendedor){
+        CL=CL.filter(c=>String(c.vendedor)===String(CU.vendedor));
+      }
+      console.log('Clients loaded:',CL.length);
+    }
+  }catch(e){console.error('Clients load error:',e);}
+  // Tariffs already loaded in init()
+}
+
+
+async function doLogin(){
+  const nome=document.getElementById('lu').value;
+  const pass=document.getElementById('lp').value;
+  const errEl=document.getElementById('lerr');
+  const loadEl=document.getElementById('lload');
+  errEl.style.display='none';
+  if(!nome){errEl.textContent='Selecione um utilizador';errEl.style.display='block';return;}
+  if(!pass){errEl.textContent='Introduza a password';errEl.style.display='block';return;}
+  document.getElementById('lbtn').disabled=true;loadEl.style.display='flex';
+  try{
+    const r=await fetch(SU+'?sheet=Comerciais&t='+Date.now());
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const fresh=data.map(row=>({nome:row['Nome']||'',email:row['Email']||'',telefone:row['Telefone']||'',funcao:(row['Funcao']||'comercial').toLowerCase(),password:row['Password']||'',fotoURL:row['FotoURL']||'',vendedor:String(row['Vendedor']||'')})).filter(c=>c.nome);
+    const user=fresh.find(c=>c.nome===nome&&c.password===pass);
+    if(!user){errEl.textContent='Utilizador ou password incorretos';errEl.style.display='block';document.getElementById('lbtn').disabled=false;loadEl.style.display='none';return;}
+    CM=fresh;CU=user;
+    document.getElementById('ls').style.display='none';
+    document.getElementById('app').style.display='block';
+    setupApp();
+    // Load log and clients after login
+    loadLogAndClients();
+  }catch(e){errEl.textContent='Erro de ligação: '+e.message;errEl.style.display='block';}
+  document.getElementById('lbtn').disabled=false;loadEl.style.display='none';
+}
+
+function showLoad(msg,det,pct){
+  const ov=document.getElementById('lov');if(ov)ov.classList.add('show');
+  const lt=document.getElementById('ltxt');if(lt)lt.textContent=msg||'A carregar…';
+  const ld=document.getElementById('ldet');if(ld)ld.textContent=det||'';
+  const lf=document.getElementById('lfil');if(lf)lf.style.width=(pct||0)+'%';
+}
+function hideLoad(){const ov=document.getElementById('lov');if(ov)ov.classList.remove('show');}
+
+async function loadLogAndClients(){
   showLoading('A carregar histórico e clientes…');
   showLoad('A carregar dados…','Tarifários e clientes',10);
   // Load log
@@ -689,8 +773,15 @@ function getTD(t){
   return p.join('  ·  ');
 }
 
-function genPrev(){
-  if(!TF||TF.length===0){toast('⚠','Aguarde — tarifários a carregar');return;}
+async function genPrev(){
+  if(!TF||TF.length===0){
+    showLoading('A carregar tarifários…');
+    // Wait up to 5 seconds for tariffs
+    let waited=0;
+    while((!TF||TF.length===0)&&waited<50){await new Promise(r=>setTimeout(r,100));waited++;}
+    hideLoading();
+    if(!TF||TF.length===0){toast('⚠','Tarifários não disponíveis — verifique a ligação');return;}
+  }
   const cNm=document.getElementById('sc').value;
   const com=CM.find(c=>c.nome===cNm)||CU;
   const cli=document.getElementById('cn').value.trim()||'Estimado Cliente';
