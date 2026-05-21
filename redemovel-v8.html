@@ -275,7 +275,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
             </div>
           </div>
           <div class="fr" style="margin-top:10px">
-            <div class="fg"><label class="flbl">Plafond Equipamentos (€)</label><input class="finp" id="cplafond" type="number" placeholder="Ex: 500" oninput="markU()" style="margin-bottom:0"></div>
+            <div class="fg"><label class="flbl">Plafond Equipamentos (€)</label><input class="finp" id="plafond" type="number" placeholder="Ex: 500" oninput="markU()" style="margin-bottom:0"></div>
             <div class="fg"></div>
           </div>
         </div>
@@ -283,7 +283,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
         <!-- Comentário Geral -->
         <div>
           <span class="slbl">Comentário Geral <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(opcional)</span></span>
-          <textarea class="fs" id="ccoment" rows="3" placeholder="Ex: Proposta válida até 30 de junho…" oninput="markU()" style="width:100%;border-radius:var(--r);padding:8px 10px;resize:vertical;min-height:60px"></textarea>
+          <textarea class="fs" id="comentario" rows="3" placeholder="Ex: Proposta válida até 30 de junho…" oninput="markU()" style="width:100%;border-radius:var(--r);padding:8px 10px;resize:vertical;min-height:60px"></textarea>
         </div>
 
         <!-- Serviços -->
@@ -291,6 +291,21 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
           <span class="slbl">Serviços Propostos</span>
           <div class="svl" id="svl"></div>
           <button class="asb" onclick="addSvc()">＋ Adicionar serviço</button>
+        </div>
+
+        <!-- Comentário Geral -->
+        <div>
+          <span class="slbl">Comentário Geral <span style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none">(opcional)</span></span>
+          <textarea class="finp" id="ccoment" rows="3" placeholder="Condições especiais, notas adicionais…" oninput="markU()" style="resize:vertical;margin-bottom:0;font-family:'DM Sans',sans-serif;line-height:1.5"></textarea>
+        </div>
+
+        <!-- Plafond Equipamentos -->
+        <div>
+          <span class="slbl">Plafond em Equipamentos <span style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none">(opcional)</span></span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input class="finp" id="cplafond" type="number" placeholder="Ex: 500" oninput="markU()" style="margin-bottom:0;flex:1">
+            <span style="color:var(--muted);font-size:13px;white-space:nowrap">€ + IVA</span>
+          </div>
         </div>
 
         <!-- Fecho -->
@@ -383,10 +398,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
 <div class="mo" id="mo-save"><div class="md"><div class="mdt">💾 Confirmar e Gravar Proposta</div><div id="mo-save-b"></div><div class="mdf"><button class="btn btn-g" onclick="closeM('mo-save')">Cancelar</button><button class="btn btn-gr" onclick="confirmSave()">✓ Confirmar e Gravar</button></div></div></div>
 <div class="mo" id="mo-view"><div class="md"><div class="mdt">Detalhe da Proposta</div><div id="mo-view-b"></div><div class="mdf"><button class="btn btn-g" onclick="closeM('mo-view')">Fechar</button></div></div></div>
 <div class="toast" id="toast"><span id="ti"></span><span id="tm"></span></div>
-<div id="loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;align-items:center;justify-content:center;flex-direction:column;gap:16px">
-  <div style="width:44px;height:44px;border:4px solid rgba(255,255,255,.15);border-top-color:#E60000;border-radius:50%;animation:spin .8s linear infinite"></div>
-  <div id="loading-msg" style="color:white;font-size:14px;font-weight:500;font-family:'DM Sans',sans-serif">A carregar…</div>
-</div>
 <script>function showLoading(msg){const o=document.getElementById('loading-overlay');if(o){o.style.display='flex';document.getElementById('loading-msg').textContent=msg||'A carregar…';}}
 function hideLoading(){const o=document.getElementById('loading-overlay');if(o)o.style.display='none';}
 
@@ -438,7 +449,7 @@ async function init(){
     const data=await r.json();
     CM=data.map(row=>({nome:row['Nome']||'',email:row['Email']||'',telefone:row['Telefone']||'',funcao:(row['Funcao']||'comercial').toLowerCase(),password:row['Password']||'',fotoURL:row['FotoURL']||'',vendedor:String(row['Vendedor']||'')})).filter(c=>c.nome);
     sel.innerHTML='<option value="">— Selecionar —</option>';
-    CM.forEach(c=>{const o=document.createElement('option');o.value=c.nome;o.textContent=c.nome+' ('+RL(c.funcao)+')';sel.appendChild(o);});
+    CM.forEach(c=>{const o=document.createElement('option');o.value=c.nome;o.textContent=c.nome;sel.appendChild(o);});
     showLoad('A carregar tarifários…','',30);
     fetch(SU+'?sheet=Tarifários&t='+Date.now()).then(r=>r.json()).then(d=>{
       if(d.length>0){const firstRow=d[0];TF_HEADERS={dados:Object.keys(firstRow).find(k=>k.toLowerCase().includes('dados'))||'Dados',chamadas:Object.keys(firstRow).find(k=>k.toLowerCase().includes('chamada'))||'Chamadas/SMS',partilha:Object.keys(firstRow).find(k=>k.toLowerCase().includes('partilha'))||'Partilha',roaming:Object.keys(firstRow).find(k=>k.toLowerCase().includes('roaming')&&!k.toLowerCase().includes('tdr'))||'Roaming EEE',roamingTDR:Object.keys(firstRow).find(k=>k.toLowerCase().includes('tdr'))||'Roaming TDR',internacional:Object.keys(firstRow).find(k=>k.toLowerCase().includes('intern'))||'Internacional',fixo:Object.keys(firstRow).find(k=>k.toLowerCase().includes('fixo'))||'Fixo',equipamentos:Object.keys(firstRow).find(k=>k.toLowerCase().includes('equip'))||'Equipamentos'};}
@@ -488,6 +499,7 @@ function showLoad(msg,det,pct){
 function hideLoad(){const ov=document.getElementById('lov');if(ov)ov.classList.remove('show');}
 
 async function loadLogAndClients(){
+  showLoading('A carregar histórico e clientes…');
   showLoad('A carregar dados…','Tarifários e clientes',10);
   // Load log
   showLoad('A carregar propostas…','',60);
@@ -675,8 +687,8 @@ function genPrev(){
   const cli=document.getElementById('cn').value.trim()||'Estimado Cliente';
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
-  const comentario=(document.getElementById('ccoment')?.value||'').trim();
-  const plafond=(document.getElementById('cplafond')?.value||'').trim();
+  const comentario=document.getElementById('comentario')?.value?.trim()||'';
+  const plafond=document.getElementById('plafond')?.value||'';
   const today=new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'long',year:'numeric'});
   let rows='';let hasSvc=false;
   SV.forEach(s=>{
@@ -761,8 +773,8 @@ function openEmail(){
   const cli=document.getElementById('cn').value.trim()||'Estimado Cliente';
   const nif=document.getElementById('cnif')?.value?.trim()||'';
   const mens2=document.getElementById('cm')?.value||'';
-  const emailPlafond=(document.getElementById('cplafond')?.value||'').trim();
-  const emailComent=(document.getElementById('ccoment')?.value||'').trim();
+  const plafond2=document.getElementById('plafond')?.value||'';
+  const comentario2=document.getElementById('comentario')?.value?.trim()||'';
   const TL=TIPO==='novo'?'Novo Serviço':TIPO==='refid'?'Refidelização':TIPO==='upgrade'?'Upgrade':'Proposta';
   const today=new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'long',year:'numeric'});
   const tipoCss=TIPO==='novo'?'background:#E8F5E9;color:#2E7D32':TIPO==='refid'?'background:#FFF3E0;color:#E65100':'background:#E3F2FD;color:#1565C0';
@@ -771,6 +783,8 @@ function openEmail(){
   const ctaLabel=CTA==='a'?'✍ ASSINATURA':'📄 PAPER FREE';
   const agNm=eh(com?.nome||'');
   const agCt=eh([com?.telefone,com?.email].filter(Boolean).join(' · '));
+  const emailComent=(document.getElementById('ccoment')?.value||'').trim();
+  const emailPlafond=(document.getElementById('cplafond')?.value||'').trim();
   const nifPart=nif?'NIF '+nif+' | ':'';
   const subjMap={novo:'Proposta Comercial – Vodafone '+nifPart+cli,refid:'Proposta Comercial – Renovação descontos Vodafone '+nifPart+cli,upgrade:'Proposta Comercial – Melhoria de Condições Vodafone '+nifPart+cli};
   const subjectLine=subjMap[TIPO]||subjMap['novo'];
@@ -797,10 +811,10 @@ function openEmail(){
     });
   });
   const comentBlk=emailComent?`<div style="background:#F5F5F5;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#444;line-height:1.6;font-family:Arial,Helvetica,sans-serif">${eh(emailComent)}</div>`:'';
-  const condBlk=(emailMens||emailPlafond)
+  const condBlk=(mens2||emailPlafond)
     ?'<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px"><tr><td style="background:#FFF8F8;border:1px solid #FECACA;border-radius:6px;padding:14px 18px"><table cellpadding="0" cellspacing="0" border="0"><tr>'
-      +(mens2?'<td style="padding-right:28px"><p style="font-size:9px;font-weight:700;text-transform:uppercase;color:#aaa;margin:0 0 3px;font-family:Arial,Helvetica,sans-serif">Mensalidade</p><p style="font-size:22px;font-weight:800;color:#E60000;margin:0;font-family:Arial,Helvetica,sans-serif">'+parseFloat(emailMens).toFixed(2).replace('.',',')+' <span style="font-size:12px;font-weight:400;color:#888">€ + IVA</span></p></td>':'')
-      +(plafond2?'<td style="padding-right:28px"><p style="font-size:9px;font-weight:700;text-transform:uppercase;color:#aaa;margin:0 0 3px;font-family:Arial,Helvetica,sans-serif">Plafond Equipamentos</p><p style="font-size:22px;font-weight:800;color:#1A8080;margin:0;font-family:Arial,Helvetica,sans-serif">'+parseFloat(plafond2).toFixed(2).replace('.',',')+' <span style="font-size:12px;font-weight:400;color:#888">€</span></p></td>':'')
+      +(mens2?'<td style="padding-right:28px"><p style="font-size:9px;font-weight:700;text-transform:uppercase;color:#aaa;margin:0 0 3px;font-family:Arial,Helvetica,sans-serif">Mensalidade</p><p style="font-size:22px;font-weight:800;color:#E60000;margin:0;font-family:Arial,Helvetica,sans-serif">'+parseFloat(mens2).toFixed(2).replace('.',',')+' <span style="font-size:12px;font-weight:400;color:#888">€ + IVA</span></p></td>':'')
+      +(emailPlafond?'<td style="text-align:right"><p style="font-size:9px;font-weight:700;text-transform:uppercase;color:#aaa;margin:0 0 3px;font-family:Arial,Helvetica,sans-serif">Plafond Equipamentos</p><p style="font-size:22px;font-weight:800;color:#1A8080;margin:0;font-family:Arial,Helvetica,sans-serif">'+parseFloat(emailPlafond).toFixed(2).replace('.',',')+' <span style="font-size:12px;font-weight:400;color:#888">€</span></p></td>':'')
       +'</tr></table></td></tr></table>'
     :'';
 
@@ -848,7 +862,7 @@ function openEmail(){
         <tbody>${rows}</tbody>
       </table>
       ${comentario2?`<div style="background:#F8F8F8;border:1px solid #E0E0E0;border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#444;line-height:1.7;font-family:Arial,Helvetica,sans-serif">${eh(comentario2)}</div>`:''}
-      ${condBlk}
+      ${comentBlk}${condBlk}
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px;border:2px solid #E60000;border-radius:6px;overflow:hidden">
         <tr><td style="background:#E60000;padding:6px 14px"><p style="color:white;font-size:11px;font-weight:800;letter-spacing:.08em;margin:0;font-family:Arial,Helvetica,sans-serif">${ctaLabel}</p></td></tr>
         <tr><td style="background:#FFF5F5;padding:12px 16px"><p style="color:#333;font-size:13px;line-height:1.6;margin:0;font-family:Arial,Helvetica,sans-serif">${ctaTxt}</p></td></tr>
