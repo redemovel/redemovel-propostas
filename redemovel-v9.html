@@ -1488,12 +1488,18 @@ function renderDB(){
       const tot2=allActive.filter(p=>p.tipo===tp.k).length;
       const gan2=allActive.filter(p=>p.tipo===tp.k&&p.estado==='ganho').length;
       const tx2=tot2>0?Math.round(gan2/tot2*100):0;
-      const arc=tx2*3.6; // degrees for CSS conic
-      return '<div style="flex:1;min-width:140px;background:var(--surface2);border-radius:12px;padding:16px;text-align:center">'
-        +'<div style="width:72px;height:72px;border-radius:50%;background:conic-gradient('+tp.c+' '+arc+'deg,var(--border) 0);margin:0 auto 10px;display:flex;align-items:center;justify-content:center">'
-        +'<div style="width:54px;height:54px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:'+tp.c+'">'+tx2+'%</div>'
-        +'</div>'
-        +'<div style="font-size:12px;font-weight:700;color:var(--fg);margin-bottom:2px">'+tp.l+'</div>'
+      const r=30,circ=2*Math.PI*r,dash=circ*(tx2/100),gap=circ-dash;
+      const svgCirc='<svg width="80" height="80" style="display:block;margin:0 auto 10px;transform:rotate(-90deg)">'
+        +'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="rgba(128,128,128,0.15)" stroke-width="8"/>'
+        +'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="'+tp.c+'" stroke-width="8"'
+        +' stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'"'
+        +' stroke-linecap="round"/>'
+        +'<text x="40" y="40" text-anchor="middle" dominant-baseline="central"'
+        +' font-size="14" font-weight="600" fill="'+tp.c+'" style="transform:rotate(90deg);transform-origin:40px 40px">'+tx2+'%</text>'
+        +'</svg>';
+      return '<div style="flex:1;min-width:140px;padding:16px;text-align:center">'
+        +svgCirc
+        +'<div style="font-size:12px;font-weight:500;color:var(--fg);margin-bottom:3px">'+tp.l+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+gan2+' / '+tot2+' propostas</div>'
         +'</div>';
     }).join('');
@@ -1504,42 +1510,49 @@ function renderDB(){
   if(chartEl){
     const allMonths=[...new Set(allActive.map(p=>p.data?.slice(3,10)).filter(Boolean))].sort().slice(-6);
     if(allMonths.length>0){
-      const W=chartEl.offsetWidth||640,H=180,pad={t:16,r:16,b:36,l:44};
+      const W=chartEl.offsetWidth||640,H=200,pad={t:20,r:24,b:40,l:44};
       const iW=W-pad.l-pad.r,iH=H-pad.t-pad.b;
+      // Pad to at least 6 slots so single month doesn't fill everything
+      const displayMonths=allMonths.length<4?[...allMonths,...Array(4-allMonths.length).fill(null)]:allMonths;
+      const nSlots=displayMonths.length;
       const mData=allMonths.map(m=>({
         m,tot:allActive.filter(p=>p.data?.slice(3,10)===m).length,
         gan:allActive.filter(p=>p.data?.slice(3,10)===m&&p.estado==='ganho').length
       }));
-      const maxV=Math.max(...mData.map(d=>d.tot),1);
-      const xStep=iW/(Math.max(allMonths.length-1,1));
+      const maxV=Math.max(...mData.map(d=>d.tot),10);
+      const xStep=iW/(nSlots);
+      const xPos=i=>pad.l+(i+0.5)*xStep;
       const yScale=v=>pad.t+iH-(v/maxV*iH);
-      const xPos=i=>pad.l+(i*xStep);
-      // Grid lines
       let svg='<svg width="'+W+'" height="'+H+'" style="overflow:visible">';
+      // Grid lines
       for(let i=0;i<=4;i++){
         const y=pad.t+(iH/4*i);
         const val=Math.round(maxV-(maxV/4*i));
-        svg+='<line x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'" stroke="var(--border)" stroke-width="1"/>';
-        svg+='<text x="'+(pad.l-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="10" fill="var(--muted)">'+val+'</text>';
+        svg+='<line x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>';
+        svg+='<text x="'+(pad.l-8)+'" y="'+(y+4)+'" text-anchor="end" font-size="10" fill="var(--muted)">'+val+'</text>';
       }
-      // Bars for total
-      const barW=Math.max(iW/allMonths.length*0.4,4);
+      // Bars for total (each in own slot)
+      const barW=Math.max(xStep*0.45,8);
       mData.forEach((d,i)=>{
-        const bH=d.tot/maxV*iH;
+        const bH=Math.max(d.tot/maxV*iH,2);
         const bX=xPos(i)-barW/2;
         const bY=pad.t+iH-bH;
-        svg+='<rect x="'+bX+'" y="'+bY+'" width="'+barW+'" height="'+bH+'" fill="var(--red)" opacity="0.18" rx="2"/>';
+        svg+='<rect x="'+bX+'" y="'+bY+'" width="'+barW+'" height="'+bH+'" fill="#E60000" opacity="0.15" rx="3"/>';
+        svg+='<rect x="'+bX+'" y="'+bY+'" width="'+barW+'" height="'+bH+'" fill="none" stroke="#E60000" stroke-width="0.5" opacity="0.4" rx="3"/>';
       });
-      // Line for ganhos
+      // Line for ganhos (only if >1 point)
       if(mData.length>1){
         const pts=mData.map((d,i)=>xPos(i)+','+yScale(d.gan)).join(' ');
-        svg+='<polyline points="'+pts+'" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+        svg+='<polyline points="'+pts+'" fill="none" stroke="#1D9E75" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
       }
-      // Dots + labels
-      mData.forEach((d,i)=>{
-        svg+='<circle cx="'+xPos(i)+'" cy="'+yScale(d.gan)+'" r="4" fill="var(--green)" stroke="var(--bg)" stroke-width="2"/>';
-        svg+='<text x="'+xPos(i)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+d.m+'</text>';
-        svg+='<text x="'+xPos(i)+'" y="'+(yScale(d.tot)-6)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+d.tot+'</text>';
+      // Dots + month labels
+      displayMonths.forEach((m,i)=>{
+        const d=mData.find(x=>x.m===m);
+        if(d){
+          svg+='<circle cx="'+xPos(i)+'" cy="'+yScale(d.gan)+'" r="4" fill="#1D9E75" stroke="white" stroke-width="1.5"/>';
+          svg+='<text x="'+xPos(i)+'" y="'+(yScale(d.tot)-7)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+d.tot+'</text>';
+        }
+        svg+='<text x="'+xPos(i)+'" y="'+(H-6)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+(m||'')+'</text>';
       });
       svg+='</svg>';
       chartEl.innerHTML=svg;
