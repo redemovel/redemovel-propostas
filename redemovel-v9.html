@@ -290,7 +290,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
           <span class="slbl">Validade da Proposta</span>
           <div style="display:flex;align-items:center;gap:8px">
             <input class="finp" id="cvalidade" type="number" min="1" max="90" placeholder="15" oninput="markU()" style="margin-bottom:0;width:80px;flex:none">
-            <span style="color:var(--muted);font-size:13px;white-space:nowrap">dias (padrão: 30)</span>
+            <span style="color:var(--muted);font-size:13px;white-space:nowrap">dias (padrão: 15)</span>
           </div>
         </div>
 
@@ -1495,7 +1495,7 @@ function renderDB(){
   if(dbGan){
     const ganStat2=teamStat(d=>d.filter(p=>p.estado==='ganho').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0));
     dbGan.innerHTML='<div style="font-size:28px;font-weight:500;color:#1D9E75">'+fmtEur(ganVal)+'</div>'
-      +cmpBadge(ganVal,ganStat2.avg,ganStat2.best,fmtEur,false);
+      +cmpBadge(ganVal,ganStat2.avg,ganStat2.best,fmtEur,true);
   }
 
   // ── Bars: Por Comercial / Por Tipo (aggregate view only) ─────────
@@ -1528,7 +1528,7 @@ function renderDB(){
       const dashAvg=circ*(avgTx/100),gapAvg=circ-dashAvg;
       const svgCirc='<svg width="80" height="80" style="display:block;margin:0 auto 8px;transform:rotate(-90deg)">'
         +'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="rgba(128,128,128,0.12)" stroke-width="8"/>'
-        +(isPersonal?'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="rgba(128,128,128,0.3)" stroke-width="2" stroke-dasharray="'+dashAvg.toFixed(1)+' '+gapAvg.toFixed(1)+'" stroke-dashoffset="0"/>':'')
+        +(isPersonal?'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="#E60000" stroke-width="1.5" stroke-dasharray="'+dashAvg.toFixed(1)+' '+gapAvg.toFixed(1)+'" stroke-dashoffset="0" opacity="0.4"/>':'')
         +'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="'+tp.c+'" stroke-width="8" stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'" stroke-linecap="round"/>'
         +'<text x="40" y="40" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="'+tp.c+'" style="transform:rotate(90deg);transform-origin:40px 40px">'+tx2+'%</text>'
         +'</svg>';
