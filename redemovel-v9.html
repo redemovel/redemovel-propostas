@@ -285,6 +285,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
           </div>
         </div>
 
+        <!-- Validade da Proposta -->
+        <div>
+          <span class="slbl">Validade da Proposta</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input class="finp" id="cvalidade" type="number" min="1" max="90" placeholder="30" oninput="markU()" style="margin-bottom:0;width:80px;flex:none">
+            <span style="color:var(--muted);font-size:13px;white-space:nowrap">dias (padrão: 30)</span>
+          </div>
+        </div>
+
         <!-- Fecho -->
         <div>
           <span class="slbl">Fecho da Proposta</span>
@@ -359,6 +368,31 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
       <div class="ccard"><div class="ctit">Por Comercial</div><div class="bchart" id="ch-com"></div></div>
       <div class="ccard"><div class="ctit">Por Tipo</div><div class="bchart" id="ch-tp"></div></div>
     </div>
+    <!-- Gráfico evolução mensal -->
+    <div class="ccard" style="margin-bottom:20px">
+      <div class="ctit" style="margin-bottom:14px">📈 Evolução Mensal</div>
+      <div id="db-chart" style="width:100%;height:180px;position:relative"></div>
+    </div>
+    <!-- Pipeline vs Ganhos -->
+    <div class="cgrid" style="margin-bottom:20px">
+      <div class="ccard">
+        <div class="ctit">💶 Pipeline (Mensalidades Pendentes)</div>
+        <div id="db-pipeline" style="font-size:28px;font-weight:800;color:var(--orange);margin-top:8px">—</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">€/mês em propostas pendentes</div>
+      </div>
+      <div class="ccard">
+        <div class="ctit">✅ Ganhos (Mensalidades Fechadas)</div>
+        <div id="db-ganhos-val" style="font-size:28px;font-weight:800;color:var(--green);margin-top:8px">—</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">€/mês em propostas ganhas</div>
+      </div>
+    </div>
+    <!-- Taxa de conversão por tipo -->
+    <div class="ccard" style="margin-bottom:20px">
+      <div class="ctit" style="margin-bottom:14px">🎯 Taxa de Conversão por Tipo</div>
+      <div id="db-conv-tipo" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+    </div>
+    <!-- Alertas de validade -->
+    <div id="db-alertas" style="margin-bottom:20px"></div>
     <div class="tw"><div class="tt"><div class="ttit">🏆 Ranking</div></div>
     <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Comercial</th><th>Propostas</th><th>Ganhos</th><th>Taxa</th><th>Novo</th><th>Refid.</th><th>Upgrade</th></tr></thead><tbody id="db-rank"></tbody></table></div></div>
   </div>
@@ -828,6 +862,9 @@ function genPrev(){
   const dur=document.getElementById('cd').value;
   const comentario=(document.getElementById('ccoment')?.value||'').trim();
   const plafond=(document.getElementById('cplafond')?.value||'').trim();
+  const validadeDias=parseInt(document.getElementById('cvalidade')?.value||'30')||30;
+  const validadeDate=new Date();validadeDate.setDate(validadeDate.getDate()+validadeDias);
+  const validadeStr=validadeDate.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});
   const today=new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'long',year:'numeric'});
   let rows='';let hasSvc=false;
   SV.forEach(s=>{
@@ -866,6 +903,7 @@ function genPrev(){
   +'<div style="padding:12px 16px;background:#FFF5F5;font-size:13px;color:#333;line-height:1.6">'+ctaTxt+'</div>'
 +'</div>'
   +'<p class="ptxt">Os descontos e condições propostos são válidos pelo período indicado, a contar da data da sua implementação.</p>'
+  +'<div style="font-size:11px;color:#999;margin:-6px 0 12px">⏳ Proposta válida até <strong>'+validadeStr+'</strong> ('+validadeDias+' dias)</div>'
   +'<div class="pnote">📋 Para detalhe completo dos tarifários, consulte <strong>vodafone.pt/business</strong></div></div>'
   +'<div class="pft"><div class="pfl"><img src="'+CLEAN+'" class="pfrdm" alt="Redemóvel"><div><div class="pfan">'+eh(com?.nome||'Redemóvel')+'</div><div class="pfac">'+eh([com?.telefone,com?.email].filter(Boolean).join(' · '))+'</div></div></div><img src="'+VDF+'" class="pfvdf" alt="Vodafone"></div>';
   PREVIEWED=true;
@@ -912,7 +950,9 @@ async function confirmSave(){
   }).join('; ');
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
-  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA};
+  const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'30')||30;
+  const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
+  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG};
   LD.push(entry);SAVED=true;PREVIEWED=false;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
   setBtn(true);
@@ -1431,6 +1471,112 @@ function renderDB(){
       ct.appendChild(row);
     });
   }
+
+  // ── Pipeline vs Ganhos (mensalidades) ───────────────────────
+  const allActive=LD.filter(p=>p.estado!=='substituida');
+  const pipVal=allActive.filter(p=>p.estado==='pendente').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0);
+  const ganVal=allActive.filter(p=>p.estado==='ganho').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0);
+  const fmtEur=v=>v>0?v.toLocaleString('pt-PT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €':'0,00 €';
+  const dbPip=document.getElementById('db-pipeline');if(dbPip)dbPip.textContent=fmtEur(pipVal);
+  const dbGan=document.getElementById('db-ganhos-val');if(dbGan)dbGan.textContent=fmtEur(ganVal);
+
+  // ── Taxa de conversão por tipo ───────────────────────────────
+  const convEl=document.getElementById('db-conv-tipo');
+  if(convEl){
+    const tipos=[{k:'novo',l:'Novo Serviço',c:'#1A8080'},{k:'refid',l:'Refidelização',c:'#E67E22'},{k:'upgrade',l:'Upgrade',c:'#2980B9'}];
+    convEl.innerHTML=tipos.map(tp=>{
+      const tot2=allActive.filter(p=>p.tipo===tp.k).length;
+      const gan2=allActive.filter(p=>p.tipo===tp.k&&p.estado==='ganho').length;
+      const tx2=tot2>0?Math.round(gan2/tot2*100):0;
+      const arc=tx2*3.6; // degrees for CSS conic
+      return '<div style="flex:1;min-width:140px;background:var(--surface2);border-radius:12px;padding:16px;text-align:center">'
+        +'<div style="width:72px;height:72px;border-radius:50%;background:conic-gradient('+tp.c+' '+arc+'deg,var(--border) 0);margin:0 auto 10px;display:flex;align-items:center;justify-content:center">'
+        +'<div style="width:54px;height:54px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:'+tp.c+'">'+tx2+'%</div>'
+        +'</div>'
+        +'<div style="font-size:12px;font-weight:700;color:var(--fg);margin-bottom:2px">'+tp.l+'</div>'
+        +'<div style="font-size:11px;color:var(--muted)">'+gan2+' / '+tot2+' propostas</div>'
+        +'</div>';
+    }).join('');
+  }
+
+  // ── Evolução mensal (bar/line chart SVG) ─────────────────────
+  const chartEl=document.getElementById('db-chart');
+  if(chartEl){
+    const allMonths=[...new Set(allActive.map(p=>p.data?.slice(3,10)).filter(Boolean))].sort().slice(-6);
+    if(allMonths.length>0){
+      const W=chartEl.offsetWidth||640,H=180,pad={t:16,r:16,b:36,l:44};
+      const iW=W-pad.l-pad.r,iH=H-pad.t-pad.b;
+      const mData=allMonths.map(m=>({
+        m,tot:allActive.filter(p=>p.data?.slice(3,10)===m).length,
+        gan:allActive.filter(p=>p.data?.slice(3,10)===m&&p.estado==='ganho').length
+      }));
+      const maxV=Math.max(...mData.map(d=>d.tot),1);
+      const xStep=iW/(Math.max(allMonths.length-1,1));
+      const yScale=v=>pad.t+iH-(v/maxV*iH);
+      const xPos=i=>pad.l+(i*xStep);
+      // Grid lines
+      let svg='<svg width="'+W+'" height="'+H+'" style="overflow:visible">';
+      for(let i=0;i<=4;i++){
+        const y=pad.t+(iH/4*i);
+        const val=Math.round(maxV-(maxV/4*i));
+        svg+='<line x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'" stroke="var(--border)" stroke-width="1"/>';
+        svg+='<text x="'+(pad.l-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="10" fill="var(--muted)">'+val+'</text>';
+      }
+      // Bars for total
+      const barW=Math.max(iW/allMonths.length*0.4,4);
+      mData.forEach((d,i)=>{
+        const bH=d.tot/maxV*iH;
+        const bX=xPos(i)-barW/2;
+        const bY=pad.t+iH-bH;
+        svg+='<rect x="'+bX+'" y="'+bY+'" width="'+barW+'" height="'+bH+'" fill="var(--red)" opacity="0.18" rx="2"/>';
+      });
+      // Line for ganhos
+      if(mData.length>1){
+        const pts=mData.map((d,i)=>xPos(i)+','+yScale(d.gan)).join(' ');
+        svg+='<polyline points="'+pts+'" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+      }
+      // Dots + labels
+      mData.forEach((d,i)=>{
+        svg+='<circle cx="'+xPos(i)+'" cy="'+yScale(d.gan)+'" r="4" fill="var(--green)" stroke="var(--bg)" stroke-width="2"/>';
+        svg+='<text x="'+xPos(i)+'" y="'+(H-8)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+d.m+'</text>';
+        svg+='<text x="'+xPos(i)+'" y="'+(yScale(d.tot)-6)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+d.tot+'</text>';
+      });
+      svg+='</svg>';
+      chartEl.innerHTML=svg;
+    } else {
+      chartEl.innerHTML='<div style="color:var(--muted);text-align:center;padding:60px 0;font-size:13px">Sem dados suficientes</div>';
+    }
+  }
+
+  // ── Alertas de validade ──────────────────────────────────────
+  const alertEl=document.getElementById('db-alertas');
+  if(alertEl){
+    const today2=new Date();today2.setHours(0,0,0,0);
+    const pending=LD.filter(p=>p.estado==='pendente'&&p.validade);
+    const expiring=pending.map(p=>{
+      const parts=p.validade.split('/');
+      if(parts.length<3) return null;
+      const d=new Date(parseInt(parts[2]),parseInt(parts[1])-1,parseInt(parts[0]));
+      const diff=Math.round((d-today2)/(1000*60*60*24));
+      return {...p,diasRestantes:diff};
+    }).filter(x=>x&&x.diasRestantes<=7).sort((a,b)=>a.diasRestantes-b.diasRestantes);
+    if(expiring.length>0){
+      alertEl.innerHTML='<div style="background:var(--surface2);border-radius:12px;padding:16px;border-left:4px solid #E67E22">'
+        +'<div style="font-size:13px;font-weight:700;color:#E67E22;margin-bottom:10px">⚠️ Propostas a expirar em breve ('+expiring.length+')</div>'
+        +expiring.map(p=>{
+          const col=p.diasRestantes<0?'var(--red)':p.diasRestantes<=3?'#E67E22':'#F1C40F';
+          const label=p.diasRestantes<0?'Expirada há '+Math.abs(p.diasRestantes)+' dias':p.diasRestantes===0?'Expira hoje':'Expira em '+p.diasRestantes+' dia'+(p.diasRestantes===1?'':'s');
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
+            +'<div><span style="font-weight:600;font-size:12px">'+eh(p.cliente)+'</span> <span style="color:var(--muted);font-size:11px">· '+eh(p.comercial)+'</span></div>'
+            +'<div style="font-size:11px;font-weight:700;color:'+col+';white-space:nowrap">'+label+'</div>'
+            +'</div>';
+        }).join('')
+        +'</div>';
+    } else {
+      alertEl.innerHTML='';
+    }
+  }
+
   const sel=document.getElementById('db-mes');const cur=sel.value;
   const months=new Set(LD.map(p=>p.data?.slice(3,10)).filter(Boolean));
   sel.innerHTML='<option value="">Todos os meses</option>';
@@ -1443,6 +1589,7 @@ function resetP(){
   document.getElementById('cm').value='';document.getElementById('cd').value='24';
   lastDuracao='24';
   const ccR=document.getElementById('ccoment');if(ccR)ccR.value='';
+  const cvR=document.getElementById('cvalidade');if(cvR)cvR.value='';
   const cpR=document.getElementById('cplafond');if(cpR)cpR.value='';
   document.getElementById('cli-search').value='';
   SV=[];SID=0;TIPO=null;CTA='b';
