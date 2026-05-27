@@ -285,6 +285,15 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
           </div>
         </div>
 
+        <!-- Validade da Proposta -->
+        <div>
+          <span class="slbl">Validade da Proposta</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input class="finp" id="cvalidade" type="number" min="1" max="90" placeholder="15" oninput="markU()" style="margin-bottom:0;width:80px;flex:none">
+            <span style="color:var(--muted);font-size:13px;white-space:nowrap">dias (padrão: 15)</span>
+          </div>
+        </div>
+
         <!-- Fecho -->
         <div>
           <span class="slbl">Fecho da Proposta</span>
@@ -351,6 +360,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
       <div><div class="ptit">Dashboard</div><div class="psub">Performance da equipa</div></div>
       <div class="frow">
         <select class="fi" id="db-mes" onchange="renderDB()"><option value="">Todos os meses</option></select>
+        <select class="fi" id="db-filter-com" onchange="renderDB()" style="display:none"><option value="">Toda a equipa</option></select>
         <select class="fi" id="db-tp" onchange="renderDB()"><option value="">Todos os tipos</option><option value="novo">Novo Serviço</option><option value="refid">Refidelização</option><option value="upgrade">Upgrade</option></select>
       </div>
     </div>
@@ -359,6 +369,31 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
       <div class="ccard"><div class="ctit">Por Comercial</div><div class="bchart" id="ch-com"></div></div>
       <div class="ccard"><div class="ctit">Por Tipo</div><div class="bchart" id="ch-tp"></div></div>
     </div>
+    <!-- Gráfico evolução mensal -->
+    <div class="ccard" style="margin-bottom:20px">
+      <div class="ctit" style="margin-bottom:14px">📈 Evolução Mensal</div>
+      <div id="db-chart" style="width:100%;height:180px;position:relative"></div>
+    </div>
+    <!-- Pipeline vs Ganhos -->
+    <div class="cgrid" style="margin-bottom:20px">
+      <div class="ccard">
+        <div class="ctit">💶 Pipeline (Mensalidades Pendentes)</div>
+        <div id="db-pipeline" style="font-size:28px;font-weight:800;color:var(--orange);margin-top:8px">—</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">€/mês em propostas pendentes</div>
+      </div>
+      <div class="ccard">
+        <div class="ctit">✅ Ganhos (Mensalidades Fechadas)</div>
+        <div id="db-ganhos-val" style="font-size:28px;font-weight:800;color:var(--green);margin-top:8px">—</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">€/mês em propostas ganhas</div>
+      </div>
+    </div>
+    <!-- Taxa de conversão por tipo -->
+    <div class="ccard" style="margin-bottom:20px">
+      <div class="ctit" style="margin-bottom:14px">🎯 Taxa de Conversão por Tipo</div>
+      <div id="db-conv-tipo" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+    </div>
+    <!-- Alertas de validade -->
+    <div id="db-alertas" style="margin-bottom:20px"></div>
     <div class="tw"><div class="tt"><div class="ttit">🏆 Ranking</div></div>
     <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>#</th><th>Comercial</th><th>Propostas</th><th>Ganhos</th><th>Taxa</th><th>Novo</th><th>Refid.</th><th>Upgrade</th></tr></thead><tbody id="db-rank"></tbody></table></div></div>
   </div>
@@ -616,6 +651,12 @@ async function loadLogAndClients(){
 }
 
 function setupApp(){
+  // Show comercial filter for coord/master
+  const fcom=document.getElementById('db-filter-com');
+  if(fcom){
+    const show=CU&&(CU.funcao==='master'||CU.funcao==='coordenador');
+    fcom.style.display=show?'block':'none';
+  }
   const u=CU;
   document.getElementById('hnm').textContent=u.nome;
   document.getElementById('hrl').textContent='';
@@ -828,6 +869,9 @@ function genPrev(){
   const dur=document.getElementById('cd').value;
   const comentario=(document.getElementById('ccoment')?.value||'').trim();
   const plafond=(document.getElementById('cplafond')?.value||'').trim();
+  const validadeDias=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
+  const validadeDate=new Date();validadeDate.setDate(validadeDate.getDate()+validadeDias);
+  const validadeStr=validadeDate.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});
   const today=new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'long',year:'numeric'});
   let rows='';let hasSvc=false;
   SV.forEach(s=>{
@@ -866,6 +910,7 @@ function genPrev(){
   +'<div style="padding:12px 16px;background:#FFF5F5;font-size:13px;color:#333;line-height:1.6">'+ctaTxt+'</div>'
 +'</div>'
   +'<p class="ptxt">Os descontos e condições propostos são válidos pelo período indicado, a contar da data da sua implementação.</p>'
+  +'<div style="font-size:11px;color:#999;margin:-6px 0 12px">⏳ Proposta válida até <strong>'+validadeStr+'</strong> ('+validadeDias+' dias)</div>'
   +'<div class="pnote">📋 Para detalhe completo dos tarifários, consulte <strong>vodafone.pt/business</strong></div></div>'
   +'<div class="pft"><div class="pfl"><img src="'+CLEAN+'" class="pfrdm" alt="Redemóvel"><div><div class="pfan">'+eh(com?.nome||'Redemóvel')+'</div><div class="pfac">'+eh([com?.telefone,com?.email].filter(Boolean).join(' · '))+'</div></div></div><img src="'+VDF+'" class="pfvdf" alt="Vodafone"></div>';
   PREVIEWED=true;
@@ -912,7 +957,9 @@ async function confirmSave(){
   }).join('; ');
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
-  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA};
+  const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
+  const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
+  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG};
   LD.push(entry);SAVED=true;PREVIEWED=false;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
   setBtn(true);
@@ -995,6 +1042,9 @@ function openEmail(){
   if(rows) rows+='<tr><td colspan="3" style="padding:6px 0"></td></tr>';
   const eComent=(document.getElementById('ccoment')?.value||'').trim();
   const ePlafond=(document.getElementById('cplafond')?.value||'').trim();
+  const eValidadeDias=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
+  const eVExp=new Date();eVExp.setDate(eVExp.getDate()+eValidadeDias);
+  const eValidadeStr=eVExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});
   const eComentBlk=eComent?'<div style="background:#F5F5F5;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#444;line-height:1.6;font-family:Arial,Helvetica,sans-serif">'+eh(eComent)+'</div>':'';
   const condBlk=(mens||ePlafond)
     ?'<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px"><tr><td style="background:#FFF8F8;border:1px solid #FECACA;border-radius:6px;padding:14px 18px"><table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
@@ -1364,78 +1414,273 @@ function dupL(id){
 }
 
 function renderDB(){
-  const mes=document.getElementById('db-mes')?.value||'';
-  const tp=document.getElementById('db-tp')?.value||'';
-  let data=LD;
-  if(mes)data=data.filter(p=>p.data?.slice(3,10)===mes);
-  if(tp)data=data.filter(p=>p.tipo===tp);
-  data=data.filter(p=>p.estado!=='substituida');
-  const tot=data.length,gan=data.filter(p=>p.estado==='ganho').length;
-  const tx=tot>0?Math.round(gan/tot*100):0;
-  const nv=data.filter(p=>p.tipo==='novo').length,rf=data.filter(p=>p.tipo==='refid').length,up=data.filter(p=>p.tipo==='upgrade').length;
-  document.getElementById('db-stats').innerHTML='<div class="sc cr"><div class="sv">'+tot+'</div><div class="sl">Total</div></div><div class="sc cg"><div class="sv">'+gan+'</div><div class="sl">Ganhos</div></div><div class="sc cb"><div class="sv">'+tx+'%</div><div class="sl">Taxa Sucesso</div></div><div class="sc"><div class="sv">'+nv+'</div><div class="sl">Novos</div></div><div class="sc co"><div class="sv">'+rf+'</div><div class="sl">Refidelizações</div></div><div class="sc cp"><div class="sv">'+up+'</div><div class="sl">Upgrades</div></div>';
-  const byCom={};data.forEach(p=>{if(!byCom[p.comercial])byCom[p.comercial]={tot:0,gan:0};byCom[p.comercial].tot++;if(p.estado==='ganho')byCom[p.comercial].gan++;});
-  const maxC=Math.max(...Object.values(byCom).map(v=>v.tot),1);
-  document.getElementById('ch-com').innerHTML=Object.entries(byCom).sort((a,b)=>b[1].tot-a[1].tot).slice(0,6).map(([n,v])=>'<div class="brow"><span class="blbl" title="'+n+'">'+n.split(' ')[0]+'</span><div class="btrk"><div class="bfil" style="width:'+Math.round(v.tot/maxC*100)+'%;background:var(--red)"></div></div><span class="bval">'+v.tot+'</span></div>').join('');
-  const maxT=Math.max(nv,rf,up,1);
-  document.getElementById('ch-tp').innerHTML=[{l:'Novo Serviço',v:nv,c:'var(--green)'},{l:'Refidelização',v:rf,c:'var(--orange)'},{l:'Upgrade',v:up,c:'var(--blue)'}].map(x=>'<div class="brow"><span class="blbl">'+x.l+'</span><div class="btrk"><div class="bfil" style="width:'+Math.round(x.v/maxT*100)+'%;background:'+x.c+'"></div></div><span class="bval">'+x.v+'</span></div>').join('');
-  const tbody=document.getElementById('db-rank');tbody.innerHTML='';
-  Object.entries(byCom).sort((a,b)=>b[1].gan-a[1].gan).forEach(([nome,v],i)=>{
-    const t2=v.tot>0?Math.round(v.gan/v.tot*100):0;
-    const cd=data.filter(p=>p.comercial===nome);
-    const tr=document.createElement('tr');tr.className=i<3?'rk'+(i+1):'';
-    tr.innerHTML='<td><span class="rn">'+(i+1)+'</span></td><td style="font-weight:600">'+eh(nome)+'</td><td>'+v.tot+'</td><td style="color:var(--green);font-weight:600">'+v.gan+'</td><td style="color:'+(t2>=50?'var(--green)':'var(--orange)')+';font-weight:600">'+t2+'%</td><td>'+cd.filter(p=>p.tipo==='novo').length+'</td><td>'+cd.filter(p=>p.tipo==='refid').length+'</td><td>'+cd.filter(p=>p.tipo==='upgrade').length+'</td>';
-    tbody.appendChild(tr);
-  });
-  if(!tbody.innerHTML)tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Sem dados</td></tr>';
-  const eb=document.getElementById('eq-body');
-  if(eb){
-    eb.innerHTML='';
-    CM.forEach(c=>{
-      const cL=LD.filter(p=>p.comercial===c.nome);
-      const cG=cL.filter(p=>p.estado==='ganho').length;
-      const cP=cL.filter(p=>p.estado==='perdido').length;
-      const cPend=cL.filter(p=>p.estado==='pendente').length;
-      const cT=cL.length>0?Math.round(cG/cL.length*100):0;
-      const tr=document.createElement('tr');
-      tr.innerHTML='<td><div style="display:flex;align-items:center;gap:10px"><div class="uav" style="width:32px;height:32px;font-size:12px">'+(c.fotoURL?'<img src="'+c.fotoURL+'" alt="">':IN(c.nome))+'</div><span style="font-weight:600">'+eh(c.nome)+'</span></div></td>'
-        +'<td style="text-align:center">'+cL.length+'</td>'
-        +'<td style="text-align:center;color:var(--green);font-weight:600">'+cG+'</td>'
-        +'<td style="text-align:center;color:var(--orange);font-weight:600">'+cPend+'</td>'
-        +'<td style="text-align:center;color:var(--red);font-weight:600">'+cP+'</td>'
-        +'<td style="text-align:center;font-weight:700;color:'+(cT>=50?'var(--green)':'var(--orange)')+'">'+(cL.length>0?cT+'%':'—')+'</td>';
-      eb.appendChild(tr);
-    });
+  const isCoord=CU&&(CU.funcao==='master'||CU.funcao==='coordenador');
+  const isComercial=CU&&(CU.funcao==='comercial'||CU.funcao==='backoffice');
+  const filterSel=document.getElementById('db-filter-com');
+  const mesSel=document.getElementById('db-mes');
+
+  // Populate comercial filter (coord/master only)
+  if(filterSel&&isCoord){
+    const curF=filterSel.value;
+    const coms=[...new Set(LD.map(p=>p.comercial).filter(Boolean))].sort();
+    filterSel.innerHTML='<option value="">Toda a equipa</option>';
+    coms.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;if(c===curF)o.selected=true;filterSel.appendChild(o);});
   }
-  // Comparativo mensal
+
+  // Determine whose data we show
+  const filteredCom=isCoord?(filterSel?.value||''):CU?.nome||'';
+  const isPersonal=!!filteredCom; // personal view = comercial filtered
+
+  // Base data (exclude substituida)
+  const allActive=LD.filter(p=>p.estado!=='substituida');
+  const mes=mesSel?.value||'';
+  let data=allActive;
+  if(mes) data=data.filter(p=>p.data?.slice(3,10)===mes);
+  if(filteredCom) data=data.filter(p=>p.comercial===filteredCom);
+
+  // Team-wide stats (for comparisons)
+  const teamAll=allActive;
+  const teamComs=[...new Set(teamAll.map(p=>p.comercial).filter(Boolean))];
+  const nComs=Math.max(teamComs.length,1);
+
+  // Helper: avg and best across comerciais
+  function teamStat(fn){
+    const vals=teamComs.map(c=>fn(teamAll.filter(p=>p.comercial===c)));
+    return {avg:vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0, best:vals.length?Math.max(...vals):0};
+  }
+  const fmtEur=v=>v>0?v.toLocaleString('pt-PT',{minimumFractionDigits:2,maximumFractionDigits:2})+' €':'0,00 €';
+  const fmtN=v=>Math.round(v);
+
+  // ── Summary stats ────────────────────────────────────────────────
+  const tot=data.length;
+  const gan=data.filter(p=>p.estado==='ganho').length;
+  const pend=data.filter(p=>p.estado==='pendente').length;
+  const tx=tot>0?Math.round(gan/tot*100):0;
+  const pipVal=data.filter(p=>p.estado==='pendente').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0);
+  const ganVal=data.filter(p=>p.estado==='ganho').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0);
+
+  // Comparison badges (shown in personal view)
+  function cmpBadge(myVal,avg,best,fmt,hideBest){
+    if(!isPersonal) return '';
+    let html='<div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.8">';
+    html+='Média equipa: <b style="color:var(--fg)">'+fmt(avg)+'</b>';
+    if(!hideBest) html+=' &nbsp;|&nbsp; Melhor: <b style="color:var(--fg)">'+fmt(best)+'</b>';
+    html+='</div>';
+    return html;
+  }
+  const txStat=teamStat(d=>{const t=d.length,g=d.filter(p=>p.estado==='ganho').length;return t>0?Math.round(g/t*100):0;});
+  const totStat=teamStat(d=>d.length);
+  const ganStat=teamStat(d=>d.filter(p=>p.estado==='ganho').length);
+  const pipStat=teamStat(d=>d.filter(p=>p.estado==='pendente').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0));
+
+  // ── Render stats cards ──────────────────────────────────────────
+  const statsEl=document.getElementById('db-stats');
+  if(statsEl){
+    const nv=data.filter(p=>p.tipo==='novo').length;
+    const rf=data.filter(p=>p.tipo==='refid').length;
+    const up=data.filter(p=>p.tipo==='upgrade').length;
+    statsEl.innerHTML=
+      '<div class="sc cr"><div class="sv">'+tot+'</div><div class="sl">Total</div>'+cmpBadge(tot,totStat.avg,totStat.best,fmtN,false)+'</div>'
+      +'<div class="sc cg"><div class="sv">'+gan+'</div><div class="sl">Ganhos</div>'+cmpBadge(gan,ganStat.avg,ganStat.best,fmtN,false)+'</div>'
+      +'<div class="sc cb"><div class="sv">'+tx+'%</div><div class="sl">Taxa Sucesso</div>'+cmpBadge(tx,txStat.avg,txStat.best,v=>Math.round(v)+'%',false)+'</div>'
+      +'<div class="sc"><div class="sv">'+nv+'</div><div class="sl">Novos</div></div>'
+      +'<div class="sc co"><div class="sv">'+rf+'</div><div class="sl">Refidelizações</div></div>'
+      +'<div class="sc cp"><div class="sv">'+up+'</div><div class="sl">Upgrades</div></div>';
+  }
+
+  // ── Pipeline vs Ganhos ──────────────────────────────────────────
+  const dbPip=document.getElementById('db-pipeline');
+  if(dbPip){
+    dbPip.innerHTML='<div style="font-size:28px;font-weight:500;color:#BA7517">'+fmtEur(pipVal)+'</div>'
+      +cmpBadge(pipVal,pipStat.avg,pipStat.best,fmtEur,true);
+  }
+  const dbGan=document.getElementById('db-ganhos-val');
+  if(dbGan){
+    const ganStat2=teamStat(d=>d.filter(p=>p.estado==='ganho').reduce((s,p)=>s+(parseFloat(p.mensalidade)||0),0));
+    dbGan.innerHTML='<div style="font-size:28px;font-weight:500;color:#1D9E75">'+fmtEur(ganVal)+'</div>'
+      +cmpBadge(ganVal,ganStat2.avg,ganStat2.best,fmtEur,true);
+  }
+
+  // ── Bars: Por Comercial / Por Tipo (aggregate view only) ─────────
+  const comEl=document.getElementById('ch-com');
+  const tpEl=document.getElementById('ch-tp');
+  if(!isPersonal){
+    const byCom={};allActive.forEach(p=>{if(!byCom[p.comercial])byCom[p.comercial]={tot:0,gan:0};byCom[p.comercial].tot++;if(p.estado==='ganho')byCom[p.comercial].gan++;});
+    const maxC=Math.max(...Object.values(byCom).map(v=>v.tot),1);
+    if(comEl) comEl.innerHTML=Object.entries(byCom).sort((a,b)=>b[1].tot-a[1].tot).slice(0,6).map(([n,v])=>'<div class="brow"><span class="blbl" title="'+n+'">'+n.split(' ')[0]+'</span><div class="btrk"><div class="bfil" style="width:'+Math.round(v.tot/maxC*100)+'%;background:var(--red)"></div></div><span class="bval">'+v.tot+'</span></div>').join('');
+    const maxT=Math.max(data.filter(p=>p.tipo==='novo').length,data.filter(p=>p.tipo==='refid').length,data.filter(p=>p.tipo==='upgrade').length,1);
+    if(tpEl) tpEl.innerHTML=[{l:'Novo Serviço',v:data.filter(p=>p.tipo==='novo').length,c:'var(--green)'},{l:'Refidelização',v:data.filter(p=>p.tipo==='refid').length,c:'var(--orange)'},{l:'Upgrade',v:data.filter(p=>p.tipo==='upgrade').length,c:'var(--blue)'}].map(x=>'<div class="brow"><span class="blbl">'+x.l+'</span><div class="btrk"><div class="bfil" style="width:'+Math.round(x.v/maxT*100)+'%;background:'+x.c+'"></div></div><span class="bval">'+x.v+'</span></div>').join('');
+  } else {
+    if(comEl) comEl.innerHTML='';
+    if(tpEl) tpEl.innerHTML='';
+  }
+
+  // ── Conversion by tipo (donut) ───────────────────────────────────
+  const convEl=document.getElementById('db-conv-tipo');
+  if(convEl){
+    const tipos=[{k:'novo',l:'Novo Serviço',c:'#1D9E75'},{k:'refid',l:'Refidelização',c:'#BA7517'},{k:'upgrade',l:'Upgrade',c:'#185FA5'}];
+    convEl.innerHTML=tipos.map(tp=>{
+      const tot2=data.filter(p=>p.tipo===tp.k).length;
+      const gan2=data.filter(p=>p.tipo===tp.k&&p.estado==='ganho').length;
+      const tx2=tot2>0?Math.round(gan2/tot2*100):0;
+      // Team avg for this tipo
+      const teamTx=teamComs.map(c=>{const td=teamAll.filter(p=>p.comercial===c&&p.tipo===tp.k);return td.length?Math.round(td.filter(p=>p.estado==='ganho').length/td.length*100):0;});
+      const avgTx=teamTx.length?Math.round(teamTx.reduce((a,b)=>a+b,0)/teamTx.length):0;
+      const r=30,circ=2*Math.PI*r;
+      const dash=circ*(tx2/100),gap=circ-dash;
+      const dashAvg=circ*(avgTx/100),gapAvg=circ-dashAvg;
+      const svgCirc='<svg width="80" height="80" style="display:block;margin:0 auto 8px;transform:rotate(-90deg)">'
+        +'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="rgba(128,128,128,0.12)" stroke-width="8"/>'
+        +(isPersonal?'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="#E60000" stroke-width="1.5" stroke-dasharray="'+dashAvg.toFixed(1)+' '+gapAvg.toFixed(1)+'" stroke-dashoffset="0" opacity="0.4"/>':'')
+        +'<circle cx="40" cy="40" r="'+r+'" fill="none" stroke="'+tp.c+'" stroke-width="8" stroke-dasharray="'+dash.toFixed(1)+' '+gap.toFixed(1)+'" stroke-linecap="round"/>'
+        +'<text x="40" y="40" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="500" fill="'+tp.c+'" style="transform:rotate(90deg);transform-origin:40px 40px">'+tx2+'%</text>'
+        +'</svg>';
+      const avgNote=isPersonal?'<div style="font-size:10px;color:var(--muted);margin-top:2px">Média equipa: '+avgTx+'%</div>':'';
+      return '<div style="flex:1;min-width:120px;padding:12px 8px;text-align:center">'
+        +svgCirc
+        +'<div style="font-size:12px;font-weight:500;color:var(--fg);margin-bottom:2px">'+tp.l+'</div>'
+        +'<div style="font-size:11px;color:var(--muted)">'+gan2+' / '+tot2+'</div>'
+        +avgNote
+        +'</div>';
+    }).join('');
+  }
+
+  // ── Monthly chart ────────────────────────────────────────────────
+  const chartEl=document.getElementById('db-chart');
+  if(chartEl){
+    const allMonths=[...new Set(allActive.map(p=>p.data?.slice(3,10)).filter(Boolean))].sort().slice(-6);
+    if(allMonths.length>0){
+      const W=chartEl.offsetWidth||640,H=200,pad={t:20,r:24,b:40,l:44};
+      const iW=W-pad.l-pad.r,iH=H-pad.t-pad.b;
+      const nSlots=Math.max(allMonths.length,4);
+      const displaySlots=[...allMonths,...Array(Math.max(0,4-allMonths.length)).fill(null)];
+      const mData=allMonths.map(m=>({
+        m,
+        tot:data.filter(p=>p.data?.slice(3,10)===m).length,
+        gan:data.filter(p=>p.data?.slice(3,10)===m&&p.estado==='ganho').length,
+        avgTot:teamComs.length>0?teamAll.filter(p=>p.data?.slice(3,10)===m).length/nComs:0,
+        avgGan:teamComs.length>0?teamAll.filter(p=>p.data?.slice(3,10)===m&&p.estado==='ganho').length/nComs:0
+      }));
+      const maxV=Math.max(...mData.map(d=>Math.max(d.tot,d.avgTot)),1,10);
+      const xStep=iW/nSlots;
+      const xPos=i=>pad.l+(i+0.5)*xStep;
+      const yScale=v=>pad.t+iH-(v/maxV*iH);
+      let svg='<svg width="'+W+'" height="'+H+'" style="overflow:visible">';
+      for(let i=0;i<=4;i++){
+        const y=pad.t+(iH/4*i);
+        const val=Math.round(maxV-(maxV/4*i));
+        svg+='<line x1="'+pad.l+'" y1="'+y+'" x2="'+(W-pad.r)+'" y2="'+y+'" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>';
+        svg+='<text x="'+(pad.l-8)+'" y="'+(y+4)+'" text-anchor="end" font-size="10" fill="var(--muted)">'+val+'</text>';
+      }
+      // Bars for total
+      const barW=Math.max(xStep*0.45,8);
+      mData.forEach((d,i)=>{
+        const bH=Math.max(d.tot/maxV*iH,2);
+        svg+='<rect x="'+(xPos(i)-barW/2)+'" y="'+(pad.t+iH-bH)+'" width="'+barW+'" height="'+bH+'" fill="#E60000" opacity="0.15" rx="3"/>';
+        svg+='<rect x="'+(xPos(i)-barW/2)+'" y="'+(pad.t+iH-bH)+'" width="'+barW+'" height="'+bH+'" fill="none" stroke="#E60000" stroke-width="0.5" opacity="0.4" rx="3"/>';
+      });
+      // Team avg line (dashed, only in personal view)
+      if(isPersonal&&mData.length>1){
+        const avgPts=mData.map((d,i)=>xPos(i)+','+yScale(d.avgGan)).join(' ');
+        svg+='<polyline points="'+avgPts+'" fill="none" stroke="rgba(128,128,128,0.5)" stroke-width="1.5" stroke-dasharray="4,3" stroke-linejoin="round"/>';
+      }
+      // Ganhos line
+      if(mData.length>1){
+        const pts=mData.map((d,i)=>xPos(i)+','+yScale(d.gan)).join(' ');
+        svg+='<polyline points="'+pts+'" fill="none" stroke="#1D9E75" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      }
+      // Dots + labels
+      mData.forEach((d,i)=>{
+        svg+='<circle cx="'+xPos(i)+'" cy="'+yScale(d.gan)+'" r="4" fill="#1D9E75" stroke="white" stroke-width="1.5"/>';
+        if(d.tot>0) svg+='<text x="'+xPos(i)+'" y="'+(yScale(d.tot)-7)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+d.tot+'</text>';
+      });
+      displaySlots.forEach((m,i)=>{
+        svg+='<text x="'+xPos(i)+'" y="'+(H-6)+'" text-anchor="middle" font-size="10" fill="var(--muted)">'+(m||'')+'</text>';
+      });
+      // Legend
+      svg+='<text x="'+pad.l+'" y="'+(H-20)+'" font-size="9" fill="#1D9E75">— ganhos</text>';
+      if(isPersonal) svg+='<text x="'+(pad.l+50)+'" y="'+(H-20)+'" font-size="9" fill="rgba(128,128,128,0.7)">- - média equipa</text>';
+      svg+='</svg>';
+      chartEl.innerHTML=svg;
+    } else {
+      chartEl.innerHTML='<div style="color:var(--muted);text-align:center;padding:60px 0;font-size:13px">Sem dados</div>';
+    }
+  }
+
+  // ── Expiry alerts ────────────────────────────────────────────────
+  const alertEl=document.getElementById('db-alertas');
+  if(alertEl){
+    const today2=new Date();today2.setHours(0,0,0,0);
+    let pending=LD.filter(p=>p.estado==='pendente'&&p.validade);
+    if(filteredCom) pending=pending.filter(p=>p.comercial===filteredCom);
+    else if(isComercial) pending=pending.filter(p=>p.comercial===CU.nome);
+    const expiring=pending.map(p=>{
+      const parts=p.validade.split('/');if(parts.length<3)return null;
+      const d=new Date(parseInt(parts[2]),parseInt(parts[1])-1,parseInt(parts[0]));
+      return {...p,diasRestantes:Math.round((d-today2)/(1000*60*60*24))};
+    }).filter(x=>x&&x.diasRestantes<=7).sort((a,b)=>a.diasRestantes-b.diasRestantes);
+    if(expiring.length>0){
+      alertEl.innerHTML='<div style="background:var(--surface2);border-radius:12px;padding:16px;border-left:4px solid #BA7517">'
+        +'<div style="font-size:13px;font-weight:700;color:#BA7517;margin-bottom:10px">Propostas a expirar em breve ('+expiring.length+')</div>'
+        +expiring.map(p=>{
+          const col=p.diasRestantes<0?'var(--red)':p.diasRestantes<=3?'#E67E22':'#F1C40F';
+          const label=p.diasRestantes<0?'Expirada há '+Math.abs(p.diasRestantes)+' dias':p.diasRestantes===0?'Expira hoje':'Expira em '+p.diasRestantes+' dia'+(p.diasRestantes===1?'':'s');
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
+            +'<div><span style="font-weight:600;font-size:12px">'+eh(p.cliente)+'</span> <span style="color:var(--muted);font-size:11px">· '+eh(p.comercial)+'</span></div>'
+            +'<div style="font-size:11px;font-weight:700;color:'+col+';white-space:nowrap">'+label+'</div></div>';
+        }).join('')+'</div>';
+    } else { alertEl.innerHTML=''; }
+  }
+
+  // ── Ranking ──────────────────────────────────────────────────────
+  const tbody=document.getElementById('db-rank');
+  if(tbody){
+    tbody.innerHTML='';
+    const byCom={};
+    allActive.forEach(p=>{if(!byCom[p.comercial])byCom[p.comercial]={tot:0,gan:0,pip:0};byCom[p.comercial].tot++;if(p.estado==='ganho')byCom[p.comercial].gan++;if(p.estado==='pendente')byCom[p.comercial].pip+=(parseFloat(p.mensalidade)||0);});
+    Object.entries(byCom).sort((a,b)=>b[1].gan-a[1].gan).forEach(([nome,v],i)=>{
+      const t2=v.tot>0?Math.round(v.gan/v.tot*100):0;
+      const isMe=nome===CU?.nome;
+      const tr=document.createElement('tr');
+      if(isMe) tr.style.cssText='background:rgba(230,0,0,0.06);font-weight:600';
+      else if(i<3) tr.className='rk'+(i+1);
+      tr.innerHTML='<td><span class="rn">'+(i+1)+'</span></td>'
+        +'<td style="font-weight:600'+(isMe?';color:var(--red)':'')+'">'+(isMe?'▶ ':'')+eh(nome)+'</td>'
+        +'<td>'+v.tot+'</td>'
+        +'<td style="color:var(--green);font-weight:600">'+v.gan+'</td>'
+        +'<td style="color:'+(t2>=50?'var(--green)':'var(--orange)')+';font-weight:600">'+t2+'%</td>';
+      tbody.appendChild(tr);
+    });
+    if(!tbody.innerHTML)tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Sem dados</td></tr>';
+  }
+
+  // ── Team comparison table (aggregate view) ───────────────────────
   const ct=document.getElementById('comp-body');
-  if(ct){
+  if(ct&&!isPersonal){
     ct.innerHTML='';
     const months=[...new Set(LD.map(p=>p.data?.slice(3,10)).filter(Boolean))].sort().reverse().slice(0,3);
     CM.forEach(c=>{
       const row=document.createElement('tr');
       let cells='<td><div style="display:flex;align-items:center;gap:8px"><div class="uav" style="width:24px;height:24px;font-size:10px">'+(c.fotoURL?'<img src="'+c.fotoURL+'" alt="">':IN(c.nome))+'</div><span style="font-weight:600">'+eh(c.nome)+'</span></div></td>';
       let totalAll=0,ganhoAll=0;
-      months.forEach(m=>{
-        const ml=LD.filter(p=>p.comercial===c.nome&&p.data?.slice(3,10)===m);
-        const mg=ml.filter(p=>p.estado==='ganho').length;
-        totalAll+=ml.length;ganhoAll+=mg;
-        cells+='<td style="text-align:center">'+ml.length+(mg?'<span style="color:var(--green);font-size:10px;margin-left:3px">('+mg+'✓)</span>':'')+'</td>';
-      });
-      // Fill empty months
+      months.forEach(m=>{const ml=LD.filter(p=>p.comercial===c.nome&&p.data?.slice(3,10)===m);const mg=ml.filter(p=>p.estado==='ganho').length;totalAll+=ml.length;ganhoAll+=mg;cells+='<td style="text-align:center">'+ml.length+(mg?'<span style="color:var(--green);font-size:10px;margin-left:3px">('+mg+'✓)</span>':'')+'</td>';});
       for(let i=months.length;i<3;i++) cells+='<td style="text-align:center;color:var(--muted)">—</td>';
       const taxa=totalAll>0?Math.round(ganhoAll/totalAll*100):0;
       cells+='<td style="text-align:center;font-weight:700">'+totalAll+'</td>';
-      cells+='<td style="text-align:center;font-weight:700;color:'+((totalAll===0)?'var(--muted)':taxa>=50?'var(--green)':'var(--orange)')+'">'+( totalAll>0?taxa+'%':'—')+'</td>';
-      row.innerHTML=cells;
-      ct.appendChild(row);
+      cells+='<td style="text-align:center;font-weight:700;color:'+((totalAll===0)?'var(--muted)':taxa>=50?'var(--green)':'var(--orange)')+'">'+(totalAll>0?taxa+'%':'—')+'</td>';
+      row.innerHTML=cells;ct.appendChild(row);
     });
+  } else if(ct) ct.innerHTML='';
+
+  // ── Month selector ───────────────────────────────────────────────
+  if(mesSel){
+    const cur=mesSel.value;
+    const months=new Set(LD.map(p=>p.data?.slice(3,10)).filter(Boolean));
+    mesSel.innerHTML='<option value="">Todos os meses</option>';
+    [...months].sort().reverse().forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===cur)o.selected=true;mesSel.appendChild(o);});
   }
-  const sel=document.getElementById('db-mes');const cur=sel.value;
-  const months=new Set(LD.map(p=>p.data?.slice(3,10)).filter(Boolean));
-  sel.innerHTML='<option value="">Todos os meses</option>';
-  [...months].sort().reverse().forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===cur)o.selected=true;sel.appendChild(o);});
 }
+
 
 function resetP(){
   if(SAVED&&!confirm('Tem a certeza? A proposta gravada mantém-se no registo.'))return;
@@ -1443,6 +1688,7 @@ function resetP(){
   document.getElementById('cm').value='';document.getElementById('cd').value='24';
   lastDuracao='24';
   const ccR=document.getElementById('ccoment');if(ccR)ccR.value='';
+  const cvR=document.getElementById('cvalidade');if(cvR)cvR.value='';
   const cpR=document.getElementById('cplafond');if(cpR)cpR.value='';
   document.getElementById('cli-search').value='';
   SV=[];SID=0;TIPO=null;CTA='b';
