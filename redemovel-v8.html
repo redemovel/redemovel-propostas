@@ -202,7 +202,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
   <nav class="nav">
     <button class="nb" onclick="goPage(this,'proposta')">📝 Nova Proposta</button>
     <button class="nb" onclick="goPage(this,'minhas')">📋 Minhas Propostas</button>
-    <button class="nb nb-coord act" onclick="goPage(this,'dashboard')">📊 Dashboard</button>
+    <button class="nb act" onclick="goPage(this,'dashboard')">📊 Dashboard</button>
     <button class="nb nb-coord hid" onclick="goPage(this,'equipa')">👥 Equipa</button>
   </nav>
 
@@ -736,7 +736,30 @@ function selectClient(c){
 
 document.addEventListener('click',e=>{
   if(!e.target.closest('.cli-search-wrap'))document.getElementById('cli-results').classList.remove('open');
+  if(!e.target.closest('[id^="tf-inp-"]')&&!e.target.closest('[id^="tf-res-"]')){
+    document.querySelectorAll('[id^="tf-res-"]').forEach(el=>el.classList.remove('open'));
+  }
 });
+
+function searchTariff(id,q){
+  const res=document.getElementById('tf-res-'+id);
+  if(!res)return;
+  const matches=q?TF.filter(t=>t.name.toLowerCase().includes(q.toLowerCase())):TF;
+  res.innerHTML='';
+  if(matches.length===0){res.classList.remove('open');return;}
+  matches.slice(0,30).forEach(t=>{
+    const div=document.createElement('div');div.className='cli-item';
+    div.innerHTML='<div class="cli-name">'+eh(t.name)+'</div>';
+    div.onclick=()=>{
+      upSvc(id,'tariff',t.name);
+      document.getElementById('tf-inp-'+id).value=t.name;
+      res.classList.remove('open');
+      markU();
+    };
+    res.appendChild(div);
+  });
+  res.classList.add('open');
+}
 
 function fillCom(){
   const nm=document.getElementById('sc').value;
@@ -793,7 +816,6 @@ function upSvc(id,f,v){const s=SV.find(s=>s.id===id);if(s){s[f]=v;markU();}}
 function renderSV(){
   const el=document.getElementById('svl');el.innerHTML='';
   SV.forEach(s=>{
-    const opts=TF.map(t=>'<option value="'+eh(t.name)+'"'+(s.tariff===t.name?' selected':'')+'>'+eh(t.name)+'</option>').join('');
     const durOpts=['6','12','18','24','30','36','42','48'].map(v=>'<option value="'+v+'"'+(s.duracao===v?' selected':'')+'>'+v+' m</option>').join('');
     const div=document.createElement('div');div.className='svr';
     // Extra refs for number type
@@ -810,7 +832,7 @@ function renderSV(){
     div.innerHTML='<div class="svf"><div class="ttg"><button class="ttb'+(s.type==='number'?' act':'')+'" onclick="stSvc('+s.id+',\'number\')">📱 Número</button><button class="ttb'+(s.type==='qty'?' act':'')+'" onclick="stSvc('+s.id+',\'qty\')">🔢 Quantidade</button></div>'
       +(s.type==='number'?'<input class="fs" placeholder="Ex: 912 345 678" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">':'<input class="fs" type="number" min="1" placeholder="Qtd. (ex: 10)" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">')
       +extraRefs+addRefBtn
-      +'<select class="fs" style="margin-top:4px" onchange="upSvc('+s.id+',\'tariff\',this.value)"><option value="">— Tarifário —</option>'+opts+'</select>'
+      +'<div class="cli-search-wrap" style="margin-top:4px"><input class="fs" id="tf-inp-'+s.id+'" placeholder="🔍 Pesquisar tarifário…" autocomplete="off" value="'+eh(s.tariff)+'" oninput="searchTariff('+s.id+',this.value)" onfocus="searchTariff('+s.id+',this.value)"><div class="cli-results" id="tf-res-'+s.id+'"></div></div>'
       +'<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><select class="fs" style="flex:1" onchange="upSvcDur('+s.id+',this.value)"><option value="">— Duração —</option>'+durOpts+'</select><input class="fs" style="flex:1" placeholder="Nota opcional…" value="'+eh(s.note)+'" oninput="upSvc('+s.id+',\'note\',this.value)"></div>'
       +'</div><button class="rmb" onclick="rmSvc('+s.id+')" style="margin-top:52px">×</button>';
     el.appendChild(div);
