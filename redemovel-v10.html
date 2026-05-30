@@ -418,6 +418,18 @@ const VDF="data:image/jpeg;base64,/9j/7gAOQWRvYmUAZAAAAAAA/9sAQwAFAwQEBAMFBAQEBQ
 
 let CU=null,TF=[],CM=[],LD=[],CL=[],SV=[],SID=0,TIPO=null,CTA='b',SAVED=false,PREVIEWED=false,TF_HEADERS=null,lastDuracao='24';
 
+// ── Gera referência única AAMMDD-HHMMSS-XXX ──────────────────────────
+function genRef(){
+  const n=new Date();
+  const pad=v=>String(v).padStart(2,'0');
+  const yy=String(n.getFullYear()).slice(2);
+  const date=yy+pad(n.getMonth()+1)+pad(n.getDate());
+  const time=pad(n.getHours())+pad(n.getMinutes())+pad(n.getSeconds());
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const rnd=Array.from({length:3},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+  return date+'-'+time+'-'+rnd;
+}
+
 const BT=[
   {name:"BIZ STD 2025",dados:"300GB (até 500Mbps)",chamadas:"5000 min/SMS Nac. e Roaming EEE e UK",partilha:"10GB",roaming:"56,09GB",internacional:"",roamingTDR:"",fixo:"Nº Fixo + One Net",equipamentos:"",obs:""},
   {name:"BIZ MAX 2025",dados:"500GB (até 500Mbps)",chamadas:"5000 min/SMS Nac. e Roaming EEE e UK",partilha:"50GB",roaming:"72,12GB",internacional:"500 min/SMS Europa/USA/Canadá",roamingTDR:"",fixo:"Nº Fixo + One Net",equipamentos:"",obs:""},
@@ -632,6 +644,31 @@ async function loadLogAndClients(){
           validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[12]||'15')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
+      // ── Migrar IDs legados (numéricos ou P+timestamp) para novo formato ──
+      LD.forEach(p=>{
+        if(/^\d+$/.test(p.id)||/^P\d+$/.test(p.id)){
+          // Gera referência baseada na data da proposta se possível
+          const parts=p.data?p.data.split('/'):[null,null,null];
+          let base='';
+          if(parts.length===3&&parts[2]){
+            const yy=String(parts[2]).slice(2);
+            const mm=String(parts[1]).padStart(2,'0');
+            const dd=String(parts[0]).padStart(2,'0');
+            base=yy+mm+dd;
+          } else {
+            const n=new Date();
+            base=String(n.getFullYear()).slice(2)+String(n.getMonth()+1).padStart(2,'0')+String(n.getDate()).padStart(2,'0');
+          }
+          const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          const rnd=Array.from({length:3},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+          p.id=base+'-000000-'+rnd;
+          p._legacyMigrated=true;
+        }
+      });
+      // ── Debug alertas de validade ──
+      const pendV=LD.filter(p=>p.estado==='pendente');
+      console.log('Pendentes total:',pendV.length,'Com validade:',pendV.filter(p=>p.validade&&p.validade!=='undefined'&&p.validade.trim()).length);
+      if(pendV.length>0)console.log('Exemplo validade[0]:',JSON.stringify({id:pendV[0].id,validade:pendV[0].validade,estado:pendV[0].estado}));
       console.log('Log loaded:',LD.length,'entries');
       renderM();
       renderDB();
@@ -899,6 +936,8 @@ function genPrev(){
   const validadeDate=new Date();validadeDate.setDate(validadeDate.getDate()+validadeDias);
   const validadeStr=validadeDate.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});
   const today=new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'long',year:'numeric'});
+  // Referência da proposta (usa a que está gravada ou gera uma prévia)
+  const prevRef=window._currentPropRef||(window._currentPropRef=genRef());
   let rows='';let hasSvc=false;
   SV.forEach(s=>{
     if(!s.tariff)return;hasSvc=true;
@@ -923,7 +962,7 @@ function genPrev(){
   const doc=document.getElementById('pdoc');
   doc.style.display='block';document.getElementById('pep').style.display='none';
   doc.innerHTML='<div class="ph"><div class="phl"><img src="'+BADGE+'" class="plogo" alt="Redemóvel"><div><div class="pcn">Redemóvel</div><div class="pcs">Agente Autorizado Vodafone Business</div></div></div><div class="pab"><div class="pan">'+eh(com?.nome||'')+'</div><div class="pac">'+eh([com?.telefone,com?.email].filter(Boolean).join(' · '))+'</div></div></div>'
-  +'<div class="pbdy"><div class="pdt">'+today+'</div>'+tb+'<p class="psal">Estimado Cliente <span>'+eh(cli)+'</span>,</p><p class="pint">'+intro+'</p>'
+  +'<div class="pbdy"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px"><div class="pdt">'+today+'</div><div style="font-size:10px;color:#aaa;font-family:monospace;letter-spacing:.04em">Ref. '+prevRef+'</div></div>'+tb+'<p class="psal">Estimado Cliente <span>'+eh(cli)+'</span>,</p><p class="pint">'+intro+'</p>'
   +'<div class="psl">Serviços Propostos</div>'
   +'<table class="ptbl"><thead><tr><th style="width:110px">Referência</th><th>Tarifário / Características</th><th style="width:80px;text-align:center">Duração</th></tr></thead><tbody>'+rows+'</tbody></table>'
   +(comentario?'<div style="background:#F5F5F5;border-radius:8px;padding:12px 16px;margin-bottom:18px;font-size:13px;color:#444;line-height:1.6">'+eh(comentario)+'</div>':'')
@@ -968,7 +1007,8 @@ function saveP(){
 
 async function confirmSave(){
   closeM('mo-save');
-  const id='P'+Date.now();
+  const id=window._currentPropRef||genRef();
+  window._currentPropRef=null;
   const data=new Date().toLocaleDateString('pt-PT');
   const cNm=document.getElementById('sc').value||CU?.nome||'';
   const cli=document.getElementById('cn').value.trim();
@@ -1393,6 +1433,7 @@ function editL(id){
 
   // Store original ID to mark as substituída when saved
   window._editingOriginalId = id;
+  window._currentPropRef = null; // força nova referência para a versão editada
   PREVIEWED=true; // editL calls genPrev() above
   toast('✏️','Proposta carregada para edição — grave para criar nova versão');
 }
@@ -1638,25 +1679,50 @@ function renderDB(){
   const alertEl=document.getElementById('db-alertas');
   if(alertEl){
     const today2=new Date();today2.setHours(0,0,0,0);
-    let pending=LD.filter(p=>p.estado==='pendente'&&p.validade);
+    // Filtra pendentes com validade preenchida (aceita qualquer string não vazia)
+    let pending=LD.filter(p=>p.estado==='pendente'&&p.validade&&p.validade.trim()&&p.validade!=='undefined');
     if(filteredCom) pending=pending.filter(p=>p.comercial===filteredCom);
     else if(isComercial) pending=pending.filter(p=>p.comercial===CU.nome);
     const expiring=pending.map(p=>{
-      const parts=p.validade.split('/');if(parts.length<3)return null;
-      const d=new Date(parseInt(parts[2]),parseInt(parts[1])-1,parseInt(parts[0]));
+      // Aceita dd/mm/aaaa ou dd-mm-aaaa ou aaaa-mm-dd
+      let d=null;
+      const v=p.validade.trim();
+      if(/^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(v)){
+        const sep=v.includes('/')? '/':'-';
+        const pts=v.split(sep);
+        d=new Date(parseInt(pts[2]),parseInt(pts[1])-1,parseInt(pts[0]));
+      } else if(/^\d{4}[\/\-]\d{2}[\/\-]\d{2}$/.test(v)){
+        d=new Date(v);
+      } else {
+        d=new Date(v); // tenta parse genérico
+      }
+      if(!d||isNaN(d.getTime()))return null;
       return {...p,diasRestantes:Math.round((d-today2)/(1000*60*60*24))};
     }).filter(x=>x&&x.diasRestantes<=7).sort((a,b)=>a.diasRestantes-b.diasRestantes);
     if(expiring.length>0){
       alertEl.innerHTML='<div style="background:var(--surface2);border-radius:12px;padding:16px;border-left:4px solid #BA7517">'
-        +'<div style="font-size:13px;font-weight:700;color:#BA7517;margin-bottom:10px">Propostas a expirar em breve ('+expiring.length+')</div>'
+        +'<div style="font-size:13px;font-weight:700;color:#BA7517;margin-bottom:10px">⚠ Propostas a expirar em breve ('+expiring.length+')</div>'
         +expiring.map(p=>{
           const col=p.diasRestantes<0?'var(--red)':p.diasRestantes<=3?'#E67E22':'#F1C40F';
-          const label=p.diasRestantes<0?'Expirada há '+Math.abs(p.diasRestantes)+' dias':p.diasRestantes===0?'Expira hoje':'Expira em '+p.diasRestantes+' dia'+(p.diasRestantes===1?'':'s');
+          const label=p.diasRestantes<0?'Expirada há '+Math.abs(p.diasRestantes)+' dia'+(Math.abs(p.diasRestantes)===1?'':'s'):p.diasRestantes===0?'Expira hoje':'Expira em '+p.diasRestantes+' dia'+(p.diasRestantes===1?'':'s');
           return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">'
-            +'<div><span style="font-weight:600;font-size:12px">'+eh(p.cliente)+'</span> <span style="color:var(--muted);font-size:11px">· '+eh(p.comercial)+'</span></div>'
+            +'<div><span style="font-weight:600;font-size:12px">'+eh(p.cliente)+'</span> <span style="color:var(--muted);font-size:11px">· '+eh(p.comercial)+'</span>'
+            +'<span style="color:var(--muted);font-size:10px;margin-left:6px;font-family:monospace">'+eh(p.id)+'</span></div>'
             +'<div style="font-size:11px;font-weight:700;color:'+col+';white-space:nowrap">'+label+'</div></div>';
         }).join('')+'</div>';
-    } else { alertEl.innerHTML=''; }
+    } else {
+      // Mostra aviso se há pendentes mas sem validade (ajuda a diagnosticar)
+      const semVal=LD.filter(p=>p.estado==='pendente'&&(!p.validade||!p.validade.trim()||p.validade==='undefined'));
+      if(semVal.length>0){
+        alertEl.innerHTML='<div style="background:var(--surface2);border-radius:8px;padding:12px 16px;border-left:4px solid var(--muted)">'
+          +'<div style="font-size:12px;color:var(--muted)">✓ Sem propostas a expirar nos próximos 7 dias</div>'
+          +'<div style="font-size:11px;color:var(--muted);margin-top:4px">⚠ '+semVal.length+' proposta(s) pendente(s) sem validade definida no Sheet (coluna L)</div>'
+          +'</div>';
+      } else {
+        alertEl.innerHTML='<div style="background:var(--surface2);border-radius:8px;padding:12px 16px;border-left:4px solid var(--green)">'
+          +'<div style="font-size:12px;color:var(--muted)">✓ Sem propostas a expirar nos próximos 7 dias</div></div>';
+      }
+    }
   }
 
   // ── Ranking ──────────────────────────────────────────────────────
@@ -1718,7 +1784,7 @@ function resetP(){
   const cvR=document.getElementById('cvalidade');if(cvR)cvR.value='';
   const cpR=document.getElementById('cplafond');if(cpR)cpR.value='';
   document.getElementById('cli-search').value='';
-  SV=[];SID=0;TIPO=null;CTA='b';
+  SV=[];SID=0;TIPO=null;CTA='b';window._currentPropRef=null;
   ['tp-novo','tp-refid','tp-upgrade'].forEach(id=>document.getElementById(id).className='tyc');
   selCTA('b');renderSV();addSvc();
   document.getElementById('pdoc').style.display='none';document.getElementById('pdoc').innerHTML='';
