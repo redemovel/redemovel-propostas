@@ -539,7 +539,9 @@ async function loadLogAndClients(){
           duracao:String(row['Duracao']||row['Fixo']||vals[7]||''),
           estado:String(row['Estado']||row['Equipamentos']||vals[8]||'pendente').toLowerCase(),
           notas:String(row['Notas']||row['Obs']||vals[9]||''),
-          cta:String(row['CTA']||vals[10]||'b')
+          cta:String(row['CTA']||vals[10]||'b'),
+          validade:String(row['validade']||row['Validade']||vals[11]||''),
+          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[12]||'15')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       console.log('Log loaded:',LD.length,'entries');
@@ -625,7 +627,9 @@ async function loadLogAndClients(){
           duracao:String(row['Duracao']||row['Fixo']||vals[7]||''),
           estado:String(row['Estado']||row['Equipamentos']||vals[8]||'pendente').toLowerCase(),
           notas:String(row['Notas']||row['Obs']||vals[9]||''),
-          cta:String(row['CTA']||vals[10]||'b')
+          cta:String(row['CTA']||vals[10]||'b'),
+          validade:String(row['validade']||row['Validade']||vals[11]||''),
+          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[12]||'15')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       console.log('Log loaded:',LD.length,'entries');
