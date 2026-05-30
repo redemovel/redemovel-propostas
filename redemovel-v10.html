@@ -552,8 +552,8 @@ async function loadLogAndClients(){
           estado:String(row['Estado']||row['Equipamentos']||vals[8]||'pendente').toLowerCase(),
           notas:String(row['Notas']||row['Obs']||vals[9]||''),
           cta:String(row['CTA']||vals[10]||'b'),
-          validade:String(row['validade']||row['Validade']||vals[11]||''),
-          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[12]||'15')
+          validade:String(row['validade']||row['Validade']||vals[12]||''),
+          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       console.log('Log loaded:',LD.length,'entries');
@@ -640,8 +640,8 @@ async function loadLogAndClients(){
           estado:String(row['Estado']||row['Equipamentos']||vals[8]||'pendente').toLowerCase(),
           notas:String(row['Notas']||row['Obs']||vals[9]||''),
           cta:String(row['CTA']||vals[10]||'b'),
-          validade:String(row['validade']||row['Validade']||vals[11]||''),
-          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[12]||'15')
+          validade:String(row['validade']||row['Validade']||vals[12]||''),
+          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       // ── Migrar IDs legados (numéricos ou P+timestamp) para novo formato ──
@@ -668,7 +668,7 @@ async function loadLogAndClients(){
       // ── Debug alertas de validade ──
       const pendV=LD.filter(p=>p.estado==='pendente');
       console.log('Pendentes total:',pendV.length,'Com validade:',pendV.filter(p=>p.validade&&p.validade!=='undefined'&&p.validade.trim()).length);
-      if(pendV.length>0)console.log('Exemplo validade[0]:',JSON.stringify({id:pendV[0].id,validade:pendV[0].validade,estado:pendV[0].estado}));
+      if(pendV.length>0)console.log('Exemplo validade[0]:',JSON.stringify({id:pendV[0].id,validade:pendV[0].validade,validadeDias:pendV[0].validadeDias,estado:pendV[0].estado}));
       console.log('Log loaded:',LD.length,'entries');
       renderM();
       renderDB();
