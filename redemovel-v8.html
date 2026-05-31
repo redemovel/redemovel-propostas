@@ -30,7 +30,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
 .spin{display:inline-block;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 #app{display:none}
-.hdr{background:var(--panel);border-bottom:1px solid var(--border);padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:58px;position:sticky;top:0;z-index:50}
+.hdr{background:var(--panel);border-bottom:1px solid var(--border);padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:58px;position:sticky;top:0;z-index:50;overflow:visible}
 .hlogos{display:flex;align-items:center;gap:12px}
 .hrdm{height:26px;object-fit:contain}
 .hsep{width:1px;height:22px;background:var(--border2)}
@@ -145,6 +145,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
 .toast{position:fixed;bottom:28px;right:28px;background:var(--panel);color:var(--text);padding:12px 18px;border-radius:var(--r);font-size:13px;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:999;display:none;align-items:center;gap:8px;border-left:3px solid var(--red);animation:tsIn .2s ease}
 .toast.on{display:flex}
 @keyframes tsIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+@keyframes passPulse{0%,100%{opacity:1}50%{opacity:.6}}
 .frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .fi{background:var(--mid);border:1px solid var(--border2);color:var(--text);border-radius:var(--r);padding:7px 12px;font-family:'DM Sans',sans-serif;font-size:12px;outline:none;transition:border-color .2s}
 .fi:focus{border-color:var(--red)}
@@ -184,6 +185,32 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
 </div>
 
 <!-- APP -->
+<!-- ECRÃ MUDANÇA DE PASSWORD -->
+<div id="chpass" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:16px;padding:32px;width:100%;max-width:400px;margin:16px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="font-size:18px;font-weight:700;margin-bottom:4px;color:var(--text)">🔒 Alterar Password</div>
+    <div id="chpass-sub" style="font-size:13px;color:var(--muted);margin-bottom:24px"></div>
+    <div style="margin-bottom:14px">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px">Password actual</label>
+      <input id="cp-atual" type="password" class="fs" placeholder="Introduza a password actual" autocomplete="current-password">
+    </div>
+    <div style="margin-bottom:14px">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px">Nova password</label>
+      <input id="cp-nova" type="password" class="fs" placeholder="Mínimo 8 caracteres" autocomplete="new-password" oninput="checkPassStrength()">
+      <div id="cp-strength" style="margin-top:6px;font-size:11px"></div>
+    </div>
+    <div style="margin-bottom:20px">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px">Confirmar nova password</label>
+      <input id="cp-conf" type="password" class="fs" placeholder="Repita a nova password" autocomplete="new-password">
+    </div>
+    <div id="chpass-err" style="display:none;background:#fee;border:1px solid #fcc;border-radius:8px;padding:10px 14px;font-size:12px;color:#c00;margin-bottom:16px"></div>
+    <div style="display:flex;gap:10px">
+      <button id="chpass-cancel" class="btn" onclick="hideChangePass()" style="flex:1">Cancelar</button>
+      <button class="btn btn-p" onclick="submitChangePass()" style="flex:2">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div id="app">
   <header class="hdr">
     <div class="hlogos">
@@ -196,6 +223,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
         <div class="uav" id="hav"></div>
         <div><div class="uname" id="hnm"></div><div class="urole" id="hrl"></div></div>
       </div>
+      <button id="pass-badge" onclick="showChangePass(false)" style="border:none;cursor:pointer;font-size:11px;font-weight:700;border-radius:20px;padding:4px 10px;line-height:1.4;display:none;flex-shrink:0"></button>
       <button class="obtn" onclick="doLogout()">Sair</button>
     </div>
   </header>
@@ -510,10 +538,19 @@ async function doLogin(){
     const r=await fetch(SU+'?sheet=Comerciais&t='+Date.now());
     if(!r.ok)throw new Error('HTTP '+r.status);
     const data=await r.json();
-    const fresh=data.map(row=>({nome:row['Nome']||'',email:row['Email']||'',telefone:row['Telefone']||'',funcao:(row['Funcao']||'comercial').toLowerCase(),password:row['Password']||'',fotoURL:row['FotoURL']||'',vendedor:String(row['Vendedor']||'')})).filter(c=>c.nome);
+    const fresh=data.map(row=>({nome:row['Nome']||'',email:row['Email']||'',telefone:row['Telefone']||'',funcao:(row['Funcao']||'comercial').toLowerCase(),password:row['Password']||'',fotoURL:row['FotoURL']||'',vendedor:String(row['Vendedor']||''),ultimaAlteracao:row['UltimaAlteracao']||'',passAnterior:row['PassAnterior']||''})).filter(c=>c.nome);
     const user=fresh.find(c=>c.nome===nome&&c.password===pass);
     if(!user){errEl.textContent='Utilizador ou password incorretos';errEl.style.display='block';document.getElementById('lbtn').disabled=false;loadEl.style.display='none';return;}
     CM=fresh;CU=user;
+    // Verificar expiração de password
+    const diasRestPass=calcDiasPassExp(user.ultimaAlteracao);
+    if(diasRestPass<=0){
+      // Password expirada — forçar mudança antes de entrar
+      document.getElementById('ls').style.display='none';
+      showChangePass(true);
+      document.getElementById('lbtn').disabled=false;loadEl.style.display='none';
+      return;
+    }
     document.getElementById('ls').style.display='none';
     document.getElementById('app').style.display='block';
     setupApp();
@@ -597,10 +634,19 @@ async function doLogin(){
     const r=await fetch(SU+'?sheet=Comerciais&t='+Date.now());
     if(!r.ok)throw new Error('HTTP '+r.status);
     const data=await r.json();
-    const fresh=data.map(row=>({nome:row['Nome']||'',email:row['Email']||'',telefone:row['Telefone']||'',funcao:(row['Funcao']||'comercial').toLowerCase(),password:row['Password']||'',fotoURL:row['FotoURL']||'',vendedor:String(row['Vendedor']||'')})).filter(c=>c.nome);
+    const fresh=data.map(row=>({nome:row['Nome']||'',email:row['Email']||'',telefone:row['Telefone']||'',funcao:(row['Funcao']||'comercial').toLowerCase(),password:row['Password']||'',fotoURL:row['FotoURL']||'',vendedor:String(row['Vendedor']||''),ultimaAlteracao:row['UltimaAlteracao']||'',passAnterior:row['PassAnterior']||''})).filter(c=>c.nome);
     const user=fresh.find(c=>c.nome===nome&&c.password===pass);
     if(!user){errEl.textContent='Utilizador ou password incorretos';errEl.style.display='block';document.getElementById('lbtn').disabled=false;loadEl.style.display='none';return;}
     CM=fresh;CU=user;
+    // Verificar expiração de password
+    const diasRestPass=calcDiasPassExp(user.ultimaAlteracao);
+    if(diasRestPass<=0){
+      // Password expirada — forçar mudança antes de entrar
+      document.getElementById('ls').style.display='none';
+      showChangePass(true);
+      document.getElementById('lbtn').disabled=false;loadEl.style.display='none';
+      return;
+    }
     document.getElementById('ls').style.display='none';
     document.getElementById('app').style.display='block';
     setupApp();
@@ -677,8 +723,6 @@ async function loadLogAndClients(){
       });
       // ── Debug alertas de validade ──
       const pendV=LD.filter(p=>p.estado==='pendente');
-      console.log('Pendentes total:',pendV.length,'Com validade:',pendV.filter(p=>p.validade&&p.validade!=='undefined'&&p.validade.trim()).length);
-      if(pendV.length>0)console.log('Exemplo validade[0]:',JSON.stringify({id:pendV[0].id,validade:pendV[0].validade,validadeDias:pendV[0].validadeDias,estado:pendV[0].estado}));
       console.log('Log loaded:',LD.length,'entries');
       renderM();
       renderDB();
@@ -740,6 +784,127 @@ function setupApp(){
   } else {
     fillCom();addSvc();renderM();renderDB();
   }
+  updatePassBadge();
+}
+
+// ── Gestão de Password ────────────────────────────────────────────────────
+
+const PASS_DIAS=45; // dias até expirar
+let _passForced=false; // true se entrada foi bloqueada por expiração
+
+function calcDiasPassExp(ultimaAlteracao){
+  if(!ultimaAlteracao||ultimaAlteracao.trim()==='')return 999; // nunca alterou — considera ok (1ª vez)
+  // Aceita dd/mm/aaaa ou formato JS Date
+  let d=null;
+  const v=ultimaAlteracao.trim();
+  if(/^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(v)){
+    const sep=v.includes('/')?'/':'-';
+    const p=v.split(sep);
+    d=new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));
+  } else {
+    d=new Date(v);
+  }
+  if(!d||isNaN(d.getTime()))return 999;
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  return PASS_DIAS-Math.round((hoje-d)/(1000*60*60*24));
+}
+
+function updatePassBadge(){
+  const badge=document.getElementById('pass-badge');
+  if(!badge||!CU)return;
+  const dias=calcDiasPassExp(CU.ultimaAlteracao);
+  if(dias>15){badge.style.display='none';return;}
+  badge.style.display='inline-block';
+  if(dias<=0){
+    badge.textContent='🔒 Expirada!';
+    badge.style.background='var(--red)';badge.style.color='#fff';
+  } else if(dias===1){
+    badge.textContent='🔒 Amanhã!';
+    badge.style.background='#E60000';badge.style.color='#fff';
+  } else if(dias<=5){
+    badge.textContent='🔒 '+dias+' dias';
+    badge.style.background='#E67E22';badge.style.color='#fff';
+    badge.style.animation='passPulse 1.5s ease-in-out infinite';
+  } else {
+    badge.textContent='🔒 '+dias+' dias';
+    badge.style.background='#555';badge.style.color='#fff';
+    badge.style.animation='';
+  }
+}
+
+function showChangePass(forced){
+  _passForced=!!forced;
+  const sub=document.getElementById('chpass-sub');
+  const cancelBtn=document.getElementById('chpass-cancel');
+  if(forced){
+    sub.textContent='A tua password expirou. Define uma nova para continuar.';
+    cancelBtn.style.display='none';
+  } else {
+    const dias=calcDiasPassExp(CU?CU.ultimaAlteracao:'');
+    sub.textContent=dias<=0?'A tua password expirou.':'A tua password expira em '+dias+' dia'+(dias===1?'':'s')+'. Podes alterá-la agora.';
+    cancelBtn.style.display='';
+  }
+  document.getElementById('cp-atual').value='';
+  document.getElementById('cp-nova').value='';
+  document.getElementById('cp-conf').value='';
+  document.getElementById('cp-strength').textContent='';
+  document.getElementById('chpass-err').style.display='none';
+  document.getElementById('chpass').style.display='flex';
+}
+
+function hideChangePass(){
+  if(_passForced)return; // não permite fechar se forçado
+  document.getElementById('chpass').style.display='none';
+}
+
+function checkPassStrength(){
+  const v=document.getElementById('cp-nova').value;
+  const el=document.getElementById('cp-strength');
+  if(!v){el.textContent='';return;}
+  const erros=[];
+  if(v.length<8)erros.push('mín. 8 caracteres');
+  if(!/[A-Z]/.test(v))erros.push('1 maiúscula');
+  if(!/[0-9]/.test(v))erros.push('1 número');
+  if(erros.length===0){el.textContent='✓ Password válida';el.style.color='var(--green)';}
+  else{el.textContent='Falta: '+erros.join(', ');el.style.color='var(--red)';}
+}
+
+async function submitChangePass(){
+  const atual=document.getElementById('cp-atual').value;
+  const nova=document.getElementById('cp-nova').value;
+  const conf=document.getElementById('cp-conf').value;
+  const errEl=document.getElementById('chpass-err');
+  errEl.style.display='none';
+  const showErr=msg=>{errEl.textContent=msg;errEl.style.display='block';};
+  if(!CU){showErr('Sessão inválida. Faz login novamente.');return;}
+  if(atual!==CU.password){showErr('Password actual incorrecta.');return;}
+  if(nova.length<8||!/[A-Z]/.test(nova)||!/[0-9]/.test(nova)){showErr('A nova password não cumpre os requisitos (mín. 8 caracteres, 1 maiúscula, 1 número).');return;}
+  if(nova!==conf){showErr('As passwords não coincidem.');return;}
+  if(nova===atual){showErr('A nova password tem de ser diferente da actual.');return;}
+  if(CU.passAnterior&&nova===CU.passAnterior){showErr('A nova password não pode ser igual à anterior.');return;}
+  // Gravar no Sheet
+  try{
+    const hoje=new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});
+    const resp=await fetch(SU+'?action=updatePassword',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'updatePassword',nome:CU.nome,novaPassword:nova,ultimaAlteracao:hoje}),redirect:'follow'});
+    const txt=await resp.text();
+    if(txt!=='PASS_UPDATED'){showErr('Erro ao guardar: '+txt);return;}
+    // Actualizar CU em memória
+    CU.passAnterior=CU.password;
+    CU.password=nova;
+    CU.ultimaAlteracao=hoje;
+    // Actualizar CM também
+    const cm=CM.find(c=>c.nome===CU.nome);
+    if(cm){cm.passAnterior=cm.password;cm.password=nova;cm.ultimaAlteracao=hoje;}
+    document.getElementById('chpass').style.display='none';
+    toast('✓','Password alterada com sucesso!');
+    if(_passForced){
+      // Agora pode entrar
+      document.getElementById('app').style.display='block';
+      setupApp();loadLogAndClients();
+    } else {
+      updatePassBadge();
+    }
+  }catch(e){showErr('Erro de ligação: '+e.message);}
 }
 
 function doLogout(){
