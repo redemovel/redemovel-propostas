@@ -1171,12 +1171,14 @@ function saveP(){
   const cNm=document.getElementById('sc').value;
   const tarif=SV.filter(s=>s.tariff).map(s=>{
     const dur=s.duracao?'['+s.duracao+'m]':'';
+    const t=TF.find(x=>x.name===s.tariff);
+    const phc=t?.refPHC?(' ['+t.refPHC+']'):'';
     if(s.type==='number'&&s.refs&&s.refs.length>0){
       const allRefs=[s.ref,...s.refs].filter(Boolean);
-      return allRefs.map(r=>r+' '+s.tariff+(dur?' '+dur:'')).join('; ');
+      return allRefs.map(r=>r+' '+s.tariff+(dur?' '+dur:'')+phc).join('; ');
     }
     const ref=s.type==='number'?(s.ref||''):(s.ref?s.ref+'×':'');
-    return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'');
+    return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'')+phc;
   }).join('; ');
   document.getElementById('mo-save-b').innerHTML='<div style="display:flex;flex-direction:column;gap:14px;font-size:13px"><p style="color:var(--muted);margin-bottom:4px">Confirme antes de gravar:</p><div style="background:var(--mid);border-radius:var(--r);padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">CLIENTE</div><div style="font-weight:600">'+eh(cli)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">TIPO</div><div style="margin-top:4px">'+TB(TIPO)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">COMERCIAL</div><div>'+eh(cNm)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">MENSALIDADE</div><div style="font-weight:700;color:var(--red)">'+(mens?parseFloat(mens).toFixed(2).replace('.',',')+' € + IVA':'—')+'</div></div></div>'+(tarif?'<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">SERVIÇOS</div><div style="font-size:12px;line-height:1.6">'+eh(tarif)+'</div></div>':'')+'</div>';
   openM('mo-save');
@@ -1192,19 +1194,20 @@ async function confirmSave(){
   const cli=document.getElementById('cn').value.trim();
   const tarif=SV.filter(s=>s.tariff).map(s=>{
     const dur=s.duracao?'['+s.duracao+'m]':'';
+    const t=TF.find(x=>x.name===s.tariff);
+    const phc=t?.refPHC?(' ['+t.refPHC+']'):'';
     if(s.type==='number'&&s.refs&&s.refs.length>0){
       const allRefs=[s.ref,...s.refs].filter(Boolean);
-      return allRefs.map(r=>r+' '+s.tariff+(dur?' '+dur:'')).join('; ');
+      return allRefs.map(r=>r+' '+s.tariff+(dur?' '+dur:'')+phc).join('; ');
     }
     const ref=s.type==='number'?(s.ref||''):(s.ref?s.ref+'×':'');
-    return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'');
+    return (ref?ref+' ':'')+s.tariff+(dur?' '+dur:'')+phc;
   }).join('; ');
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
   const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
   const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
-  const refPHC=SV.filter(s=>s.tariff).map(s=>{const t=TF.find(x=>x.name===s.tariff);return t?.refPHC||'';}).filter(Boolean).join('; ');
-  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,refPHC};
+  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG};
   LD.push(entry);SAVED=true;PREVIEWED=false;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
   setBtn(true);
@@ -1544,7 +1547,7 @@ async function updSt(id,estado){
 
 function viewL(id){
   const p=LD.find(x=>x.id===id);if(!p)return;
-  document.getElementById('mo-view-b').innerHTML='<div style="display:flex;flex-direction:column;gap:12px;font-size:13px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">CLIENTE</div><div style="font-weight:600">'+eh(p.cliente||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">COMERCIAL</div><div>'+eh(p.comercial||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">TIPO</div><div style="margin-top:4px">'+TB(p.tipo)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">SERVIÇOS</div><div style="line-height:1.6">'+eh(p.tarif||'—')+(p.refPHC?' <span style="color:var(--muted);font-size:11px">['+eh(p.refPHC)+']</span>':'')+'</div></div><div style="display:flex;gap:24px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">MENSALIDADE</div><div style="font-weight:700;color:var(--red)">'+(p.mensalidade?p.mensalidade+' €':'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DURAÇÃO</div><div>'+(p.duracao?p.duracao+' meses':'—')+'</div></div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">ESTADO</div><div style="margin-top:4px">'+EB(p.estado)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DATA</div><div>'+p.data+'</div></div>'+'</div>';
+  document.getElementById('mo-view-b').innerHTML='<div style="display:flex;flex-direction:column;gap:12px;font-size:13px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">CLIENTE</div><div style="font-weight:600">'+eh(p.cliente||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">COMERCIAL</div><div>'+eh(p.comercial||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">TIPO</div><div style="margin-top:4px">'+TB(p.tipo)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">SERVIÇOS</div><div style="line-height:1.6">'+eh(p.tarif||'—')+'</div></div><div style="display:flex;gap:24px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">MENSALIDADE</div><div style="font-weight:700;color:var(--red)">'+(p.mensalidade?p.mensalidade+' €':'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DURAÇÃO</div><div>'+(p.duracao?p.duracao+' meses':'—')+'</div></div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">ESTADO</div><div style="margin-top:4px">'+EB(p.estado)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DATA</div><div>'+p.data+'</div></div>'+'</div>';
   openM('mo-view');
 }
 
