@@ -514,7 +514,7 @@ async function init(){
           equipamentos:Object.keys(firstRow).find(k=>k.toLowerCase().includes('equip'))||'Equipamentos',
         };
       }
-      const t=d.map(r=>({name:r['Nome']||'',dados:r['Dados']||'',chamadas:r['Chamadas']||'',partilha:r['Partilha']||'',roaming:r['Roaming']||'',internacional:r['Internacional']||'',roamingTDR:r['RoamingTDR']||'',fixo:r['Fixo']||'',equipamentos:r['Equipamentos']||'',obs:r['Obs']||''})).filter(x=>x.name);
+      const t=d.map(r=>({name:r['Nome']||'',refPHC:r['Ref PHC']||'',dados:r['Dados']||'',chamadas:r['Chamadas']||'',partilha:r['Partilha']||'',roaming:r['Roaming']||'',internacional:r['Internacional']||'',roamingTDR:r['RoamingTDR']||'',fixo:r['Fixo']||'',equipamentos:r['Equipamentos']||'',obs:r['Obs']||''})).filter(x=>x.name);
       if(t.length)TF=t;else TF=BT;
     }).catch(()=>{TF=BT;});
   }catch(e){
@@ -595,7 +595,8 @@ async function loadLogAndClients(){
             if(v.includes('GMT')||v.includes('00:00:00')){try{const d=new Date(v);return d.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});}catch(e){return '';}}
             return v;
           })(),
-          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15')
+          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15'),
+          refPHC:String(row['refPHC']||row['RefPHC']||vals[13]||'')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       console.log('Log loaded:',LD.length,'entries');
@@ -697,7 +698,8 @@ async function loadLogAndClients(){
             if(v.includes('GMT')||v.includes('00:00:00')){try{const d=new Date(v);return d.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'});}catch(e){return '';}}
             return v;
           })(),
-          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15')
+          validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15'),
+          refPHC:String(row['refPHC']||row['RefPHC']||vals[13]||'')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       // ── Migrar IDs legados (numéricos ou P+timestamp) para novo formato ──
@@ -723,8 +725,6 @@ async function loadLogAndClients(){
       });
       // ── Debug alertas de validade ──
       const pendV=LD.filter(p=>p.estado==='pendente');
-      console.log('Pendentes total:',pendV.length,'Com validade:',pendV.filter(p=>p.validade&&p.validade!=='undefined'&&p.validade.trim()).length);
-      if(pendV.length>0)console.log('Exemplo validade[0]:',JSON.stringify({id:pendV[0].id,validade:pendV[0].validade,validadeDias:pendV[0].validadeDias,estado:pendV[0].estado}));
       console.log('Log loaded:',LD.length,'entries');
       renderM();
       renderDB();
@@ -1203,7 +1203,8 @@ async function confirmSave(){
   const dur=document.getElementById('cd').value;
   const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
   const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
-  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG};
+  const refPHC=SV.filter(s=>s.tariff).map(s=>{const t=TF.find(x=>x.name===s.tariff);return t?.refPHC||'';}).filter(Boolean).join('; ');
+  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,refPHC};
   LD.push(entry);SAVED=true;PREVIEWED=false;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
   setBtn(true);
@@ -1543,7 +1544,7 @@ async function updSt(id,estado){
 
 function viewL(id){
   const p=LD.find(x=>x.id===id);if(!p)return;
-  document.getElementById('mo-view-b').innerHTML='<div style="display:flex;flex-direction:column;gap:12px;font-size:13px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">CLIENTE</div><div style="font-weight:600">'+eh(p.cliente||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">COMERCIAL</div><div>'+eh(p.comercial||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">TIPO</div><div style="margin-top:4px">'+TB(p.tipo)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">SERVIÇOS</div><div style="line-height:1.6">'+eh(p.tarif||'—')+'</div></div><div style="display:flex;gap:24px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">MENSALIDADE</div><div style="font-weight:700;color:var(--red)">'+(p.mensalidade?p.mensalidade+' €':'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DURAÇÃO</div><div>'+(p.duracao?p.duracao+' meses':'—')+'</div></div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">ESTADO</div><div style="margin-top:4px">'+EB(p.estado)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DATA</div><div>'+p.data+'</div></div></div>';
+  document.getElementById('mo-view-b').innerHTML='<div style="display:flex;flex-direction:column;gap:12px;font-size:13px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">CLIENTE</div><div style="font-weight:600">'+eh(p.cliente||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">COMERCIAL</div><div>'+eh(p.comercial||'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">TIPO</div><div style="margin-top:4px">'+TB(p.tipo)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">SERVIÇOS</div><div style="line-height:1.6">'+eh(p.tarif||'—')+'</div></div><div style="display:flex;gap:24px"><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">MENSALIDADE</div><div style="font-weight:700;color:var(--red)">'+(p.mensalidade?p.mensalidade+' €':'—')+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DURAÇÃO</div><div>'+(p.duracao?p.duracao+' meses':'—')+'</div></div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">ESTADO</div><div style="margin-top:4px">'+EB(p.estado)+'</div></div><div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">DATA</div><div>'+p.data+'</div></div>'+(p.refPHC?'<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">REF PHC</div><div style="font-family:monospace;font-size:13px">'+eh(p.refPHC)+'</div></div>':'')+'</div>';
   openM('mo-view');
 }
 
