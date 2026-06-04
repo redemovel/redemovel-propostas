@@ -1668,7 +1668,8 @@ function renderDB(){
   // ── Bars: Por Comercial / Por Tipo (aggregate view only) ─────────
   const comEl=document.getElementById('ch-com');
   const tpEl=document.getElementById('ch-tp');
-  if(!isPersonal){
+  const noComFilter=!(filterSel?.value||'');
+  if(noComFilter){
     const byCom={};data.forEach(p=>{if(!byCom[p.comercial])byCom[p.comercial]={tot:0,gan:0};byCom[p.comercial].tot++;if(p.estado==='ganho')byCom[p.comercial].gan++;});
     const maxC=Math.max(...Object.values(byCom).map(v=>v.tot),1);
     if(comEl) comEl.innerHTML=Object.entries(byCom).sort((a,b)=>b[1].tot-a[1].tot).slice(0,6).map(([n,v])=>'<div class="brow"><span class="blbl" title="'+n+'">'+n.split(' ')[0]+'</span><div class="btrk"><div class="bfil" style="width:'+Math.round(v.tot/maxC*100)+'%;background:var(--red)"></div></div><span class="bval">'+v.tot+'</span></div>').join('');
