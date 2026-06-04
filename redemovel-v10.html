@@ -1575,6 +1575,14 @@ function renderDB(){
   const filterSel=document.getElementById('db-filter-com');
   const mesSel=document.getElementById('db-mes');
 
+  // Populate month selector (preserve current selection)
+  if(mesSel){
+    const curMes=mesSel.value;
+    const months=new Set(LD.map(p=>p.data?.slice(3,10)).filter(Boolean));
+    mesSel.innerHTML='<option value="">Todos os meses</option>';
+    [...months].sort().reverse().forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===curMes)o.selected=true;mesSel.appendChild(o);});
+  }
+
   // Populate comercial filter (coord/master only)
   if(filterSel&&isCoord){
     const curF=filterSel.value;
@@ -1853,13 +1861,7 @@ function renderDB(){
     });
   } else if(ct) ct.innerHTML='';
 
-  // ── Month selector ───────────────────────────────────────────────
-  if(mesSel){
-    const cur=mesSel.value;
-    const months=new Set(LD.map(p=>p.data?.slice(3,10)).filter(Boolean));
-    mesSel.innerHTML='<option value="">Todos os meses</option>';
-    [...months].sort().reverse().forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===cur)o.selected=true;mesSel.appendChild(o);});
-  }
+
 }
 
 
