@@ -602,7 +602,8 @@ async function loadLogAndClients(){
             return v;
           })(),
           validadeDias:String(row['validadeDias']||row['ValidadeDias']||vals[11]||'15'),
-          refPHC:String(row['refPHC']||row['RefPHC']||vals[13]||'')
+          refPHC:String(row['refPHC']||row['RefPHC']||vals[13]||''),
+          nif:String(row['nif']||row['NIF']||vals[14]||'')
         };
       }).filter(x=>x&&x.id&&x.id!=='undefined'&&x.id!=='ID'&&!x.id.startsWith('Nome'));
       // ── Migrar IDs legados (numéricos ou P+timestamp) para novo formato ──
@@ -1110,7 +1111,8 @@ async function confirmSave(){
   const dur=document.getElementById('cd').value;
   const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
   const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
-  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG};
+  const nif=document.getElementById('cnif')?.value?.trim()||'';
+  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,nif};
   LD.push(entry);SAVED=true;PREVIEWED=false;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
   setBtn(true);
@@ -1409,7 +1411,7 @@ function renderM(){
   if(fComVal)data=data.filter(p=>p.comercial===fComVal);
   if(fT)data=data.filter(p=>p.tipo===fT);
   if(fS)data=data.filter(p=>p.estado===fS);
-  if(fR)data=data.filter(p=>p.cliente?.toLowerCase().includes(fR)||p.tarif?.toLowerCase().includes(fR));
+  if(fR)data=data.filter(p=>p.cliente?.toLowerCase().includes(fR)||p.tarif?.toLowerCase().includes(fR)||p.nif?.includes(fR));
   const dataActive=data.filter(p=>p.estado!=='substituida');
   const tot=dataActive.length,gan=dataActive.filter(p=>p.estado==='ganho').length,pen=dataActive.filter(p=>p.estado==='pendente').length;
   const tx=tot>0?Math.round(gan/tot*100):0;
