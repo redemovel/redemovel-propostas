@@ -245,7 +245,7 @@ function drawLista(){
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
-        <input id="ft" placeholder="Procurar nº, cliente, NIF, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
+        <input id="ft" type="search" autocomplete="off" name="pesquisa-rpn" placeholder="Procurar nº, cliente, NIF, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
         <input id="fm" type="month" value="${esc(f.mes)}" style="width:160px" title="Mês">
         ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
         <select id="fb" style="width:180px"><option value="">Todas as BO</option>${bos().map(b=>`<option value="${b.uid}" ${f.bo===b.uid?'selected':''}>${esc(b.nome)}</option>`).join('')}</select>`:''}
@@ -275,7 +275,7 @@ function rpnVazio(){
     loja:'Externos', dtAtivacao:'', dtFimEquip:'', prazoPermanencia:24, classificacao:'',
     condicoes:{pnEspecial:false,aprovacaoGA:false,novoNif:false,desconto:0,subsidiacao:0,reuniao:'',infoRisco:'',resumo:''},
     contas:{gsm:'',dados:'',adsl:'',gsm2:'',novaConta:''}, notas:'', linhas:[], nLinhas:0, totRLMC:0, totScore:0,
-    propostaRef:'', propostaInfo:'', cargaContada:0 };
+    propostaRef:'', propostaInfo:'', propostaTarif:'', cargaContada:0 };
 }
 function linhaVazia(t){ return t ? {...t, msisdn:'', contratoVDF:'', upgrade:false} : {ref:'',designacao:'',natureza:'Ref Móvel',msisdn:'',nConta:'',rlmc:0,prazo:24,tier:'',pricingPlan:'',descontinuado:false,upgrade:false,contratoVDF:''}; }
 
@@ -319,7 +319,7 @@ function drawFicha(){
       ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
       <span class="sp"></span>${acts.join('')}
     </div>
-    ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}</div>`:''}
+    ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}${r.propostaTarif?`<div class="muted" style="font-size:12px;margin-top:4px">Serviços na proposta: ${esc(r.propostaTarif)}</div>`:''}</div>`:''}
     ${(r.motivos||[]).length && !['Concluído','Cancelado','Reprovado'].includes(r.estado)?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
     <div class="tabs">${tabs.map(([k,t])=>`<a data-t="${k}" class="${S.tab===k?'on':''}">${t}</a>`).join('')}</div>
     <div id="tabc"></div>`;
@@ -588,21 +588,35 @@ async function eliminar(){
 function handlePropostaParam(){
   const u = new URL(location.href), raw = u.searchParams.get('prop'); if(!raw) return;
   u.searchParams.delete('prop'); history.replaceState(null,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams:'')+'#/novo');
-  let p; try { p = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g,'+').replace(/_/g,'/'))))); } catch(e){ toast('Dados da proposta inválidos.',true); return; }
+  let p; try { const b64 = raw.replace(/-/g,'+').replace(/_/g,'/'); p = JSON.parse(decodeURIComponent(escape(atob(b64 + '==='.slice((b64.length+3)%4))))); } catch(e){ toast('Dados da proposta inválidos.',true); return; }
   const r = rpnVazio();
-  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||''); r.cliente.email = p.email||''; r.notas = p.notas||'';
-  r.propostaInfo = [p.tipo, p.tarif, p.mensalidade?`${p.mensalidade} €/mês`:'', p.duracao?`${p.duracao} meses`:''].filter(Boolean).join(' · ');
-  const segs = String(p.tarif||'').split(/\n|\|/).map(s=>s.trim()).filter(Boolean);
-  segs.forEach(sg=>{
-    const l = linhaVazia(); const br=[...sg.matchAll(/\[([^\]]+)\]/g)].map(x=>x[1]);
-    const pz = br.find(b=>/^\d+\s*m$/i.test(b)); if(pz) l.prazo=parseInt(pz); else if(p.duracao) l.prazo=+p.duracao||24;
-    const rf = br.filter(b=>!/^\d+\s*m$/i.test(b)).pop(); const pr = rf && S.prodMap[rf.toUpperCase()];
-    if (pr) Object.assign(l,{ref:pr.ref,designacao:pr.designacao,tier:pr.tier,pricingPlan:pr.pricingPlan,descontinuado:pr.descontinuado,natureza:pr.categoria==='Fixo'?'Ref Fixo':'Ref Móvel'});
-    else { l.ref = rf||''; l.designacao = sg.replace(/\[[^\]]+\]/g,'').replace(/^\d{9}\s*/,'').trim(); }
-    const ms = sg.match(/^(\d{9})\b/); if(ms) l.msisdn=ms[1];
-    r.linhas.push(l);
+  const TIPO_TXT = {novo:'Novo Serviço', refid:'Refidelização', upgrade:'Upgrade'};
+  const nova = p.tipo==='novo', upg = p.tipo==='upgrade';
+  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||'').trim(); r.cliente.email = p.email||''; r.notas = p.notas||'';
+  // BackOffice/Master a abrir a proposta de um comercial: o RPN fica em nome do comercial da proposta
+  if (isBO() && p.comercial) { const v = Object.entries(S.users).find(([,u])=>(u.nome||'').trim().toLowerCase()===String(p.comercial).trim().toLowerCase()); if (v) { r.vendedorUid=v[0]; r.vendedorNome=v[1].nome; r.subSfid=v[1].sfid||''; } }
+  // Formato da app de Propostas:  "912 345 678 TARIFÁRIO [24m] [REF_PHC]; 10× TARIFÁRIO [24m] [REF_PHC]"
+  String(p.tarif||'').split(/;|\n|\|/).map(x=>x.trim()).filter(Boolean).forEach(sg=>{
+    const br = [...sg.matchAll(/\[([^\]]+)\]/g)].map(x=>x[1].trim());
+    const pz = br.find(b=>/^\d+\s*m$/i.test(b));
+    const rf = br.filter(b=>!/^\d+\s*m$/i.test(b)).pop();
+    let resto = sg.replace(/\[[^\]]+\]/g,'').trim(), qtd = 1, msisdn = '';
+    const q = resto.match(/^(\d+)\s*[×x]\s+/i);
+    if (q) { qtd = Math.min(Math.max(+q[1],1),300); resto = resto.slice(q[0].length); }
+    else { const m = resto.match(/^(\d[\d ]{7,14}\d)\s+/); if (m && m[1].replace(/\s/g,'').length>=9) { msisdn = m[1].replace(/\s/g,''); resto = resto.slice(m[0].length); } }
+    const pr = rf && S.prodMap[rf.toUpperCase()];
+    const fixo = pr ? pr.categoria==='Fixo' : false;
+    const l = linhaVazia();
+    Object.assign(l, { designacao: resto.trim(), msisdn, upgrade: upg, prazo: pz ? parseInt(pz) : (+p.duracao||24),
+      natureza: (nova?'Nova ':'Ref ') + (fixo?'Fixo':'Móvel') });
+    if (pr) Object.assign(l, {ref:pr.ref, designacao:pr.designacao, tier:pr.tier, pricingPlan:pr.pricingPlan, descontinuado:pr.descontinuado});
+    else l.ref = rf||'';
+    for (let i=0;i<qtd;i++) r.linhas.push({...l});
   });
-  if (r.linhas.length===1 && p.mensalidade) r.linhas[0].rlmc = parseFloat(String(p.mensalidade).replace(',','.'))||0;
+  const mens = parseFloat(String(p.mensalidade||'').replace(',','.'))||0;
+  if (r.linhas.length===1 && mens) r.linhas[0].rlmc = mens;
+  r.propostaInfo = [TIPO_TXT[p.tipo]||p.tipo, mens?`mensalidade total ${eur(mens)} €`:'', p.duracao?`${p.duracao} meses`:'', p.comercial?`comercial: ${p.comercial}`:''].filter(Boolean).join(' · ');
+  r.propostaTarif = String(p.tarif||'');
   S.pendingNovo = r;
   // aviso de duplicado
   const q = isStaff() ? query(collection(db,'rpn'),where('propostaRef','==',r.propostaRef)) : query(collection(db,'rpn'),where('vendedorUid','==',S.me.uid),where('propostaRef','==',r.propostaRef));
