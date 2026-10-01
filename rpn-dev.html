@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RPN · Redemóvel</title>
+<style>
+:root{--red:#e60000;--red-d:#b80000;--ink:#1d1d1f;--mut:#6b6b70;--line:#e3e3e6;--bg:#f5f5f7;--card:#fff;--ok:#1a7f37;--warn:#b26a00;--info:#0b5cad;}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{border:1px solid #cfcfd4;border-radius:6px;padding:6px 8px;background:#fff;width:100%}
+input:disabled,select:disabled,textarea:disabled{background:#f0f0f2;color:#555}
+input[type=checkbox]{width:auto}
+textarea{resize:vertical;min-height:60px}
+label{display:block;font-size:12px;color:var(--mut);margin:0 0 3px}
+.btn{border:1px solid #cfcfd4;background:#fff;border-radius:6px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#f0f0f2}
+.btn.pri{background:var(--red);border-color:var(--red);color:#fff}.btn.pri:hover{background:var(--red-d)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.sm{padding:3px 8px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+header{background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:10px 20px;position:sticky;top:0;z-index:5}
+header .brand{font-weight:700;color:var(--red);font-size:16px}
+header nav{display:flex;gap:4px;flex:1}
+header nav a{padding:6px 10px;border-radius:6px;color:var(--ink);text-decoration:none}
+header nav a.on{background:#fde8e8;color:var(--red-d)}
+header .who{font-size:12px;color:var(--mut);text-align:right}
+main{padding:20px;max-width:1500px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 12px}
+.muted{color:var(--mut)}
+table{border-collapse:collapse;width:100%}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:12px;color:var(--mut);font-weight:600;background:#fafafa;position:sticky;top:0}
+tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#fafafa}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.scroll{overflow:auto}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#eee;white-space:nowrap}
+.b-Em-Elaboração{background:#eee;color:#444}
+.b-Submetido{background:#e7f0fb;color:var(--info)}
+.b-Em-Implementação{background:#e8e4fb;color:#4b2fb0}
+.b-Pendente-Comercial,.b-Pendente-Documentos{background:#fff3df;color:var(--warn)}
+.b-Concluído{background:#e6f4ea;color:var(--ok)}
+.b-Cancelado,.b-Reprovado{background:#fde8e8;color:var(--red-d)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;min-width:110px}
+.chip b{display:block;font-size:20px}.chip.on{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:0 0 16px;flex-wrap:wrap}
+.tabs a{padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;color:var(--mut)}
+.tabs a.on{border-color:var(--red);color:var(--ink);font-weight:600}
+.lines input,.lines select{padding:4px 6px;font-size:13px}
+.lines td{padding:3px 4px;white-space:nowrap}
+.tot td{font-weight:700;background:#fafafa}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:8px;display:none;z-index:50;max-width:90vw}
+#toast.err{background:var(--red-d)}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:40}
+.modal{background:#fff;border-radius:10px;padding:20px;width:min(560px,92vw);max-height:90vh;overflow:auto}
+.login{max-width:360px;margin:12vh auto}
+.msgs{max-height:380px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.msg{background:#f3f3f5;border-radius:8px;padding:8px 10px;max-width:80%}
+.msg.mine{background:#fde8e8;align-self:flex-end}
+.msg small{display:block;color:var(--mut);font-size:11px}
+.hist td{font-size:13px}
+.motivos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 12px}
+.motivos label{display:flex;gap:6px;align-items:center;color:var(--ink);font-size:13px;margin:0}
+.warnbox{background:#fff3df;border:1px solid #f0d9a8;border-radius:8px;padding:8px 12px;margin-bottom:12px}
+@media (max-width:900px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.motivos{grid-template-columns:repeat(2,1fr)}main{padding:12px}}
+</style>
+</head>
+<body>
+<div id="app"><div class="login muted">A carregar…</div></div>
+<div id="toast"></div>
+<script type="module">
+// =====================================================================
+//  RPN — Registo de Processo de Negócio · Redemóvel   (Fase 1)
+//  DEV: rpn-dev.html   ·   PRODUÇÃO: rpn.html
+// =====================================================================
+
+// ---------- 1. CONFIGURAÇÃO FIREBASE (colar do Firebase Console) ----------
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDKvTxqGq2BWtpgaDmkZvasyU0f-ax3GrY",
+  authDomain: "redemovel-rpn.firebaseapp.com",
+  projectId: "redemovel-rpn",
+  storageBucket: "redemovel-rpn.firebasestorage.app",
+  messagingSenderId: "418514108309",
+  appId: "1:418514108309:web:a8cc65c3a2a0e304cd009c"
+};
+const EMAIL_DOMAIN = 'redemovel.pt';   // "pmota" → pmota@redemovel.pt
+
+import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword,
+         sendPasswordResetEmail, updatePassword, connectAuthEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where, orderBy,
+         limit, runTransaction, serverTimestamp, writeBatch, onSnapshot, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject, connectStorageEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
+
+const EMU = new URLSearchParams(location.search).has('emu') && ['localhost','127.0.0.1'].includes(location.hostname);
+const cfg = EMU ? {apiKey:'demo-key',authDomain:'demo-rpn.firebaseapp.com',projectId:'demo-rpn',storageBucket:'demo-rpn.appspot.com',appId:'demo'} : FIREBASE_CONFIG;
+const app = initializeApp(cfg);
+const auth = getAuth(app), db = getFirestore(app), st = getStorage(app);
+if (EMU) { connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true}); connectFirestoreEmulator(db,'127.0.0.1',8080); connectStorageEmulator(st,'127.0.0.1',9199); }
+
+// ---------- 2. TABELAS DE NEGÓCIO ----------
+const ESTADOS  = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Concluído','Cancelado','Reprovado'];
+const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos'];   // contam para a carga da BO
+const EDIT_COM = ['Em Elaboração','Pendente Comercial','Pendente Documentos'];                // comercial pode editar
+const MOTIVOS  = ['Doc. Identificação','Contrato','CRC','Morada','Condições Comerciais','Dívida','STOP 08','STOP 15','STOP 22','STOP 31','1229','1229 via OS'];
+const NATUREZAS= ['Ref Móvel','Nova Móvel','Ref Fixo','Nova Fixo','Nova SS'];
+const LOJAS    = ['Externos','LOA','L8A','LAR','LLI','LOV','LVO'];
+const PRAZOS   = [12,18,24,30,36,48];
+const PERFIS   = ['comercial','coordenador','backoffice','bo_financeiro','master'];
+const PERFIL_TXT = {comercial:'Comercial',coordenador:'Coordenador',backoffice:'BackOffice',bo_financeiro:'BO Financeiro',master:'Master'};
+const ATIVIDADE= ['Elegível/Carteira','Não Incentivada'];
+
+// Score = RLMC × ajuste prazo × ajustes / 22,50   (Manual Comissões Redemóvel + Plano VDF FY26/27)
+const SCORE_BASE = 22.5;
+function fatorPrazo(m){ m=+m||0; if(m>=48)return 1.5; if(m>=36)return 1.2525; if(m>=30)return 1.125; if(m>=24)return 1; if(m>=18)return 0.6488; if(m>=12)return 0.4; return 0; }
+const FATOR_TIER = {Gold:1, Bronze:0.6, Silver:0.6, Estanho:0.36};   // Bronze = Gold desc.; Estanho = Silver desc.
+function scoreLinha(l, r){
+  let f = fatorPrazo(l.prazo) * (FATOR_TIER[l.tier] ?? 1);
+  if (l.descontinuado && (l.tier==='Gold' || l.tier==='Silver')) f *= 0.6;
+  if (r.clienteParticular) f *= 0.6;
+  if (r.atividade==='Não Incentivada' && /Móvel/.test(l.natureza||'')) f *= 0.6;
+  const s = (+l.rlmc||0) * f / SCORE_BASE;
+  return Math.floor(s*1000)/1000;
+}
+
+// ---------- 3. ESTADO / UTILITÁRIOS ----------
+const S = { user:null, me:null, users:{}, prodMap:{}, prodList:[], list:null, cur:null, tab:'principal', dirty:false, filtros:{estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}, unsub:[] };
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eur = n => (+n||0).toLocaleString('pt-PT',{minimumFractionDigits:2,maximumFractionDigits:2});
+const n3  = n => (+n||0).toLocaleString('pt-PT',{minimumFractionDigits:3,maximumFractionDigits:3});
+const hoje = () => new Date().toISOString().slice(0,10);
+const fmtD = d => d ? d.split('-').reverse().join('.') : '';
+const tsTxt = t => { const d = t?.toDate ? t.toDate() : (t ? new Date(t) : null); return d ? d.toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'}) : ''; };
+const perfil = () => S.me?.perfil;
+const isMaster = () => perfil()==='master';
+const isStaff = () => ['backoffice','bo_financeiro','coordenador','master'].includes(perfil());
+const isBO = () => ['backoffice','bo_financeiro','master'].includes(perfil());
+const userNome = uid => S.users[uid]?.nome || '';
+const bos = () => Object.entries(S.users).filter(([,u]) => u.ativo && u.recebeRPN && ['backoffice','bo_financeiro','master'].includes(u.perfil)).map(([uid,u])=>({uid,...u}));
+function toast(msg, err=false){ const t=$('#toast'); t.textContent=msg; t.className=err?'err':''; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', err?6000:2800); }
+function getPath(o,p){ return p.split('.').reduce((a,k)=>a?.[k], o); }
+function setPath(o,p,v){ const ks=p.split('.'); let a=o; ks.slice(0,-1).forEach(k=>{ a[k]=a[k]||{}; a=a[k]; }); a[ks.at(-1)]=v; }
+function errTxt(e){ const c=e?.code||''; if(c.includes('permission-denied'))return 'Sem permissão para esta operação.'; if(c.includes('invalid-credential')||c.includes('wrong-password')||c.includes('user-not-found'))return 'Utilizador ou password incorretos.'; if(c.includes('weak-password'))return 'Password demasiado fraca (mín. 8 caracteres).'; if(c.includes('requires-recent-login'))return 'Por segurança, saia e volte a entrar antes de mudar a password.'; if(c.includes('email-already-in-use'))return 'Esse email já tem conta.'; return e?.message||String(e); }
+function modal(html, onMount){ const bg=document.createElement('div'); bg.className='modal-bg'; bg.innerHTML=`<div class="modal">${html}</div>`; document.body.appendChild(bg); const close=()=>bg.remove(); bg.addEventListener('click',e=>{ if(e.target===bg) close(); }); onMount?.(bg.querySelector('.modal'), close); return close; }
+function clearSubs(){ S.unsub.forEach(u=>u()); S.unsub=[]; }
+
+// ---------- 4. ARRANQUE / AUTENTICAÇÃO ----------
+onAuthStateChanged(auth, async user => {
+  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; clearSubs();
+  if (!user) return renderLogin();
+  try {
+    const snap = await getDoc(doc(db,'users',user.uid));
+    if (!snap.exists() || !snap.data().ativo) { $('#app').innerHTML = `<div class="login card"><h2>Conta sem acesso</h2><p class="muted">A conta ${esc(user.email)} não tem perfil ativo. Contacte o administrador.</p><button class="btn" id="out">Sair</button></div>`; $('#out').onclick=()=>signOut(auth); return; }
+    S.me = {uid:user.uid, ...snap.data()};
+    await Promise.all([loadUsers(), loadProdutos()]);
+    handlePropostaParam();
+    render();
+  } catch(e){ toast(errTxt(e), true); console.error(e); }
+});
+window.addEventListener('hashchange', () => { if (S.me) render(); });
+window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue=''; } });
+
+async function loadUsers(){ const s=await getDocs(collection(db,'users')); S.users={}; s.forEach(d=>S.users[d.id]=d.data()); }
+async function loadProdutos(){ const s=await getDocs(collection(db,'produtos')); S.prodMap={}; S.prodList=[]; s.forEach(d=>{ const p=d.data(); S.prodMap[p.ref.toUpperCase()]=p; S.prodList.push(p); }); S.prodList.sort((a,b)=>a.ref.localeCompare(b.ref)); }
+
+function renderLogin(){
+  $('#app').innerHTML = `<div class="login card">
+    <h1 style="color:var(--red);margin-bottom:4px">Redemóvel · RPN</h1>
+    <p class="muted" style="margin-top:0">Registo de Processo de Negócio</p>
+    <form id="lf" class="grid">
+      <div><label>Utilizador ou email</label><input id="lu" autocomplete="username" required></div>
+      <div><label>Password</label><input id="lp" type="password" autocomplete="current-password" required></div>
+      <button class="btn pri" type="submit">Entrar</button>
+      <a href="#" id="lr" class="muted" style="font-size:12px">Esqueci-me da password</a>
+    </form></div>`;
+  const em = () => { const v=$('#lu').value.trim(); return v.includes('@')?v:`${v}@${EMAIL_DOMAIN}`; };
+  $('#lf').onsubmit = async e => { e.preventDefault(); try { await signInWithEmailAndPassword(auth, em(), $('#lp').value); } catch(err){ toast(errTxt(err), true); } };
+  $('#lr').onclick = async e => { e.preventDefault(); if(!$('#lu').value) return toast('Escreva primeiro o utilizador.', true); try { await sendPasswordResetEmail(auth, em()); toast('Email de recuperação enviado.'); } catch(err){ toast(errTxt(err), true); } };
+}
+
+// ---------- 5. ROUTER ----------
+function render(){
+  clearSubs();
+  const h = location.hash || '#/lista';
+  const nav = [['#/lista','RPNs'],['#/novo','Novo RPN']];
+  if (isMaster()) nav.push(['#/admin','Administração']);
+  $('#app').innerHTML = `<header>
+      <span class="brand">Redemóvel · RPN</span>
+      <nav>${nav.map(([u,t])=>`<a href="${u}" class="${h.startsWith(u)?'on':''}">${t}</a>`).join('')}</nav>
+      <div class="who"><b>${esc(S.me.nome)}</b><br>${PERFIL_TXT[perfil()]||perfil()}</div>
+      <button class="btn sm" id="pw">Password</button><button class="btn sm" id="out">Sair</button>
+    </header><main id="main"></main>`;
+  $('#out').onclick = () => { if (S.dirty && !confirm('Há alterações por guardar. Sair?')) return; S.dirty=false; signOut(auth); };
+  $('#pw').onclick = mudarPassword;
+  if (h.startsWith('#/rpn/')) return viewFicha(h.slice(6));
+  if (h.startsWith('#/novo')) return viewFicha(null);
+  if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
+  return viewLista();
+}
+function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
+document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty){ e.preventDefault(); go(a.getAttribute('href')); } });
+
+function mudarPassword(){
+  modal(`<h2>Alterar password</h2><div class="grid"><div><label>Nova password (mín. 8)</label><input type="password" id="np1"></div><div><label>Repetir</label><input type="password" id="np2"></div><div class="row"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Guardar</button></div></div>`, (m,close)=>{
+    m.querySelector('#c').onclick=close;
+    m.querySelector('#ok').onclick=async()=>{ const a=m.querySelector('#np1').value,b=m.querySelector('#np2').value; if(a.length<8) return toast('Mínimo 8 caracteres.',true); if(a!==b) return toast('As passwords não coincidem.',true); try{ await updatePassword(auth.currentUser,a); toast('Password alterada.'); close(); }catch(e){ toast(errTxt(e),true); } };
+  });
+}
+
+// ---------- 6. LISTA ----------
+async function viewLista(){
+  const m = $('#main');
+  m.innerHTML = `<div class="card muted">A carregar RPNs…</div>`;
+  try {
+    const q = isStaff() ? query(collection(db,'rpn'), orderBy('numero','desc'), limit(2000))
+                        : query(collection(db,'rpn'), where('vendedorUid','==',S.me.uid));
+    const s = await getDocs(q);
+    S.list = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.numero||0)-(a.numero||0));
+  } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
+  if (S.filtros.meus===null) S.filtros.meus = perfil()==='backoffice';
+  drawLista();
+}
+function drawLista(){
+  const f = S.filtros, all = S.list;
+  const base = all.filter(r => (!f.meus || r.boUid===S.me.uid)
+    && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
+    && (!f.mes || (r.data||'').startsWith(f.mes))
+    && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
+  const cnt = {}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
+  const rows = base.filter(r=>!f.estado || r.estado===f.estado);
+  const vends = [...new Set(all.map(r=>r.vendedorUid))].map(u=>[u,userNome(u)||all.find(r=>r.vendedorUid===u)?.vendedorNome]).sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
+  const tot = rows.reduce((a,r)=>({l:a.l+(r.nLinhas||0),rl:a.rl+(r.totRLMC||0),sc:a.sc+(r.totScore||0)}),{l:0,rl:0,sc:0});
+  $('#main').innerHTML = `
+    <div class="chips">
+      <div class="chip ${!f.estado?'on':''}" data-e=""><span class="muted">Todos</span><b>${base.length}</b></div>
+      ${ESTADOS.map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <input id="ft" placeholder="Procurar nº, cliente, NIF, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
+        <input id="fm" type="month" value="${esc(f.mes)}" style="width:160px" title="Mês">
+        ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
+        <select id="fb" style="width:180px"><option value="">Todas as BO</option>${bos().map(b=>`<option value="${b.uid}" ${f.bo===b.uid?'selected':''}>${esc(b.nome)}</option>`).join('')}</select>`:''}
+        ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fme" ${f.meus?'checked':''}> Só os meus</label>`:''}
+        <span class="sp"></span><button class="btn pri" id="nv">+ Novo RPN</button>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b></td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span>${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
+      </table></div>
+    </div>`;
+  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ f.estado=c.dataset.e; drawLista(); });
+  document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
+  $('#nv').onclick=()=>go('#/novo');
+  const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
+  $('#fm').onchange=e=>{ f.mes=e.target.value; drawLista(); };
+  if ($('#fv')) { $('#fv').onchange=e=>{ f.vend=e.target.value; drawLista(); }; $('#fb').onchange=e=>{ f.bo=e.target.value; drawLista(); }; }
+  if ($('#fme')) $('#fme').onchange=e=>{ f.meus=e.target.checked; drawLista(); };
+}
+
+// ---------- 7. FICHA RPN ----------
+function rpnVazio(){
+  return { numero:null, data:hoje(), estado:'Em Elaboração', motivos:[], vendedorUid:S.me.uid, vendedorNome:S.me.nome, subSfid:S.me.sfid||'',
+    nOportunidade:'', boUid:null, boNome:'', rpnAgregado:false, atividade:'Elegível/Carteira', clienteParticular:false,
+    cliente:{nome:'',nCliente:'',nif:'',email:'',interlocutor:'',telefone:'',morada1:'',morada2:'',localidade:'',codPostal:''},
+    loja:'Externos', dtAtivacao:'', dtFimEquip:'', prazoPermanencia:24, classificacao:'',
+    condicoes:{pnEspecial:false,aprovacaoGA:false,novoNif:false,desconto:0,subsidiacao:0,reuniao:'',infoRisco:'',resumo:''},
+    contas:{gsm:'',dados:'',adsl:'',gsm2:'',novaConta:''}, notas:'', linhas:[], nLinhas:0, totRLMC:0, totScore:0,
+    propostaRef:'', propostaInfo:'', cargaContada:0 };
+}
+function linhaVazia(t){ return t ? {...t, msisdn:'', contratoVDF:'', upgrade:false} : {ref:'',designacao:'',natureza:'Ref Móvel',msisdn:'',nConta:'',rlmc:0,prazo:24,tier:'',pricingPlan:'',descontinuado:false,upgrade:false,contratoVDF:''}; }
+
+async function viewFicha(id){
+  const m = $('#main');
+  if (!id || S.cur?.id !== id) S.tab = 'principal';
+  if (!id) {
+    S.cur = S.pendingNovo || rpnVazio(); S.pendingNovo = null; S.cur.id = null; S.tab='principal';
+    S.dirty = !!S.cur.propostaRef;
+  } else {
+    m.innerHTML = `<div class="card muted">A carregar…</div>`;
+    try { const s = await getDoc(doc(db,'rpn',id)); if(!s.exists()) { m.innerHTML='<div class="card">RPN não encontrado.</div>'; return; } S.cur = {id, ...s.data()}; }
+    catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
+    S.dirty = false;
+  }
+  drawFicha();
+}
+
+function perms(){
+  const r = S.cur, own = r.vendedorUid===S.me.uid, nov = !r.id;
+  const edCom = (own||nov) && EDIT_COM.includes(r.estado);
+  return { own, nov, bo:isBO(), edit: isBO() || edCom, edCom };
+}
+
+function drawFicha(){
+  const r = S.cur, p = perms(), dis = p.edit ? '' : 'disabled';
+  recalc();
+  const tabs = [['principal','Página Principal'],['outros','Outros Dados'],['cond','Condições Comerciais'],['anexos','Anexos'],['msg','Mensagens'],['hist','Histórico']];
+  const acts = [];
+  if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button>`);
+  if ((p.own||p.nov) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
+  if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
+  if (r.id && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
+  if (r.id) acts.push(`<button class="btn" id="a-mail">Email</button>`);
+
+  $('#main').innerHTML = `
+    <div class="row" style="margin-bottom:12px">
+      <button class="btn ghost" id="back">← Lista</button>
+      <h1>${r.numero?`RPN ${r.numero}`:'Novo RPN'}</h1>
+      <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(r.estado)}</span>
+      ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
+      <span class="sp"></span>${acts.join('')}
+    </div>
+    ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}</div>`:''}
+    ${(r.motivos||[]).length && !['Concluído','Cancelado','Reprovado'].includes(r.estado)?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
+    <div class="tabs">${tabs.map(([k,t])=>`<a data-t="${k}" class="${S.tab===k?'on':''}">${t}</a>`).join('')}</div>
+    <div id="tabc"></div>`;
+  $('#back').onclick=()=>go('#/lista');
+  document.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ S.tab=a.dataset.t; clearSubs(); drawFicha(); });
+  $('#a-save')?.addEventListener('click',()=>guardar());
+  $('#a-sub')?.addEventListener('click',()=>guardar({submeter:true}));
+  $('#a-resp')?.addEventListener('click',()=>guardar({devolver:true}));
+  $('#a-del')?.addEventListener('click',eliminar);
+  $('#a-mail')?.addEventListener('click',()=>enviarEmail(''));
+  const tc = $('#tabc');
+  if (S.tab==='principal') tabPrincipal(tc, dis, p);
+  else if (S.tab==='outros') tabOutros(tc, dis, p);
+  else if (S.tab==='cond') tabCond(tc, dis);
+  else if (S.tab==='anexos') tabAnexos(tc, p);
+  else if (S.tab==='msg') tabMsg(tc);
+  else tabHist(tc);
+  // binding genérico data-f
+  tc.querySelectorAll('[data-f]').forEach(el=>{
+    const ev = el.type==='checkbox'||el.tagName==='SELECT' ? 'change' : 'input';
+    el.addEventListener(ev,()=>{ let v = el.type==='checkbox'?el.checked : el.type==='number'?(parseFloat(el.value)||0) : el.value; setPath(S.cur, el.dataset.f, v); S.dirty=true; if(['clienteParticular','atividade'].includes(el.dataset.f)) updTotals(); });
+  });
+}
+
+const fld = (lab, path, dis, type='text', extra='') => { const v=getPath(S.cur,path); return `<div><label>${lab}</label>${type==='checkbox'?`<input type="checkbox" data-f="${path}" ${v?'checked':''} ${dis}>`:`<input type="${type}" data-f="${path}" value="${esc(v)}" ${dis} ${extra}>`}</div>`; };
+const sel = (lab, path, opts, dis) => `<div><label>${lab}</label><select data-f="${path}" ${dis}>${opts.map(o=>{ const [v,t]=Array.isArray(o)?o:[o,o]; return `<option value="${esc(v)}" ${String(getPath(S.cur,path))===String(v)?'selected':''}>${esc(t)}</option>`; }).join('')}</select></div>`;
+
+function tabPrincipal(tc, dis, p){
+  const r = S.cur, boDis = isBO()?'':'disabled';
+  const vendOpts = Object.entries(S.users).filter(([,u])=>u.ativo&&['comercial','coordenador','master'].includes(u.perfil)).map(([uid,u])=>[uid,u.nome]);
+  tc.innerHTML = `
+    <div class="card"><div class="grid g4">
+      ${fld('Cliente','cliente.nome',dis)}${fld('NIF','cliente.nif',dis)}${fld('Nº Cliente (PHC)','cliente.nCliente',dis)}${fld('Data','data',dis,'date')}
+      ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}
+      ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
+      ${sel('Estado','estado',ESTADOS,isBO()&&r.id?'':'disabled')}
+      ${sel('Resp. BackOffice','boUid',[['','— atribuição automática —'],...bos().map(b=>[b.uid,b.nome])],isBO()&&r.id?'':'disabled')}
+      ${sel('Atividade incentivada','atividade',ATIVIDADE,dis)}
+      <div class="row" style="align-items:flex-end;gap:16px">
+        <label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" data-f="rpnAgregado" ${r.rpnAgregado?'checked':''} ${dis}> RPN agregado</label>
+        <label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" data-f="clienteParticular" ${r.clienteParticular?'checked':''} ${dis}> Cliente particular</label>
+      </div>
+    </div>
+    ${isBO()&&r.id?`<div style="margin-top:12px"><label>Motivo(s) de pendência</label><div class="motivos">${MOTIVOS.map(mo=>`<label><input type="checkbox" class="mot" value="${esc(mo)}" ${(r.motivos||[]).includes(mo)?'checked':''}> ${esc(mo)}</label>`).join('')}</div></div>`:''}
+    </div>
+    <div class="card">
+      <div class="row" style="margin-bottom:8px"><h2 style="margin:0">Linhas do negócio</h2><span class="sp"></span>
+        ${p.edit?`<button class="btn sm" id="l-add">+ Linha</button><button class="btn sm" id="l-bulk">+ Várias MSISDN</button>`:''}</div>
+      <div class="scroll" id="lines"></div>
+    </div>
+    <div class="card"><label>Notas para a BackOffice</label><textarea data-f="notas" ${dis} rows="3">${esc(r.notas)}</textarea></div>
+    <datalist id="dl-prod">${S.prodList.map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)} · ${esc(x.tier)}</option>`).join('')}</datalist>`;
+  drawLines(dis);
+  tc.querySelectorAll('.mot').forEach(c=>c.onchange=()=>{ S.cur.motivos=[...tc.querySelectorAll('.mot:checked')].map(x=>x.value); S.dirty=true; });
+  tc.querySelector('[data-f="boUid"]')?.addEventListener('change',e=>{ S.cur.boNome = userNome(e.target.value); });
+  tc.querySelector('[data-f="vendedorUid"]')?.addEventListener('change',e=>{ const u=S.users[e.target.value]; S.cur.vendedorNome=u?.nome||''; });
+  $('#l-add')?.addEventListener('click',()=>{ const ls=S.cur.linhas; ls.push(linhaVazia(ls.at(-1))); S.dirty=true; drawLines(dis); });
+  $('#l-bulk')?.addEventListener('click',()=>bulkMsisdn(dis));
+}
+
+function drawLines(dis){
+  const r = S.cur, L = r.linhas;
+  $('#lines').innerHTML = `<table class="lines"><thead><tr><th>#</th><th>Referência</th><th>Designação</th><th>Natureza</th><th>MSISDN</th><th>Nº Conta</th><th class="num">RLMC €</th><th>Prazo</th><th>Tier</th><th>PricingPlan</th><th>Desc.</th><th>Upgr.</th><th>Contrato VDF</th><th class="num">Score</th><th></th></tr></thead>
+  <tbody>${L.map((l,i)=>`<tr data-i="${i}">
+    <td class="muted">${i+1}</td>
+    <td><input list="dl-prod" data-l="ref" value="${esc(l.ref)}" ${dis} style="width:170px"></td>
+    <td><input data-l="designacao" value="${esc(l.designacao)}" ${dis} style="width:240px"></td>
+    <td><select data-l="natureza" ${dis} style="width:112px">${NATUREZAS.map(n=>`<option ${l.natureza===n?'selected':''}>${n}</option>`).join('')}</select></td>
+    <td><input data-l="msisdn" value="${esc(l.msisdn)}" ${dis} style="width:110px"></td>
+    <td><input data-l="nConta" value="${esc(l.nConta)}" ${dis} style="width:100px"></td>
+    <td><input type="number" step="0.01" data-l="rlmc" value="${l.rlmc||''}" ${dis} style="width:80px;text-align:right"></td>
+    <td><select data-l="prazo" ${dis} style="width:62px">${PRAZOS.map(n=>`<option value="${n}" ${+l.prazo===n?'selected':''}>${n}</option>`).join('')}</select></td>
+    <td><select data-l="tier" ${dis} style="width:90px">${['','Gold','Silver','Bronze','Estanho'].map(n=>`<option ${l.tier===n?'selected':''}>${n}</option>`).join('')}</select></td>
+    <td><input data-l="pricingPlan" value="${esc(l.pricingPlan)}" ${dis} style="width:95px"></td>
+    <td style="text-align:center"><input type="checkbox" data-l="descontinuado" ${l.descontinuado?'checked':''} ${dis}></td>
+    <td style="text-align:center"><input type="checkbox" data-l="upgrade" ${l.upgrade?'checked':''} ${dis}></td>
+    <td><input data-l="contratoVDF" value="${esc(l.contratoVDF)}" ${dis} placeholder="POS…" style="width:165px"></td>
+    <td class="num sc">${n3(scoreLinha(l,r))}</td>
+    <td>${dis?'':`<button class="btn sm ghost" data-dup title="Duplicar">⧉</button><button class="btn sm ghost" data-del title="Remover" style="color:var(--red-d)">✕</button>`}</td>
+  </tr>`).join('') || `<tr><td colspan="15" class="muted">Sem linhas. ${dis?'':'Use “+ Linha”.'}</td></tr>`}</tbody>
+  <tfoot><tr class="tot"><td colspan="6">${L.length} linha(s)</td><td class="num" id="t-rl">${eur(r.totRLMC)}</td><td colspan="6"></td><td class="num" id="t-sc">${n3(r.totScore)}</td><td></td></tr></tfoot></table>`;
+  $('#lines').querySelectorAll('[data-l]').forEach(el=>{
+    const ev = el.type==='checkbox'||el.tagName==='SELECT' ? 'change' : 'input';
+    el.addEventListener(ev,()=>{
+      const i=+el.closest('tr').dataset.i, k=el.dataset.l, l=L[i];
+      l[k] = el.type==='checkbox'?el.checked : k==='rlmc'?(parseFloat(el.value)||0) : k==='prazo'?+el.value : el.value;
+      S.dirty = true;
+      if (k==='ref') { const pr=S.prodMap[el.value.trim().toUpperCase()]; if (pr) { Object.assign(l,{ref:pr.ref,designacao:pr.designacao,tier:pr.tier,pricingPlan:pr.pricingPlan,descontinuado:pr.descontinuado}); if(pr.categoria==='Fixo' && /Móvel/.test(l.natureza)) l.natureza=l.natureza.replace('Móvel','Fixo'); if(pr.categoria==='Móvel' && /Fixo/.test(l.natureza)) l.natureza=l.natureza.replace('Fixo','Móvel'); drawLines(dis); return; } }
+      updTotals();
+    });
+  });
+  $('#lines').querySelectorAll('[data-dup]').forEach(b=>b.onclick=()=>{ const i=+b.closest('tr').dataset.i; L.splice(i+1,0,linhaVazia(L[i])); S.dirty=true; drawLines(dis); });
+  $('#lines').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const i=+b.closest('tr').dataset.i; L.splice(i,1); S.dirty=true; drawLines(dis); });
+}
+function recalc(){ const r=S.cur; r.nLinhas=r.linhas.length; r.totRLMC=Math.round(r.linhas.reduce((a,l)=>a+(+l.rlmc||0),0)*100)/100; r.totScore=Math.round(r.linhas.reduce((a,l)=>a+scoreLinha(l,r),0)*1000)/1000; r.linhas.forEach(l=>l.score=scoreLinha(l,r)); }
+function updTotals(){ recalc(); const r=S.cur; document.querySelectorAll('#lines tbody tr[data-i]').forEach(tr=>{ const c=tr.querySelector('.sc'); if(c) c.textContent=n3(scoreLinha(r.linhas[+tr.dataset.i],r)); }); if($('#t-rl')){ $('#t-rl').textContent=eur(r.totRLMC); $('#t-sc').textContent=n3(r.totScore); } }
+
+function bulkMsisdn(dis){
+  const L=S.cur.linhas;
+  modal(`<h2>Adicionar várias linhas</h2><p class="muted" style="margin-top:0">Uma MSISDN por linha (ou separadas por vírgula). ${L.length?`Copia referência, RLMC, prazo e natureza da última linha (<b>${esc(L.at(-1).ref)}</b>).`:'Será criada uma linha vazia por número.'}</p><textarea id="bm" rows="8"></textarea><div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Adicionar</button></div>`,(m,close)=>{
+    m.querySelector('#c').onclick=close;
+    m.querySelector('#ok').onclick=()=>{ const nums=m.querySelector('#bm').value.split(/[\s,;]+/).map(x=>x.replace(/\D/g,'')).filter(Boolean); const tpl=L.at(-1); nums.forEach(n=>L.push({...linhaVazia(tpl),msisdn:n})); S.dirty=true; close(); drawLines(dis); toast(`${nums.length} linha(s) adicionada(s).`); };
+  });
+}
+
+function tabOutros(tc, dis){
+  tc.innerHTML = `<div class="card"><h2>Morada de entrega de equipamentos</h2><div class="grid g2">
+      ${fld('Morada','cliente.morada1',dis)}${fld('Morada (cont.)','cliente.morada2',dis)}${fld('Localidade','cliente.localidade',dis)}${fld('Código postal','cliente.codPostal',dis)}
+    </div></div>
+    <div class="card"><div class="grid g4">
+      ${fld('Interlocutor','cliente.interlocutor',dis)}${fld('Telefone','cliente.telefone',dis)}${sel('Loja','loja',LOJAS,dis)}${sel('Prazo permanência (meses)','prazoPermanencia',PRAZOS,dis)}
+      ${fld('Data ativação','dtAtivacao',dis,'date')}${fld('Data fim equipamento','dtFimEquip',dis,'date')}${fld('Classificação cliente','classificacao',dis,'text','placeholder="Prospect, Cliente…"')}
+    </div></div>`;
+  tc.querySelector('[data-f="prazoPermanencia"]').addEventListener('change',e=>S.cur.prazoPermanencia=+e.target.value);
+}
+function tabCond(tc, dis){
+  tc.innerHTML = `<div class="card"><div class="grid g4">
+      ${fld('PN especial','condicoes.pnEspecial',dis,'checkbox')}${fld('Aprovação GA','condicoes.aprovacaoGA',dis,'checkbox')}${fld('Novo NIF','condicoes.novoNif',dis,'checkbox')}<div></div>
+      ${fld('Desconto €','condicoes.desconto',dis,'number','step="0.01"')}${fld('Subsidiação €','condicoes.subsidiacao',dis,'number','step="0.01"')}${fld('Reunião','condicoes.reuniao',dis,'date')}${fld('Info risco','condicoes.infoRisco',dis)}
+    </div><div style="margin-top:12px"><label>Resumo do negócio</label><textarea data-f="condicoes.resumo" rows="4" ${dis}>${esc(S.cur.condicoes?.resumo)}</textarea></div></div>
+    <div class="card"><h2>Contas / ciclo</h2><div class="grid g4">
+      ${fld('Conta GSM / ciclo','contas.gsm',dis)}${fld('Conta Dados / ciclo','contas.dados',dis)}${fld('Conta ADSL / ciclo','contas.adsl',dis)}${fld('Conta GSM2 / ciclo','contas.gsm2',dis)}${fld('Nova conta','contas.novaConta',dis)}
+    </div></div>`;
+}
+
+// ---- anexos ----
+function tabAnexos(tc, p){
+  const r=S.cur;
+  if (!r.id) { tc.innerHTML=`<div class="card muted">Guarde o RPN primeiro para poder anexar documentos.</div>`; return; }
+  const podeUp = isStaff() || p.own;
+  tc.innerHTML = `<div class="card">
+    ${podeUp?`<div class="row" style="margin-bottom:12px"><input type="file" id="fup" multiple style="max-width:420px"><button class="btn pri" id="bup">Carregar</button><span class="muted" style="font-size:12px">Comprovativo de aceitação: email do cliente, contrato assinado (PDF)… máx. 20 MB</span></div>`:''}
+    <table><thead><tr><th>Ficheiro</th><th>Por</th><th>Quando</th><th class="num">Tamanho</th><th></th></tr></thead><tbody id="axl"><tr><td colspan="5" class="muted">A carregar…</td></tr></tbody></table></div>`;
+  const un = onSnapshot(query(collection(db,'rpn',r.id,'anexos'),orderBy('em','desc')), s=>{
+    $('#axl').innerHTML = s.docs.map(d=>{ const a=d.data(); const pode = isBO() || isMaster() || (a.porUid===S.me.uid && r.estado==='Em Elaboração'); return `<tr><td><a href="#" data-open="${esc(a.path)}">${esc(a.nome)}</a></td><td>${esc(a.porNome)}</td><td>${tsTxt(a.em)}</td><td class="num">${Math.ceil((a.tamanho||0)/1024)} KB</td><td>${pode?`<button class="btn sm ghost" data-rm="${d.id}" data-p="${esc(a.path)}" style="color:var(--red-d)">Remover</button>`:''}</td></tr>`; }).join('') || `<tr><td colspan="5" class="muted">Sem anexos.</td></tr>`;
+    $('#axl').querySelectorAll('[data-open]').forEach(a=>a.onclick=async e=>{ e.preventDefault(); try{ window.open(await getDownloadURL(sref(st,a.dataset.open)),'_blank'); }catch(err){ toast(errTxt(err),true); } });
+    $('#axl').querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ if(!confirm('Remover este anexo?'))return; try{ await deleteObject(sref(st,b.dataset.p)).catch(()=>{}); await deleteDoc(doc(db,'rpn',r.id,'anexos',b.dataset.rm)); hist('Anexo removido', b.dataset.p.split('/').pop()); }catch(err){ toast(errTxt(err),true); } });
+  }, e=>toast(errTxt(e),true));
+  S.unsub.push(un);
+  $('#bup')?.addEventListener('click', async ()=>{
+    const fs=[...$('#fup').files]; if(!fs.length) return toast('Escolha um ficheiro.',true);
+    $('#bup').disabled=true;
+    try { for (const f of fs) { if (f.size>20*1024*1024) { toast(`${f.name}: excede 20 MB`,true); continue; }
+        const path=`rpn/${r.id}/${Date.now()}_${f.name.replace(/[^\w.\-]+/g,'_')}`;
+        await uploadBytes(sref(st,path), f, {contentType:f.type||'application/octet-stream'});
+        await addDoc(collection(db,'rpn',r.id,'anexos'),{nome:f.name,path,tamanho:f.size,tipo:f.type,porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()});
+        hist('Anexo adicionado', f.name); }
+      toast('Anexo(s) carregado(s).'); $('#fup').value='';
+    } catch(e){ toast(errTxt(e),true); } finally { $('#bup').disabled=false; }
+  });
+}
+
+// ---- mensagens ----
+function tabMsg(tc){
+  const r=S.cur;
+  if (!r.id) { tc.innerHTML=`<div class="card muted">Guarde o RPN primeiro.</div>`; return; }
+  tc.innerHTML = `<div class="card"><div class="msgs" id="ml"><span class="muted">A carregar…</span></div>
+    <textarea id="mt" rows="3" placeholder="Escrever mensagem para ${esc(r.vendedorUid===S.me.uid ? (r.boNome||'a BackOffice') : r.vendedorNome)}…"></textarea>
+    <div class="row" style="margin-top:8px"><label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" id="me" checked> Abrir também email no Outlook</label><span class="sp"></span><button class="btn pri" id="ms">Enviar</button></div></div>`;
+  const un = onSnapshot(query(collection(db,'rpn',r.id,'mensagens'),orderBy('em')), s=>{
+    const el=$('#ml'); if(!el) return;
+    el.innerHTML = s.docs.map(d=>{ const x=d.data(); return `<div class="msg ${x.porUid===S.me.uid?'mine':''}"><small>${esc(x.porNome)} · ${tsTxt(x.em)}</small>${esc(x.texto).replace(/\n/g,'<br>')}</div>`; }).join('') || `<span class="muted">Sem mensagens.</span>`;
+    el.scrollTop = el.scrollHeight;
+  }, e=>toast(errTxt(e),true));
+  S.unsub.push(un);
+  $('#ms').onclick = async ()=>{ const t=$('#mt').value.trim(); if(!t) return; try{ await addDoc(collection(db,'rpn',r.id,'mensagens'),{texto:t,porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()}); if($('#me').checked) enviarEmail(t); $('#mt').value=''; }catch(e){ toast(errTxt(e),true); } };
+}
+function enviarEmail(texto){
+  const r=S.cur; const para = r.vendedorUid===S.me.uid ? S.users[r.boUid]?.email : S.users[r.vendedorUid]?.email;
+  const url = location.href.split('#')[0].split('?')[0] + '#/rpn/' + r.id;
+  const body = `${texto ? texto+'\n\n' : ''}RPN ${r.numero} · ${r.cliente?.nome||''} (NIF ${r.cliente?.nif||''})\nEstado: ${r.estado}${(r.motivos||[]).length?' — '+r.motivos.join(', '):''}\n${url}`;
+  location.href = `mailto:${encodeURIComponent(para||'')}?subject=${encodeURIComponent(`RPN ${r.numero} – ${r.cliente?.nome||''}`)}&body=${encodeURIComponent(body)}`;
+}
+
+// ---- histórico ----
+function tabHist(tc){
+  const r=S.cur;
+  if (!r.id) { tc.innerHTML=`<div class="card muted">Sem histórico (RPN ainda não guardado).</div>`; return; }
+  tc.innerHTML = `<div class="card"><table class="hist"><thead><tr><th style="width:150px">Quando</th><th style="width:160px">Quem</th><th style="width:170px">Ação</th><th>Detalhe</th></tr></thead><tbody id="hl"><tr><td colspan="4" class="muted">A carregar…</td></tr></tbody></table></div>`;
+  const un = onSnapshot(query(collection(db,'rpn',r.id,'historico'),orderBy('em','desc')), s=>{
+    $('#hl').innerHTML = s.docs.map(d=>{ const h=d.data(); return `<tr><td>${tsTxt(h.em)}</td><td>${esc(h.porNome)}</td><td>${esc(h.acao)}</td><td>${esc(h.detalhe)}</td></tr>`; }).join('') || `<tr><td colspan="4" class="muted">Sem registos.</td></tr>`;
+  }, e=>toast(errTxt(e),true));
+  S.unsub.push(un);
+}
+function hist(acao, detalhe, id){ const rid=id||S.cur?.id; if(!rid) return Promise.resolve(); return addDoc(collection(db,'rpn',rid,'historico'),{acao,detalhe:detalhe||'',porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()}).catch(e=>console.warn('hist',e)); }
+
+const CAMPOS_HIST = [['estado','Estado'],['boNome','BO'],['vendedorNome','Vendedor'],['cliente.nome','Cliente'],['cliente.nif','NIF'],['nOportunidade','Oportunidade'],['subSfid','Sub-SFID'],['atividade','Atividade'],['dtAtivacao','Dt. ativação'],['nLinhas','Nº linhas'],['totRLMC','RLMC total'],['totScore','Score']];
+function diffTxt(a,b){
+  const out=[]; CAMPOS_HIST.forEach(([k,t])=>{ const x=getPath(a,k), y=getPath(b,k); if(String(x??'')!==String(y??'')) out.push(`${t}: ${x??'—'} → ${y??'—'}`); });
+  const ma=(a.motivos||[]).join(', '), mb=(b.motivos||[]).join(', '); if(ma!==mb) out.push(`Motivos: ${ma||'—'} → ${mb||'—'}`);
+  const ca=(a.linhas||[]).map(l=>l.contratoVDF).join(), cb=(b.linhas||[]).map(l=>l.contratoVDF).join(); if(ca!==cb) out.push('Contratos VDF atualizados');
+  return out.join('; ');
+}
+
+// ---------- 8. GUARDAR / SUBMETER (com distribuição automática da BO) ----------
+function validarSubmissao(r){
+  const e=[];
+  if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)');
+  if(!r.linhas.length) e.push('pelo menos 1 linha');
+  r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
+  return e;
+}
+function escolherBO(carga){
+  const lista = bos(); if(!lista.length) throw new Error('Não há BackOffices ativas configuradas para receber RPNs (Administração → Utilizadores → “Recebe RPN”).');
+  const min = Math.min(...lista.map(b=>carga[b.uid]||0));
+  const cand = lista.filter(b=>(carga[b.uid]||0)===min);
+  return cand[Math.floor(Math.random()*cand.length)];
+}
+async function guardar(opts={}){
+  const r = S.cur; recalc();
+  if (opts.submeter) { const e=validarSubmissao(r); if(e.length) return toast('Falta: '+e.join(', '), true); }
+  if (opts.submeter && !r.id) { const ok = await guardar({silencioso:true}); if(ok===false) return; }
+  const btns=[...document.querySelectorAll('.row .btn')]; btns.forEach(b=>b.disabled=true);
+  try {
+    const isNew = !r.id;
+    const rpnRef = isNew ? doc(collection(db,'rpn')) : doc(db,'rpn',r.id);
+    const data = JSON.parse(JSON.stringify({...r})); ['id','criadoEm','atualizadoEm'].forEach(k=>delete data[k]);
+    if (opts.submeter) { data.estado='Submetido'; data.submetidoEm=new Date().toISOString(); }
+    if (opts.devolver) { data.estado='Em Implementação'; data.motivos=[]; }
+    if (['Concluído','Cancelado','Reprovado'].includes(data.estado) && !data.fechadoEm) data.fechadoEm=new Date().toISOString();
+    if (!['Concluído','Cancelado','Reprovado'].includes(data.estado)) data.fechadoEm=null;
+    let old=null, boEscolhida=null;
+    await runTransaction(db, async tx => {
+      const cargaRef = doc(db,'config','cargaBO'), cntRef = doc(db,'counters','rpn');
+      const cs = await tx.get(cargaRef); const carga = cs.exists() ? {...(cs.data().carga||{})} : {};
+      let numero = data.numero;
+      if (isNew) { const c = await tx.get(cntRef); numero = c.exists() ? c.data().next : 1; tx.set(cntRef,{next:numero+1}); data.numero=numero; data.criadoEm=serverTimestamp(); data.criadoPor=S.me.uid; }
+      else { const s = await tx.get(rpnRef); old = s.data(); }
+      if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; }
+      const oldBo=old?.boUid||null, oldCnt=old?.cargaContada||0;
+      const newCnt = (ABERTOS.includes(data.estado) && data.boUid) ? data.nLinhas : 0;
+      if (oldBo && oldCnt) carga[oldBo] = Math.max(0,(carga[oldBo]||0) - oldCnt);
+      if (data.boUid && newCnt) carga[data.boUid] = (carga[data.boUid]||0) + newCnt;
+      data.cargaContada = newCnt;
+      if (oldCnt || newCnt) tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()});
+      data.atualizadoEm = serverTimestamp(); data.atualizadoPor = S.me.uid;
+      if (isNew) tx.set(rpnRef, data); else tx.set(rpnRef, data, {merge:true});
+    });
+    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm;
+    S.dirty = false;
+    if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
+    if (opts.submeter) await hist('Submetido', `Atribuído a ${data.boNome} (distribuição automática, ${data.nLinhas} linha(s))`);
+    else if (opts.devolver) await hist('Devolvido à BO', 'Pendência resolvida pelo comercial');
+    else if (old) { const d=diffTxt(old,data); if(d) await hist(old.estado!==data.estado?'Mudança de estado':'Alterado', d); }
+    if (!opts.silencioso) toast(opts.submeter?`Submetido. BackOffice: ${data.boNome}`:'Guardado.');
+    if (isNew) history.replaceState(null,'','#/rpn/'+rpnRef.id);
+    if (!opts.silencioso) drawFicha();
+    if (opts.submeter && confirm(`RPN ${data.numero} atribuído a ${data.boNome}. Enviar email de aviso?`)) enviarEmail('Novo RPN submetido.');
+    return true;
+  } catch(e){ console.error(e); toast(errTxt(e), true); return false; }
+  finally { btns.forEach(b=>b.disabled=false); }
+}
+async function eliminar(){
+  const r=S.cur; if(!confirm(`Eliminar definitivamente o RPN ${r.numero}?`)) return;
+  try {
+    await runTransaction(db, async tx => {
+      const cargaRef=doc(db,'config','cargaBO'); const cs=await tx.get(cargaRef);
+      if (r.boUid && r.cargaContada) { const carga={...(cs.data()?.carga||{})}; carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-r.cargaContada); tx.set(cargaRef,{carga,atualizadoEm:serverTimestamp()}); }
+      tx.delete(doc(db,'rpn',r.id));
+    });
+    S.dirty=false; toast('RPN eliminado.'); location.hash='#/lista';
+  } catch(e){ toast(errTxt(e),true); }
+}
+
+// ---------- 9. LIGAÇÃO ÀS PROPOSTAS ( ?prop=<base64 JSON> ) ----------
+function handlePropostaParam(){
+  const u = new URL(location.href), raw = u.searchParams.get('prop'); if(!raw) return;
+  u.searchParams.delete('prop'); history.replaceState(null,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams:'')+'#/novo');
+  let p; try { p = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g,'+').replace(/_/g,'/'))))); } catch(e){ toast('Dados da proposta inválidos.',true); return; }
+  const r = rpnVazio();
+  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||''); r.cliente.email = p.email||''; r.notas = p.notas||'';
+  r.propostaInfo = [p.tipo, p.tarif, p.mensalidade?`${p.mensalidade} €/mês`:'', p.duracao?`${p.duracao} meses`:''].filter(Boolean).join(' · ');
+  const segs = String(p.tarif||'').split(/\n|\|/).map(s=>s.trim()).filter(Boolean);
+  segs.forEach(sg=>{
+    const l = linhaVazia(); const br=[...sg.matchAll(/\[([^\]]+)\]/g)].map(x=>x[1]);
+    const pz = br.find(b=>/^\d+\s*m$/i.test(b)); if(pz) l.prazo=parseInt(pz); else if(p.duracao) l.prazo=+p.duracao||24;
+    const rf = br.filter(b=>!/^\d+\s*m$/i.test(b)).pop(); const pr = rf && S.prodMap[rf.toUpperCase()];
+    if (pr) Object.assign(l,{ref:pr.ref,designacao:pr.designacao,tier:pr.tier,pricingPlan:pr.pricingPlan,descontinuado:pr.descontinuado,natureza:pr.categoria==='Fixo'?'Ref Fixo':'Ref Móvel'});
+    else { l.ref = rf||''; l.designacao = sg.replace(/\[[^\]]+\]/g,'').replace(/^\d{9}\s*/,'').trim(); }
+    const ms = sg.match(/^(\d{9})\b/); if(ms) l.msisdn=ms[1];
+    r.linhas.push(l);
+  });
+  if (r.linhas.length===1 && p.mensalidade) r.linhas[0].rlmc = parseFloat(String(p.mensalidade).replace(',','.'))||0;
+  S.pendingNovo = r;
+  // aviso de duplicado
+  const q = isStaff() ? query(collection(db,'rpn'),where('propostaRef','==',r.propostaRef)) : query(collection(db,'rpn'),where('vendedorUid','==',S.me.uid),where('propostaRef','==',r.propostaRef));
+  if (r.propostaRef) getDocs(q).then(s=>{ if(!s.empty) toast(`Atenção: já existe o RPN ${s.docs[0].data().numero} para esta proposta.`, true); }).catch(()=>{});
+}
+
+// ---------- 10. ADMINISTRAÇÃO (master) ----------
+let ADM_TAB = 'users';
+function viewAdmin(){
+  const m=$('#main');
+  m.innerHTML = `<div class="tabs">${[['users','Utilizadores'],['cat','Catálogo PHC'],['carga','Carga BO & numeração']].map(([k,t])=>`<a data-t="${k}" class="${ADM_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="adm"></div>`;
+  m.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ ADM_TAB=a.dataset.t; viewAdmin(); });
+  ({users:admUsers,cat:admCat,carga:admCarga})[ADM_TAB]($('#adm'));
+}
+function admUsers(el){
+  const us = Object.entries(S.users).sort((a,b)=>(a[1].nome||'').localeCompare(b[1].nome||''));
+  el.innerHTML = `<div class="card"><h2>Novo utilizador</h2><div class="grid g4">
+      <div><label>Nome</label><input id="nu-nome"></div><div><label>Utilizador</label><input id="nu-user" placeholder="ex: pmota"></div>
+      <div><label>Email</label><input id="nu-email" placeholder="ex: pmota@${EMAIL_DOMAIN}"></div><div><label>Password inicial (mín. 8)</label><input id="nu-pw" type="text"></div>
+      <div><label>Perfil</label><select id="nu-perfil">${PERFIS.map(p=>`<option value="${p}">${PERFIL_TXT[p]}</option>`).join('')}</select></div>
+      <div><label>SFID</label><input id="nu-sfid"></div><div><label>Nº vendedor PHC</label><input id="nu-vend"></div>
+      <div style="align-self:end"><button class="btn pri" id="nu-ok">Criar utilizador</button></div></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">O utilizador deve mudar a password no primeiro acesso (botão “Password”).</p></div>
+    <div class="card scroll"><table><thead><tr><th>Nome</th><th>Utilizador</th><th>Email</th><th>Perfil</th><th>SFID</th><th>Vend. PHC</th><th>Recebe RPN</th><th>Ativo</th><th></th></tr></thead><tbody>
+    ${us.map(([uid,u])=>`<tr data-uid="${uid}"><td><input data-k="nome" value="${esc(u.nome)}"></td><td>${esc(u.username)}</td><td>${esc(u.email)}</td>
+      <td><select data-k="perfil">${PERFIS.map(p=>`<option value="${p}" ${u.perfil===p?'selected':''}>${PERFIL_TXT[p]}</option>`).join('')}</select></td>
+      <td><input data-k="sfid" value="${esc(u.sfid)}" style="width:100px"></td><td><input data-k="vendedorPHC" value="${esc(u.vendedorPHC)}" style="width:80px"></td>
+      <td style="text-align:center"><input type="checkbox" data-k="recebeRPN" ${u.recebeRPN?'checked':''}></td><td style="text-align:center"><input type="checkbox" data-k="ativo" ${u.ativo?'checked':''}></td>
+      <td><button class="btn sm" data-save>Guardar</button> <button class="btn sm ghost" data-reset>Reset pw</button></td></tr>`).join('')}
+    </tbody></table></div>`;
+  $('#nu-user').oninput=e=>{ if(!$('#nu-email')._t) $('#nu-email').value = e.target.value?`${e.target.value}@${EMAIL_DOMAIN}`:''; };
+  $('#nu-email').oninput=e=>e.target._t=true;
+  $('#nu-ok').onclick = async ()=>{
+    const d={nome:$('#nu-nome').value.trim(),username:$('#nu-user').value.trim().toLowerCase(),email:$('#nu-email').value.trim().toLowerCase(),perfil:$('#nu-perfil').value,sfid:$('#nu-sfid').value.trim(),vendedorPHC:$('#nu-vend').value.trim(),ativo:true,recebeRPN:['backoffice','bo_financeiro'].includes($('#nu-perfil').value)};
+    const pw=$('#nu-pw').value; if(!d.nome||!d.email) return toast('Nome e email obrigatórios.',true); if(pw.length<8) return toast('Password com mínimo 8 caracteres.',true);
+    const sec = initializeApp(cfg, 'sec-'+Date.now()); const sa=getAuth(sec); if(EMU) connectAuthEmulator(sa,'http://127.0.0.1:9099',{disableWarnings:true});
+    try { const c=await createUserWithEmailAndPassword(sa,d.email,pw); await setDoc(doc(db,'users',c.user.uid),{...d,criadoEm:serverTimestamp()}); await signOut(sa); toast(`Utilizador ${d.nome} criado.`); await loadUsers(); admUsers(el); }
+    catch(e){ toast(errTxt(e),true); } finally { deleteApp(sec).catch(()=>{}); }
+  };
+  el.querySelectorAll('[data-save]').forEach(b=>b.onclick=async()=>{ const tr=b.closest('tr'), uid=tr.dataset.uid, upd={};
+    tr.querySelectorAll('[data-k]').forEach(i=>upd[i.dataset.k]= i.type==='checkbox'?i.checked:i.value.trim());
+    if(uid===S.me.uid && (upd.perfil!=='master'||!upd.ativo)) return toast('Não pode retirar o seu próprio acesso de master.',true);
+    try{ await updateDoc(doc(db,'users',uid),upd); Object.assign(S.users[uid],upd); toast('Guardado.'); }catch(e){ toast(errTxt(e),true); } });
+  el.querySelectorAll('[data-reset]').forEach(b=>b.onclick=async()=>{ const u=S.users[b.closest('tr').dataset.uid]; if(!confirm(`Enviar email de reposição de password para ${u.email}?`))return; try{ await sendPasswordResetEmail(auth,u.email); toast('Email enviado.'); }catch(e){ toast(errTxt(e),true); } });
+}
+
+// Catálogo: colar export PHC (Sub_familia | Referencia | Designacao | Tipo_tarif | Pricingplan | Descontinuado)
+function parseCatalogo(txt){
+  const out=[], seen=new Set();
+  txt.split(/\r?\n/).forEach(line=>{
+    if(!line.trim()) return;
+    let c = line.includes('\t') ? line.split('\t') : line.split(/\s{2,}/);
+    c = c.map(x=>x.trim()); while(c.length && c[0]==='') c.shift(); while(c.length && c.at(-1)==='') c.pop();
+    if (c.length<6) return;
+    const [sub,ref,des,tier,pp,dsc] = c;
+    if (/^sub_?famil/i.test(sub) || !ref) return;
+    const ppn = parseFloat(String(pp).replace(/\./g,'').replace(',','.'))||0;
+    const T = {gold:'Gold',silver:'Silver',bronze:'Bronze',estanho:'Estanho'}[tier.toLowerCase()]||tier;
+    const key = ref.toUpperCase(); if (seen.has(key)) return; seen.add(key);
+    out.push({ref, designacao:des, subfamilia:sub, tier:T, pricingPlan: ppn?String(Math.round(ppn)):'', descontinuado:/^s/i.test(dsc), categoria: /^fixo/i.test(sub)?'Fixo':'Móvel'});
+  });
+  return out;
+}
+const prodId = ref => ref.toUpperCase().replace(/[\/\s]+/g,'_').replace(/^\.+$/,'_')||'_';
+function admCat(el){
+  el.innerHTML = `<div class="card"><h2>Importar / atualizar catálogo</h2>
+    <p class="muted" style="margin-top:0">Cole aqui o export do PHC (família VODAFONENEGOCIOS) com as colunas <b>Sub_familia · Referência · Designação · Tipo tarifário · Pricingplan · Descontinuado</b>. Referências já existentes são atualizadas; as restantes ficam como estão.</p>
+    <textarea id="ct" rows="8" placeholder="Colar aqui…"></textarea>
+    <div class="row" style="margin-top:8px"><button class="btn" id="cp">Pré-visualizar</button><button class="btn pri" id="ci" disabled>Importar</button><span id="cs" class="muted"></span></div>
+    <div id="cprev" class="scroll" style="max-height:260px;margin-top:8px"></div></div>
+    <div class="card"><div class="row" style="margin-bottom:8px"><h2 style="margin:0">Catálogo atual (${S.prodList.length})</h2><span class="sp"></span><input id="cf" placeholder="Filtrar…" style="max-width:260px"></div>
+    <div class="scroll" style="max-height:480px" id="clist"></div></div>`;
+  const tbl = rows => `<table><thead><tr><th>Sub-fam.</th><th>Referência</th><th>Designação</th><th>Tier</th><th>PricingPlan</th><th>Desc.</th><th>Categoria</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(p.subfamilia)}</td><td>${esc(p.ref)}</td><td>${esc(p.designacao)}</td><td>${esc(p.tier)}</td><td>${esc(p.pricingPlan)||'<span style="color:var(--red-d)">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td><td>${esc(p.categoria)}</td></tr>`).join('')}</tbody></table>`;
+  const drawList = () => { const f=($('#cf').value||'').toLowerCase(); $('#clist').innerHTML = tbl(S.prodList.filter(p=>!f||(p.ref+' '+p.designacao+' '+p.tier).toLowerCase().includes(f))); };
+  $('#cf').oninput = drawList; drawList();
+  let parsed=[];
+  $('#cp').onclick=()=>{ parsed=parseCatalogo($('#ct').value); const novos=parsed.filter(p=>!S.prodMap[p.ref.toUpperCase()]).length, semPP=parsed.filter(p=>!p.pricingPlan).length;
+    $('#cs').textContent = `${parsed.length} referências lidas · ${novos} novas · ${parsed.length-novos} a atualizar${semPP?` · ${semPP} sem PricingPlan`:''}`;
+    $('#cprev').innerHTML = tbl(parsed); $('#ci').disabled = !parsed.length; };
+  $('#ci').onclick=async()=>{ $('#ci').disabled=true;
+    try { for (let i=0;i<parsed.length;i+=400){ const b=writeBatch(db); parsed.slice(i,i+400).forEach(p=>b.set(doc(db,'produtos',prodId(p.ref)),{...p,atualizadoEm:serverTimestamp()},{merge:true})); await b.commit(); }
+      toast(`${parsed.length} referências importadas.`); await loadProdutos(); admCat(el);
+    } catch(e){ toast(errTxt(e),true); $('#ci').disabled=false; } };
+}
+async function admCarga(el){
+  const [cs,cn] = await Promise.all([getDoc(doc(db,'config','cargaBO')), getDoc(doc(db,'counters','rpn'))]);
+  const carga = cs.data()?.carga||{};
+  el.innerHTML = `<div class="card"><h2>Carga atual das BackOffices</h2><p class="muted" style="margin-top:0">Linhas em RPNs abertos (Submetido, Em Implementação, Pendentes). Cada novo RPN submetido vai para a BO com menor carga; em empate, sorteio.</p>
+    <table style="max-width:520px"><thead><tr><th>BackOffice</th><th class="num">Linhas abertas</th></tr></thead><tbody>${bos().map(b=>`<tr><td>${esc(b.nome)}</td><td class="num">${carga[b.uid]||0}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">Nenhuma BO marcada com “Recebe RPN”.</td></tr>'}</tbody></table>
+    <button class="btn" id="rc" style="margin-top:12px">Recalcular a partir dos RPN</button></div>
+    <div class="card"><h2>Numeração</h2><div class="row"><div style="width:200px"><label>Próximo nº de RPN</label><input type="number" id="nx" value="${cn.data()?.next||1}"></div><button class="btn" id="nxs" style="align-self:end">Guardar</button></div>
+    <p class="muted" style="font-size:12px">Sugestão: começar acima da numeração do sistema atual para evitar confusões (ex.: 60001).</p></div>`;
+  $('#nxs').onclick=async()=>{ const v=parseInt($('#nx').value); if(!(v>0)) return; try{ await setDoc(doc(db,'counters','rpn'),{next:v}); toast('Numeração atualizada.'); }catch(e){ toast(errTxt(e),true); } };
+  $('#rc').onclick=async()=>{ try{ const s=await getDocs(collection(db,'rpn')); const c={}; const b=writeBatch(db); let n=0;
+      s.forEach(d=>{ const r=d.data(); const cnt=(ABERTOS.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt; if((r.cargaContada||0)!==cnt && n<450){ b.update(d.ref,{cargaContada:cnt}); n++; } });
+      b.set(doc(db,'config','cargaBO'),{carga:c,atualizadoEm:serverTimestamp()}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
+}
+</script>
+</body>
+</html>
