@@ -1438,6 +1438,7 @@ function renderM(){
         +'<button class="btn btn-g btn-sm" style="padding:5px 10px" onclick="viewL(\'' +p.id+ '\')">👁</button>'
         +(p.estado==='pendente'?'<button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--orange);border-color:var(--orange)" onclick="editL(\'' +p.id+ '\')">✏️</button>':'')
         +(p.estado==='ganho'||p.estado==='perdido'?'<button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--blue);border-color:var(--blue)" onclick="dupL(\'' +p.id+ '\')">📋</button>':'')
+        +(p.estado==='ganho'?'<button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--green);border-color:var(--green)" title="Transformar em RPN" onclick="toRPN(\'' +p.id+ '\')">RPN</button>':'')
       +'</td>';
     tbody.appendChild(tr);
   });
@@ -1526,6 +1527,16 @@ function editL(id){
   window._currentPropRef = null; // força nova referência para a versão editada
   PREVIEWED=true; // editL calls genPrev() above
   toast('✏️','Proposta carregada para edição — grave para criar nova versão');
+}
+
+// ── Transformar proposta ganha em RPN ──
+const RPN_URL='https://redemovel.github.io/redemovel-propostas/rpn-dev.html'; // produção: rpn.html
+function toRPN(id){
+  const p=LD.find(x=>x.id===id);
+  if(!p){toast('⚠','Proposta não encontrada');return;}
+  const d={ref:p.id,cliente:p.cliente,nif:p.nif||'',comercial:p.comercial,tipo:p.tipo,tarif:p.tarif,mensalidade:p.mensalidade,duracao:p.duracao,notas:p.notas||''};
+  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  window.open(RPN_URL+'?prop='+b64,'_blank');
 }
 
 function dupL(id){
