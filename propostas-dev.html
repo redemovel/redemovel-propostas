@@ -381,7 +381,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
     </div>
     <div class="sgrid" id="m-stats"></div>
     <div class="tw"><div class="tt"><div class="ttit">Propostas</div></div>
-    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Mensalidade</th><th>Estado</th><th>Ações</th></tr></thead><tbody id="m-body"></tbody></table></div></div>
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Mensalidade</th><th>Estado</th><th>Ações</th></tr></thead><tbody id="m-body"></tbody></table></div>
+    <div id="m-mais" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;border-top:1px solid var(--border)"></div></div>
   </div>
 
   <!-- DASHBOARD -->
@@ -488,7 +489,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
         <li>No SQL Server Management Studio: <b>Tools › Options › Query Results › SQL Server › Results to Grid</b> e marque <i>Include column headers when copying or saving the results</i>.</li>
         <li>Copie a consulta abaixo, cole numa janela <b>New Query</b> e carregue em <b>Execute</b>.</li>
         <li>Clique na grelha de resultados, botão direito › <b>Save Results As…</b>, tipo <b>Text (Tab delimited) (*.txt)</b>. (Em alternativa: Ctrl+A, Ctrl+C, colar no Bloco de Notas e guardar.)</li>
-        <li>Escolha aqui o ficheiro e carregue em <b>Analisar e importar</b>. Antes de gravar, o registo acima mostra os totais e pede confirmação.</li>
+        <li>Escolha aqui o ficheiro e carregue em <b>Analisar ficheiro</b>. O registo acima mostra os totais; só grava depois de carregar em <b>Confirmar importação</b>.</li>
       </ol>
       <textarea class="finp" id="adm-sql" rows="5" readonly style="font-family:monospace;font-size:10px;margin-bottom:8px;white-space:pre">-- Redemóvel · exportação única de clientes do PHC para a plataforma
 -- Filtro: activos, só sede, vendedores actuais, com conta Vodafone OU dossier OU tipo de cliente
@@ -551,7 +552,8 @@ ORDER BY c.no DESC;
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-g btn-sm" onclick="admCopiaSQL()">📋 Copiar consulta</button>
         <input type="file" id="adm-cli-file" accept=".txt,.csv,.tsv,text/plain" style="font-size:12px;color:var(--muted)">
-        <button class="btn btn-r btn-sm" onclick="admRun('Clientes PHC',admCliFile)">Analisar e importar</button>
+        <button class="btn btn-r btn-sm" onclick="admRun('Clientes PHC',admCliFile)">Analisar ficheiro</button>
+        <button class="btn btn-gr btn-sm" id="adm-cli-ok" style="display:none" onclick="admRun('Clientes PHC',admCliConfirma)"></button>
         <button class="btn btn-g btn-sm" onclick="admRun('Índice',admCliIdx)">↻ Reconstruir índice de pesquisa</button>
       </div>
       <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);margin-top:10px"><input type="checkbox" id="adm-cli-subst"> Se repetir a importação: substituir as fichas que já existem (perde alterações feitas na plataforma)</label>
@@ -626,13 +628,40 @@ const BT=[
 const SU_ANTIGA="https://script.google.com/macros/s/AKfycbyEA8cL7L9uMcAhpujjIgV72MOtrh2Fvv8-Ozl2UJy0FdzYAFkKpi0yyw-SKVD_Rb4C/exec"; // só para a importação inicial (Administração)
 const EMAIL_DOMAIN='redemovel.pt';
 const RPN_URL='rpn-dev.html'; // produção: rpn.html
-let RES_OUTROS=[]; // resumo (sem clientes nem tarifários) das propostas dos colegas, para as comparações do dashboard
+let RES_TODAS=[]; // resumo de TODAS as propostas (comercial, estado, tipo, mensalidade, data) — alimenta dashboard e ranking com poucas leituras
+let WIN_DIAS=0;   // quantos dias de propostas fechadas (ganhas/perdidas) já foram carregados; 0 = só as em aberto
+let DIA_OK=false; // as propostas já têm a data em formato pesquisável (campo "dia")
+const WIN_PASSO=30;
 let _entered=false;
 
 function mapPerfil(p){return p==='bo_financeiro'?'backoffice':(p||'comercial');}
 function userToCM(u){return {uid:u.uid,nome:u.nome||'',email:u.emailContacto||u.email||'',telefone:u.telefone||'',funcao:mapPerfil(u.perfil),perfil:u.perfil||'',fotoURL:u.fotoURL||'',vendedor:String(u.vendedorPHC||''),ultimaAlteracao:u.passAlteradaEm||''};}
 function isStaffCU(){return !!CU&&(CU.funcao==='coordenador'||CU.funcao==='master'||CU.funcao==='backoffice');}
-function dbLD(){return isStaffCU()?LD:LD.concat(RES_OUTROS);}
+// dados para dashboard/estatísticas: as propostas carregadas + o resumo das restantes
+function dbLD(){const ids=new Set(LD.map(p=>p.id));return LD.concat(RES_TODAS.filter(r=>!ids.has(r.id)));}
+function isoDia(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function fundeLD(novas){
+  const m={};LD.forEach(p=>m[p.id]=p);novas.forEach(p=>{if(!m[p.id])m[p.id]=p;});
+  LD=Object.values(m).sort((a,b)=>(a.ord||0)-(b.ord||0));
+}
+// carrega mais 30 dias de propostas fechadas (ganhas, perdidas, substituídas)
+async function maisPropostas(){
+  if(!DIA_OK){toast('⚠','O histórico ainda não está preparado. O administrador (Master) tem de entrar uma vez na aplicação.');return;}
+  const bt=document.getElementById('m-mais-b');if(bt)bt.disabled=true;
+  try{
+    const dias=[];for(let i=WIN_DIAS;i<WIN_DIAS+WIN_PASSO;i++){const d=new Date();d.setDate(d.getDate()-i);dias.push(isoDia(d));}
+    const novas=await FB.propostasJanela(isStaffCU()?null:CU.uid,dias);
+    const antes=LD.length;fundeLD(novas);WIN_DIAS+=WIN_PASSO;
+    toast('✓',(LD.length-antes)+' proposta(s) fechada(s) acrescentada(s) — últimos '+WIN_DIAS+' dias');
+    renderM();renderDB();
+  }catch(e){console.error(e);toast('⚠','Erro ao carregar: '+fbErr(e));}
+  if(bt)bt.disabled=false;
+}
+function renderMais(){
+  const el=document.getElementById('m-mais');if(!el)return;
+  el.innerHTML='<span style="color:var(--muted);font-size:12px">A mostrar: propostas <b>em aberto</b>'+(WIN_DIAS?' + ganhas e perdidas dos <b>últimos '+WIN_DIAS+' dias</b>':'')+'</span>'
+    +'<button class="btn btn-g btn-sm" id="m-mais-b" onclick="maisPropostas()">'+(WIN_DIAS?'＋ mais '+WIN_PASSO+' dias (até '+(WIN_DIAS+WIN_PASSO)+')':'Ver ganhas e perdidas dos últimos '+WIN_PASSO+' dias')+'</button>';
+}
 function fbErr(e){
   const c=(e&&e.code)||'';
   if(c.includes('invalid-credential')||c.includes('wrong-password')||c.includes('user-not-found')||c.includes('invalid-email'))return 'Utilizador ou password incorretos';
@@ -717,15 +746,18 @@ async function doLogin(){
 async function loadLogAndClients(){
   const staff=isStaffCU();
   try{
-    LD=await FB.propostas(staff?null:CU.uid);
-    RES_OUTROS=[];
-    if(!staff){
-      try{RES_OUTROS=(await FB.resumo()).filter(r=>r.comercial!==CU.nome);}catch(e){console.error('Resumo:',e);}
-    }
-    console.log('Propostas carregadas:',LD.length);
+    // só as propostas em aberto; as fechadas carregam-se a pedido, de 30 em 30 dias
+    LD=await FB.propostasAbertas(staff?null:CU.uid);
+    WIN_DIAS=0;RES_TODAS=[];
+    try{RES_TODAS=await FB.resumo();}catch(e){console.error('Resumo:',e);}
+    try{
+      DIA_OK=await FB.diaOk();
+      if(!DIA_OK&&CU.funcao==='master'){const n=await FB.prepararDias();DIA_OK=true;console.log('Datas preparadas em '+n+' propostas');}
+    }catch(e){console.error('Preparação das datas:',e);}
+    console.log('Propostas em aberto:',LD.length,'· no resumo:',RES_TODAS.length);
     renderM();
     renderDB();
-    if(LD.length>0)toast('✓',LD.length+' propostas carregadas do histórico');
+    toast('✓',LD.length+' proposta(s) em aberto');
   }catch(e){console.error('Erro ao carregar propostas:',e);toast('⚠','Erro ao carregar propostas: '+fbErr(e));}
   // Clientes — cada comercial só recebe os da sua carteira (garantido pelas regras da base de dados)
   try{
@@ -1473,6 +1505,7 @@ function copyTxt(){
 
 function renderM(){
   if(!CU)return;
+  renderMais();
   const isC=CU.funcao==='coordenador'||CU.funcao==='master'||CU.funcao==='backoffice';
   let data=isC?LD:LD.filter(p=>p.comercial===CU.nome);
   // Populate and show comercial filter for coord/master/backoffice
@@ -1481,7 +1514,7 @@ function renderM(){
     if(isC){
       fCom.style.display='block';
       const curVal=fCom.value;
-      const names=[...new Set(LD.map(p=>p.comercial).filter(Boolean))].sort();
+      const names=[...new Set(dbLD().map(p=>p.comercial).filter(Boolean))].sort();
       fCom.innerHTML='<option value="">Todos os comerciais</option>';
       names.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;if(n===curVal)o.selected=true;fCom.appendChild(o);});
     } else {
@@ -1496,12 +1529,14 @@ function renderM(){
   if(fT)data=data.filter(p=>p.tipo===fT);
   if(fS)data=data.filter(p=>p.estado===fS);
   if(fR)data=data.filter(p=>p.cliente?.toLowerCase().includes(fR)||p.tarif?.toLowerCase().includes(fR)||p.nif?.includes(fR));
-  const dataActive=data.filter(p=>p.estado!=='substituida');
+  // totais: todas as propostas (carregadas + resumo), com os filtros de comercial e tipo
+  let base=dbLD();if(!isC)base=base.filter(p=>p.comercial===CU.nome);if(fComVal)base=base.filter(p=>p.comercial===fComVal);if(fT)base=base.filter(p=>p.tipo===fT);
+  const dataActive=base.filter(p=>p.estado!=='substituida');
   const tot=dataActive.length,gan=dataActive.filter(p=>p.estado==='ganho').length,pen=dataActive.filter(p=>p.estado==='pendente').length;
   const tx=tot>0?Math.round(gan/tot*100):0;
   document.getElementById('m-stats').innerHTML='<div class="sc"><div class="sv">'+tot+'</div><div class="sl">Total</div></div><div class="sc cg"><div class="sv">'+gan+'</div><div class="sl">Ganhos</div></div><div class="sc co"><div class="sv">'+pen+'</div><div class="sl">Pendentes</div></div><div class="sc cb"><div class="sv">'+tx+'%</div><div class="sl">Taxa Sucesso</div></div>';
   const tbody=document.getElementById('m-body');tbody.innerHTML='';
-  if(!data.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">Sem propostas registadas</td></tr>';return;}
+  if(!data.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">'+((fS&&fS!=='pendente'&&!WIN_DIAS)?'As propostas ganhas e perdidas não estão carregadas. Use o botão abaixo da tabela.':'Sem propostas para mostrar')+'</td></tr>';return;}
   [...data].reverse().forEach(p=>{
     const tr=document.createElement('tr');
     const mens=p.mensalidade?parseFloat(p.mensalidade).toFixed(2).replace('.',',')+' €':'—';
@@ -2033,10 +2068,15 @@ function renderCliLista(){
   const fv=isStaffCU()?document.getElementById('cli-fv').value:'';
   let d=CL;
   if(fv==='__sem')d=d.filter(c=>!c.vendedor);else if(fv)d=d.filter(c=>c.vendnm===fv);
-  if(q)d=d.filter(c=>c.nome.toLowerCase().includes(q)||String(c.ncont).includes(q)||(c.local||'').toLowerCase().includes(q));
-  document.getElementById('cli-n').textContent=d.length.toLocaleString('pt-PT')+' cliente(s)'+(d.length>100?' · a mostrar os primeiros 100':'');
   const tb=document.getElementById('cli-body');tb.innerHTML='';
-  if(!d.length){tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:28px">'+(CL.length?'Nenhum cliente encontrado':'Sem clientes na sua carteira')+'</td></tr>';return;}
+  // a lista abre vazia: só mostra resultados depois de escrever 2 letras (ou de escolher um vendedor)
+  if(q.length<2&&!fv){
+    document.getElementById('cli-n').textContent=CL.length.toLocaleString('pt-PT')+' cliente(s)'+(isStaffCU()?'':' na sua carteira');
+    tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:28px">'+(CL.length?'Escreva pelo menos 2 letras do nome, do NIF ou da localidade':'Sem clientes na sua carteira')+'</td></tr>';return;
+  }
+  if(q.length>=2)d=d.filter(c=>c.nome.toLowerCase().includes(q)||String(c.ncont).includes(q)||(c.local||'').toLowerCase().includes(q));
+  document.getElementById('cli-n').textContent=d.length.toLocaleString('pt-PT')+' cliente(s) encontrado(s)'+(d.length>100?' · a mostrar os primeiros 100, afine a pesquisa':'');
+  if(!d.length){tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:28px">Nenhum cliente encontrado</td></tr>';return;}
   d.slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).slice(0,100).forEach(c=>{
     const tr=document.createElement('tr');tr.style.cursor='pointer';
     tr.innerHTML='<td style="font-weight:600">'+eh(c.nome)+'</td><td style="font-family:monospace;font-size:12px">'+eh(c.ncont)+'</td><td>'+eh(c.local||c.area||'')+'</td><td style="color:var(--muted)">'+eh(c.vendnm||'—')+'</td>';
@@ -2057,7 +2097,15 @@ function novoCli(){
   CLI_CUR={ncont:'',nome:'',vendedor:CU.funcao==='comercial'?CU.vendedor:''};
   CLI_NOVO=true;CLI_EDIT=true;CLI_TAB='ident';desenharCli();
 }
-function cliTab(t){cliLer();CLI_TAB=t;desenharCli();}
+async function cliTab(t){
+  cliLer();CLI_TAB=t;
+  if(t==='hist'&&CLI_CUR&&!CLI_CUR._hist){
+    CLI_CUR._hist=[];desenharCli();const f=CLI_CUR;
+    try{f._hist=await FB.propostasNif(isStaffCU()?null:CU.uid,f.ncont);}catch(e){console.error(e);toast('⚠','Erro ao carregar as propostas: '+fbErr(e));}
+    if(CLI_CUR!==f)return;
+  }
+  desenharCli();
+}
 function cliLer(){
   if(!CLI_EDIT||!CLI_CUR)return;
   document.querySelectorAll('#cli-form [data-k]').forEach(el=>{CLI_CUR[el.dataset.k]=el.value.trim();});
@@ -2072,7 +2120,7 @@ function desenharCli(){
     +(CLI_NOVO?'':'<button class="btn '+(CLI_TAB==='hist'?'btn-r':'btn-g')+' btn-sm" onclick="cliTab(\'hist\')">Propostas</button>');
   const form=document.getElementById('cli-form');
   if(CLI_TAB==='hist'){
-    const ps=LD.filter(p=>String(p.nif||'')===String(f.ncont)).slice().reverse();
+    const ps=(f._hist||[]).slice().reverse();
     form.style.display='block';
     form.innerHTML=ps.length?'<table class="tbl"><thead><tr><th>Data</th><th>Comercial</th><th>Tipo</th><th>Mensalidade</th><th>Estado</th><th>RPN</th></tr></thead><tbody>'
       +ps.map(p=>'<tr><td style="font-size:11px;color:var(--muted)">'+eh(p.data)+'</td><td>'+eh(p.comercial)+'</td><td>'+TB(p.tipo)+'</td><td>'+(p.mensalidade?parseFloat(p.mensalidade).toFixed(2).replace('.',',')+' €':'—')+'</td><td>'+EB(p.estado)+'</td><td>'+(p.rpnNumero?eh(p.rpnNumero):'—')+'</td></tr>').join('')+'</tbody></table>'
@@ -2195,11 +2243,19 @@ async function admCliFile(){
   if(r.malForm.length)admLog('  '+r.malForm.length+' linha(s) com nº de colunas errado (ignoradas): '+r.malForm.slice(0,20).join(', '),true);
   if(r.nifEstr)admLog('  '+r.nifEstr+' NIF que não passam na validação portuguesa (estrangeiros ou antigos) — importados na mesma.');
   if(!r.fichas.length)return;
+  _phcPend=r.fichas;
+  admLog('Clientes PHC: nada foi gravado ainda. Confira os números acima e carregue em "Confirmar importação".');
+  const bt=document.getElementById('adm-cli-ok');bt.textContent='✔ Confirmar importação de '+r.fichas.length+' clientes';bt.style.display='';
+  document.getElementById('adm-log').scrollIntoView({block:'center'});
+}
+let _phcPend=null;
+async function admCliConfirma(){
+  if(!_phcPend)return;
+  const fichas=_phcPend;_phcPend=null;document.getElementById('adm-cli-ok').style.display='none';
   const subst=document.getElementById('adm-cli-subst').checked;
-  if(!confirm('Importar '+r.fichas.length+' clientes para a plataforma?\n\nA lista de clientes atual (da folha Google) é substituída por esta.'))return;
-  const res=await FB.importFichas(r.fichas,subst,m=>admLog('  '+m));
+  const res=await FB.importFichas(fichas,subst,m=>admLog('  '+m));
   admLog('Clientes PHC: '+res.novas+' criados · '+res.substituidas+' atualizados · '+res.mantidas+' mantidos como estavam · '+res.blocos+' bloco(s) de pesquisa.');
-  inp.value='';
+  document.getElementById('adm-cli-file').value='';
   CL=await FB.clientes(null);admCliInfo();toast('✓','Importação de clientes terminada');
 }
 async function admCliIdx(){
@@ -2433,17 +2489,27 @@ const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app), db = getFirestore(app);
 
 const CAMPOS = ['data','comercial','cliente','tipo','tarif','mensalidade','duracao','estado','notas','cta','validade','validadeDias','nif'];
+const diaDe = d => { const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(String(d||'').trim()); return m ? m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0') : ''; };
 const anoDe = d => { const m = /(\d{4})\s*$/.exec(String(d||'')); return m ? m[1] : '0000'; };
 const resumoDe = p => ({ c: p.comercial||'', e: p.estado||'pendente', t: p.tipo||'', m: String(p.mensalidade||''), d: p.data||'' });
 const toLocal = (id, x) => ({ id, data: x.data||'', comercial: x.comercial||'', cliente: x.cliente||'', tipo: x.tipo||'', tarif: x.tarif||'',
   mensalidade: String(x.mensalidade ?? ''), duracao: String(x.duracao ?? ''), estado: x.estado||'pendente', notas: x.notas||'', cta: x.cta||'b',
   validade: x.validade||'', validadeDias: String(x.validadeDias ?? '15'), refPHC: x.refPHC||'', nif: String(x.nif||''),
-  comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', ord: x.ord||0 });
-const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); return o; };
+  comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', ord: x.ord||0, dia: x.dia||'' });
+const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); o.dia = diaDe(p.data); return o; };
 async function commitEmBlocos(ops, n = 400, prog) {
   for (let i = 0; i < ops.length; i += n) { const b = writeBatch(db); ops.slice(i, i + n).forEach(f => f(b)); await b.commit(); if (prog) prog(Math.min(i + n, ops.length), ops.length); }
 }
 const idxDe = f => ({ nome: f.nome||'', ncont: String(f.ncont||''), codpost: f.codpost||'', area: f.area||'', local: f.local||'', vendnm: f.vendnm||'' });
+
+// propostas com campo == valor; para o comercial junta comercialUid == uid.
+// Se o Firestore pedir um índice composto, recorre a só comercialUid e filtra no browser.
+async function doisFiltros(uid, campo, valor) {
+  const col = collection(db, 'propostas');
+  if (!uid) return (await getDocs(query(col, where(campo, '==', valor)))).docs;
+  try { return (await getDocs(query(col, where('comercialUid', '==', uid), where(campo, '==', valor)))).docs; }
+  catch (e) { if (e.code !== 'failed-precondition') throw e; console.warn('Índice em falta, a filtrar no browser:', e.message); return (await getDocs(query(col, where('comercialUid', '==', uid)))).docs.filter(d => d.data()[campo] === valor); }
+}
 
 window.FB = {
   onAuth: cb => onAuthStateChanged(auth, cb),
@@ -2465,9 +2531,38 @@ window.FB = {
     const s = await getDocs(q);
     return s.docs.map(d => toLocal(d.id, d.data())).sort((a, b) => a.ord - b.ord);
   },
+  // só as propostas em aberto (pendentes)
+  async propostasAbertas(uid) {
+    const docs = await doisFiltros(uid, 'estado', 'pendente');
+    return docs.map(d => toLocal(d.id, d.data())).sort((a, b) => a.ord - b.ord);
+  },
+  // propostas com data num conjunto de dias (máx. 30, no formato aaaa-mm-dd)
+  async propostasJanela(uid, dias) {
+    const col = collection(db, 'propostas'); let docs;
+    if (!uid) { const ord = dias.slice().sort(); docs = (await getDocs(query(col, where('dia', '>=', ord[0]), where('dia', '<=', ord[ord.length - 1])))).docs; }
+    else {
+      try { docs = (await getDocs(query(col, where('comercialUid', '==', uid), where('dia', 'in', dias)))).docs; }
+      catch (e) { if (e.code !== 'failed-precondition') throw e; const set = new Set(dias); docs = (await getDocs(query(col, where('comercialUid', '==', uid)))).docs.filter(d => set.has(d.data().dia)); }
+    }
+    return docs.map(d => toLocal(d.id, d.data()));
+  },
+  // todas as propostas de um NIF (ficha do cliente)
+  async propostasNif(uid, nif) {
+    const docs = await doisFiltros(uid, 'nif', String(nif));
+    return docs.map(d => toLocal(d.id, d.data())).sort((a, b) => a.ord - b.ord);
+  },
+  async diaOk() { const s = await getDoc(doc(db, 'config', 'propostas')); return s.exists() && s.data().diaOk === true; },
+  // (Master, uma vez) grava em cada proposta a data em formato pesquisável
+  async prepararDias() {
+    const s = await getDocs(collection(db, 'propostas')); const ops = [];
+    s.docs.forEach(d => { const dia = diaDe(d.data().data); if (d.data().dia !== dia) ops.push(b => b.update(d.ref, { dia })); });
+    await commitEmBlocos(ops);
+    await setDoc(doc(db, 'config', 'propostas'), { diaOk: true, preparadoEm: serverTimestamp() }, { merge: true });
+    return ops.length;
+  },
   async resumo() {
     const s = await getDocs(collection(db, 'resumoPropostas')); const out = [];
-    s.docs.forEach(d => Object.values(d.data().r || {}).forEach(x => out.push({ id: '', data: x.d||'', comercial: x.c||'', cliente: '', tipo: x.t||'', tarif: '', mensalidade: x.m||'', duracao: '', estado: x.e||'pendente', notas: '', validade: '', nif: '' })));
+    s.docs.forEach(d => Object.entries(d.data().r || {}).forEach(([id, x]) => out.push({ id, data: x.d||'', comercial: x.c||'', cliente: '', tipo: x.t||'', tarif: '', mensalidade: x.m||'', duracao: '', estado: x.e||'pendente', notas: '', validade: '', nif: '' })));
     return out;
   },
   async clientes(vendedor) {
@@ -2485,7 +2580,7 @@ window.FB = {
   },
   async setEstado(p, estado) {
     const b = writeBatch(db);
-    b.update(doc(db, 'propostas', p.id), { estado, atualizadoEm: serverTimestamp() });
+    b.update(doc(db, 'propostas', p.id), { estado, dia: diaDe(p.data), atualizadoEm: serverTimestamp() });
     b.set(doc(db, 'resumoPropostas', anoDe(p.data)), { r: { [p.id]: resumoDe({ ...p, estado }) } }, { merge: true });
     await b.commit();
   },
