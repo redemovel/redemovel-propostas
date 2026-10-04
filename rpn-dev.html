@@ -430,7 +430,10 @@ function tabPrincipal(tc, dis, p){
         ${p.edit?`<button class="btn sm" id="l-add">+ Linha</button><button class="btn sm" id="l-bulk">+ Várias MSISDN</button>`:''}</div>
       <div class="scroll" id="lines"></div>
     </div>
-    <div class="card"><label>Notas para a BackOffice</label><textarea data-f="notas" ${dis} rows="3">${esc(r.notas)}</textarea></div>
+    <div class="card"><div class="grid g2">
+      <div><label>Resumo do negócio</label><textarea data-f="condicoes.resumo" ${dis} rows="5">${esc(r.condicoes?.resumo)}</textarea></div>
+      <div><label>Notas para a BackOffice</label><textarea data-f="notas" ${dis} rows="5">${esc(r.notas)}</textarea></div>
+    </div></div>
     <div id="t-out"></div><div id="t-cond"></div>
     <datalist id="dl-prod">${S.prodList.map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)} · ${esc(x.tier)}</option>`).join('')}</datalist>`;
   drawLines(dis);
@@ -503,7 +506,7 @@ function tabCond(tc, dis){
   tc.innerHTML = `<div class="card"><h2>Condições comerciais</h2><div class="grid g4">
       ${fld('PN especial','condicoes.pnEspecial',dis,'checkbox')}${fld('Aprovação GA','condicoes.aprovacaoGA',dis,'checkbox')}${fld('Novo NIF','condicoes.novoNif',dis,'checkbox')}<div></div>
       ${fld('Desconto €','condicoes.desconto',dis,'number','step="0.01"')}${fld('Subsidiação €','condicoes.subsidiacao',dis,'number','step="0.01"')}${fld('Reunião','condicoes.reuniao',dis,'date')}${fld('Info risco','condicoes.infoRisco',dis)}
-    </div><div style="margin-top:12px"><label>Resumo do negócio</label><textarea data-f="condicoes.resumo" rows="4" ${dis}>${esc(S.cur.condicoes?.resumo)}</textarea></div></div>
+    </div></div>
     <div class="card"><h2>Contas / ciclo</h2><div class="grid g4">
       ${fld('Conta GSM / ciclo','contas.gsm',dis)}${fld('Conta Dados / ciclo','contas.dados',dis)}${fld('Conta ADSL / ciclo','contas.adsl',dis)}${fld('Conta GSM2 / ciclo','contas.gsm2',dis)}${fld('Nova conta','contas.novaConta',dis)}
     </div></div>`;
@@ -945,7 +948,7 @@ function pnParse(txt){
     if (o.ref) { const k=r.cliente; if(!k.email&&o.email) k.email=o.email; if(!k.interlocutor&&o.contacto) k.interlocutor=o.contacto; if(!k.morada1&&o.morada){ k.morada1=o.morada; k.localidade=o.local; k.codPostal=o.codpost; } if(!r.loja&&o.loja) r.loja=o.loja; }
     if (o.ref) r.linhas.push({ref:o.ref, designacao:o.design, natureza:o.u_natureza, msisdn:o.msisdn, nConta:o.conta, tipo:o.tipo, rlmc:num(o.rlmc), prazo:+o.u_pzperm||0, tier:o.u_tipotarv, pricingPlan:(o.u_pricplan==='0'?'':o.u_pricplan.replace(/\.0+$/,'')), descontinuado:o.u_descont==='1', upgrade:false, contratoVDF:o.u_contrvdf.toUpperCase(), oportunidade:o.u_oport, scorePHC:num(o.score)});
   }
-  const lista = Object.entries(pn).map(([id,r])=>{ r.nLinhas=r.linhas.length; r.totRLMC=Math.round(r.linhas.reduce((a,l)=>a+l.rlmc,0)*100)/100; r.totScore=Math.round(r.linhas.reduce((a,l)=>a+l.scorePHC,0)*1000)/1000;
+  const lista = Object.entries(pn).map(([id,r])=>{ if (!r.condicoes.resumo && r.notas) { r.condicoes.resumo=r.notas; r.notas=''; r.phcResumoDeNotas=true; } r.nLinhas=r.linhas.length; r.totRLMC=Math.round(r.linhas.reduce((a,l)=>a+l.rlmc,0)*100)/100; r.totScore=Math.round(r.linhas.reduce((a,l)=>a+l.scorePHC,0)*1000)/1000;
     r.contratos=[...new Set(r.linhas.map(l=>l.contratoVDF).filter(Boolean))]; r.msisdns=listaMsisdn(r.linhas); return {id, ...r}; });
   return {lista, mal};
 }
@@ -970,7 +973,7 @@ function admPN(el){
       L.forEach(p=>{ anos[p.data.slice(0,4)]=(anos[p.data.slice(0,4)]||0)+1; nl+=p.nLinhas; if(!p.vendedorUid) semV[p.vendedorNome||('vendedor '+p.vendedorPHC)]=(semV[p.vendedorNome||('vendedor '+p.vendedorPHC)]||0)+1; if(!p.cliente.nif) semNif++; semC+=p.linhas.filter(l=>!l.contratoVDF).length; });
       log(`${L.length} PN e ${nl} linhas no ficheiro.`);
       log('Por ano: '+Object.entries(anos).sort().map(([a,n])=>`${a}: ${n}`).join(' · '));
-      log(`Linhas sem contrato VDF: ${semC} · linhas sem MSISDN: ${L.reduce((a,p)=>a+p.linhas.filter(l=>!l.msisdn).length,0)} · PN sem email do cliente: ${L.filter(p=>!p.cliente.email).length} · PN sem dossier de origem: ${L.filter(p=>!p.phcRpn).length} · com notas para a BO: ${L.filter(p=>p.notas).length} · com resumo do negócio: ${L.filter(p=>p.condicoes.resumo).length} · PN sem NIF: ${semNif} · PN sem linhas: ${L.filter(p=>!p.nLinhas).length}`);
+      log(`Linhas sem contrato VDF: ${semC} · linhas sem MSISDN: ${L.reduce((a,p)=>a+p.linhas.filter(l=>!l.msisdn).length,0)} · PN sem email do cliente: ${L.filter(p=>!p.cliente.email).length} · PN sem dossier de origem: ${L.filter(p=>!p.phcRpn).length} · com resumo do negócio: ${L.filter(p=>p.condicoes.resumo).length} (${L.filter(p=>p.phcResumoDeNotas).length} vindos da caixa de notas do PHC) · com notas para a BO: ${L.filter(p=>p.notas).length} · PN sem NIF: ${semNif} · PN sem linhas: ${L.filter(p=>!p.nLinhas).length}`);
       const sv=Object.entries(semV).sort((a,b)=>b[1]-a[1]); if (sv.length) log('PN de vendedores sem conta (só visíveis a Master/Coordenador/BO): '+sv.map(([n,c])=>`${n} (${c})`).join(', '), true);
       if (r.mal.length) log(`${r.mal.length} linha(s) do ficheiro com formato errado (ignoradas): ${r.mal.slice(0,15).join(', ')}`, true);
       if (!L.length) return;
