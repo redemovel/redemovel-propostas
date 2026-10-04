@@ -109,7 +109,8 @@ if (EMU) { connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:tru
 // ---------- 2. TABELAS DE NEGÓCIO ----------
 const ESTADOS  = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Em Conferência','PN','Cancelado','Reprovado'];
 const ESTADOS_MAN = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Cancelado','Reprovado'];   // os que a BO escolhe à mão; Conferência e PN só pelos botões
-const FECHADOS = ['PN','Concluído','Cancelado','Reprovado'];   // 'Concluído' = estado antigo, anterior à conferência
+const FECHADOS = ['PN','Concluído','Cancelado','Reprovado'];
+const EM_CURSO = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Em Conferência'];   // 'Concluído' = estado antigo, anterior à conferência
 const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos'];   // contam para a carga da BO
 const EDIT_COM = ['Em Elaboração','Pendente Comercial','Pendente Documentos'];                // comercial pode editar
 const MOTIVOS  = ['Doc. Identificação','Contrato','CRC','Morada','Condições Comerciais','Dívida','STOP 08','STOP 15','STOP 22','STOP 31','1229','1229 via OS'];
@@ -130,7 +131,8 @@ function scoreLinha(l, r){
   if (r.clienteParticular) f *= 0.6;
   if (r.atividade==='Não Incentivada' && /Móvel/.test(l.natureza||'')) f *= 0.6;
   const s = (+l.rlmc||0) * f / SCORE_BASE;
-  return Math.floor(s*1000)/1000;
+  if (l.scorePHC!=null) return +l.scorePHC||0;   // PN importado do PHC: fica o Score que lá estava
+  return Math.round((s+1e-9)*1000)/1000;   // arredondado, como no PHC (15,02 → 0,668)
 }
 
 // ---------- 3. ESTADO / UTILITÁRIOS ----------
@@ -158,7 +160,7 @@ function clearSubs(){ S.unsub.forEach(u=>u()); S.unsub=[]; }
 
 // ---------- 4. ARRANQUE / AUTENTICAÇÃO ----------
 onAuthStateChanged(auth, async user => {
-  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; clearSubs();
+  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; clearSubs();
   if (!user) return renderLogin();
   try {
     const snap = await getDoc(doc(db,'users',user.uid));
@@ -225,20 +227,34 @@ function mudarPassword(){
 async function viewLista(){
   const m = $('#main');
   m.innerHTML = `<div class="card muted">A carregar RPNs…</div>`;
+  if (!S.filtros.mes) S.filtros.mes = mesLocal();
   try {
-    const q = isStaff() ? query(collection(db,'rpn'), orderBy('numero','desc'), limit(2000))
-                        : query(collection(db,'rpn'), where('vendedorUid','==',S.me.uid));
-    const s = await getDocs(q);
-    S.list = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.numero||0)-(a.numero||0));
+    // economia de leituras: os processos em curso + os fechados do mês escolhido (o histórico procura-se à parte)
+    const col = collection(db,'rpn'), meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
+    const [a, f] = await Promise.all([getDocs(query(col, ...meu, where('estado','in',EM_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',S.filtros.mes)))]);
+    const m2 = {}; [...a.docs, ...f.docs, ...(S.extra||[])].forEach(d=>{ const r = d.data ? {id:d.id,...d.data()} : d; m2[r.id]=r; });
+    S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0));
   } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
   if (S.filtros.meus===null) S.filtros.meus = perfil()==='backoffice';
   drawLista();
+}
+// procura exata em todos os processos (nº, NIF ou contrato VDF) — os resultados juntam-se à lista
+async function procurarHistorico(){
+  const t = (S.filtros.txt||'').trim(); if (t.length<4) return toast('Escreva na caixa de pesquisa o nº do processo, o NIF ou o contrato VDF completos.', true);
+  const col = collection(db,'rpn'), meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
+  const qs = [query(col, ...meu, where('cliente.nif','==',t)), query(col, ...meu, where('contratos','array-contains',t.toUpperCase()))];
+  if (/^\d+$/.test(t)) qs.push(query(col, ...meu, where('numero','==',+t)));
+  const r = await Promise.allSettled(qs.map(q=>getDocs(q)));
+  const docs = r.filter(x=>x.status==='fulfilled').flatMap(x=>x.value.docs).map(d=>({id:d.id,...d.data()}));
+  if (!docs.length) return toast(r.some(x=>x.status==='rejected') ? 'Não foi possível procurar: '+errTxt(r.find(x=>x.status==='rejected').reason) : 'Nada encontrado no histórico com “'+t+'”.', true);
+  S.extra = [...(S.extra||[]).filter(x=>!docs.some(d=>d.id===x.id)), ...docs];
+  const m2 = {}; [...S.list, ...docs].forEach(x=>m2[x.id]=x); S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0));
+  S.filtros.estado=''; toast(docs.length+' processo(s) encontrado(s) no histórico.'); drawLista();
 }
 function drawLista(){
   const f = S.filtros, all = S.list;
   const base = all.filter(r => (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
-    && (!f.mes || (r.data||'').startsWith(f.mes))
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
   const cnt = {}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
   const rows = base.filter(r=>!f.estado || r.estado===f.estado);
@@ -252,7 +268,8 @@ function drawLista(){
     <div class="card">
       <div class="row" style="margin-bottom:12px">
         <input id="ft" type="search" autocomplete="off" name="pesquisa-rpn" placeholder="Procurar nº, cliente, NIF, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
-        <input id="fm" type="month" value="${esc(f.mes)}" style="width:160px" title="Mês">
+        <button class="btn" id="fh" title="Procura em todos os processos, incluindo os antigos, por nº, NIF ou contrato VDF exatos">Procurar no histórico</button>
+        <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)">Fechados em <input id="fm" type="month" value="${esc(f.mes)}" style="width:160px"></label>
         ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
         <select id="fb" style="width:180px"><option value="">Todas as BO</option>${bos().map(b=>`<option value="${b.uid}" ${f.bo===b.uid?'selected':''}>${esc(b.nome)}</option>`).join('')}</select>`:''}
         ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fme" ${f.meus?'checked':''}> Só os meus</label>`:''}
@@ -260,7 +277,7 @@ function drawLista(){
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b></td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span>${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span>${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -269,7 +286,8 @@ function drawLista(){
   $('#nv').onclick=()=>go('#/novo');
   if ($('#aus')) $('#aus').onclick=()=>ausencias().catch(e=>toast(errTxt(e),true));
   const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
-  $('#fm').onchange=e=>{ f.mes=e.target.value; drawLista(); };
+  $('#fm').onchange=e=>{ if(e.target.value){ f.mes=e.target.value; viewLista(); } };
+  $('#fh').onclick=procurarHistorico;
   if ($('#fv')) { $('#fv').onchange=e=>{ f.vend=e.target.value; drawLista(); }; $('#fb').onchange=e=>{ f.bo=e.target.value; drawLista(); }; }
   if ($('#fme')) $('#fme').onchange=e=>{ f.meus=e.target.checked; drawLista(); };
 }
@@ -305,7 +323,7 @@ function perms(){
   const r = S.cur, own = r.vendedorUid===S.me.uid, nov = !r.id;
   const edCom = (own||nov) && EDIT_COM.includes(r.estado);
   // um PN está fechado: só o Master o altera
-  const boEd = isBO() && (!['PN','Concluído'].includes(r.estado) || isMaster());
+  const boEd = isBO() && r.origem!=='PHC' && (!['PN','Concluído'].includes(r.estado) || isMaster());
   return { own, nov, bo:isBO(), edit: boEd || edCom, edCom };
 }
 
@@ -317,12 +335,12 @@ function drawFicha(){
   if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button>`);
   if ((p.own||p.nov) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
-  if (r.id && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
+  if (r.id && r.origem!=='PHC' && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
   if (isBO() && r.id && ['Submetido','Em Implementação'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
   if (isBO() && r.estado==='Em Conferência' && r.boUid!==S.me.uid && (r.confUid===S.me.uid || isMaster())) acts.push(`<button class="btn pri" id="a-ok">Conferido · fechar como PN</button><button class="btn" id="a-dev">Devolver à implementação</button>`);
   if (isBO() && r.id && ABERTOS.includes(r.estado)) acts.push(`<button class="btn" id="a-real">Realocar BO</button>`);
   if (isBO() && r.estado==='Em Conferência') acts.push(`<button class="btn" id="a-realc">Realocar conferência</button>`);
-  if (isMaster() && ['PN','Concluído'].includes(r.estado)) acts.push(`<button class="btn" id="a-reab">Reabrir</button>`);
+  if (isMaster() && ['PN','Concluído'].includes(r.estado) && r.origem!=='PHC') acts.push(`<button class="btn" id="a-reab">Reabrir</button>`);
   if (r.id) acts.push(`<button class="btn" id="a-mail">Email</button>`);
 
   $('#main').innerHTML = `
@@ -332,7 +350,7 @@ function drawFicha(){
       <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(r.estado)}</span>
       ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
       ${r.estado==='Em Conferência'?`<span class="muted">Conferência: <b>${esc(r.confNome||'em fila (sem BO disponível)')}</b></span>`:''}
-      ${r.estado==='PN'?`<span class="muted">Conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:''}
+      ${r.origem==='PHC'?`<span class="badge">histórico PHC</span>`:(r.estado==='PN'?`<span class="muted">Conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:'')}
       <span class="sp"></span>${acts.join('')}
     </div>
     ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}${r.propostaTarif?`<div class="muted" style="font-size:12px;margin-top:4px">Serviços na proposta: ${esc(r.propostaTarif)}</div>`:''}</div>`:''}
@@ -655,6 +673,8 @@ async function guardar(opts={}){
     if (opts.devolverImpl) { data.estado='Em Implementação'; data.confNota=opts.devolverImpl; }
     if (opts.reabrir) { data.estado='Em Implementação'; }
     if (FECHADOS.includes(data.estado) && !data.fechadoEm) { data.fechadoEm=new Date().toISOString(); data.fechadoMes=mesLocal(); }
+    data.mesRef = FECHADOS.includes(data.estado) ? (data.fechadoMes||mesLocal()) : null;   // mês em que aparece na lista dos fechados
+    data.contratos = [...new Set((data.linhas||[]).map(l=>String(l.contratoVDF||'').trim()).filter(Boolean))];
     if (!FECHADOS.includes(data.estado)) { data.fechadoEm=null; data.fechadoMes=null; }
     let old=null, boEscolhida=null;
     await runTransaction(db, async tx => {
@@ -855,9 +875,79 @@ async function viewProducao(){
 let ADM_TAB = 'users';
 function viewAdmin(){
   const m=$('#main');
-  m.innerHTML = `<div class="tabs">${[['users','Utilizadores'],['cat','Catálogo PHC'],['carga','Carga BO & numeração']].map(([k,t])=>`<a data-t="${k}" class="${ADM_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="adm"></div>`;
+  m.innerHTML = `<div class="tabs">${[['users','Utilizadores'],['cat','Catálogo PHC'],['carga','Carga BO & numeração'],['pn','Importar PN do PHC']].map(([k,t])=>`<a data-t="${k}" class="${ADM_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="adm"></div>`;
   m.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ ADM_TAB=a.dataset.t; viewAdmin(); });
-  ({users:admUsers,cat:admCat,carga:admCarga})[ADM_TAB]($('#adm'));
+  ({users:admUsers,cat:admCat,carga:admCarga,pn:admPN})[ADM_TAB]($('#adm'));
+}
+// ---- importação única dos PN do PHC (histórico) ----
+const PN_COLS = ["ftstamp", "fno", "fdata", "no", "nome", "ncont", "vendedor", "vendnm", "u_noportun", "u_ssfid", "u_ftstatus", "u_tpactivo", "lordem", "ref", "design", "score", "rlmc", "u_natureza", "u_pzperm", "u_contrvdf", "u_oport", "u_pricplan", "u_descont", "u_tipotarv"];
+const PN_SQL = "-- Redemóvel · exportação dos Processos de Negócio (PN) do PHC para a plataforma\n-- Série 20 \"Processos Negócio\", desde 01/10/2022 (48 meses). Uma linha por cada linha do PN; a linha \"DPN\" é ignorada.\nUSE ARPURO;\nSELECT\n  RTRIM(ft.ftstamp) AS ftstamp,\n  CAST(ft.fno AS int) AS fno,\n  CONVERT(varchar(10), ft.fdata, 120) AS fdata,\n  CAST(ft.no AS int) AS no,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft.nome,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS nome,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft.ncont,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS ncont,\n  CAST(ft.vendedor AS int) AS vendedor,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft.vendnm,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS vendnm,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft2.u_noportun,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_noportun,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft2.u_ssfid,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_ssfid,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft2.u_ftstatus,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_ftstatus,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(ft2.u_tpactivo,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_tpactivo,\n  CAST(ISNULL(fi.lordem,0) AS int) AS lordem,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(fi.ref,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS ref,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(fi.design,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS design,\n  CAST(ISNULL(fi.qtt,0) AS varchar(20)) AS score,\n  CAST(ISNULL(fi.u_qtt,0) AS varchar(20)) AS rlmc,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(fi.u_natureza,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_natureza,\n  CAST(ISNULL(fi.u_pzperm,0) AS int) AS u_pzperm,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(fi.u_contrvdf,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_contrvdf,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(fi.u_oport,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_oport,\n  CAST(ISNULL(fi.u_pricplan,0) AS varchar(20)) AS u_pricplan,\n  CAST(ISNULL(fi.u_descont,0) AS int) AS u_descont,\n  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(fi.u_tipotarv,'')),CHAR(9),' '),CHAR(13),' '),CHAR(10),' ') AS u_tipotarv\nFROM ft\nJOIN ft2 ON ft2.ft2stamp = ft.ftstamp\nLEFT JOIN fi ON fi.ftstamp = ft.ftstamp AND fi.ref <> 'DPN' AND fi.ref <> ''\nWHERE ft.ndoc = 20 AND ft.fdata >= '20221001'\nORDER BY ft.fdata, ft.fno, fi.lordem;\n";
+function lerFicheiroTexto(file){
+  return new Promise((res,rej)=>{ const r=new FileReader(); r.onerror=()=>rej(new Error('Não foi possível ler o ficheiro'));
+    r.onload=()=>{ const b=new Uint8Array(r.result); let t;
+      if (b[0]===0xFF&&b[1]===0xFE) t=new TextDecoder('utf-16le').decode(b); else if (b[0]===0xFE&&b[1]===0xFF) t=new TextDecoder('utf-16be').decode(b);
+      else { try{ t=new TextDecoder('utf-8',{fatal:true}).decode(b); }catch(e){ t=new TextDecoder('windows-1252').decode(b); } }
+      res(t.replace(/^\uFEFF/,'')); };
+    r.readAsArrayBuffer(file); });
+}
+function pnParse(txt){
+  const ls = txt.split(/\r?\n/).filter(l=>l.trim()); if(!ls.length) return {erro:'Ficheiro vazio'};
+  let cols=PN_COLS, ini=0; const h=ls[0].split('\t').map(x=>x.trim().toLowerCase());
+  if (h[0]==='ftstamp') { cols=h; ini=1; }
+  const falta=PN_COLS.filter(c=>!cols.includes(c)); if (falta.length) return {erro:'Faltam colunas no ficheiro: '+falta.join(', ')};
+  const porVend={}; Object.entries(S.users).forEach(([uid,u])=>{ if(u.vendedorPHC) porVend[String(u.vendedorPHC)]=uid; });
+  const pn={}, mal=[]; const num=v=>parseFloat(String(v||'0').replace(',','.'))||0;
+  for (let i=ini;i<ls.length;i++){
+    const c=ls[i].split('\t'); if (c.length!==cols.length) { mal.push(i+1); continue; }
+    const o={}; cols.forEach((k,j)=>{ let v=(c[j]||'').trim(); if(v==='NULL') v=''; o[k]=v; });
+    if (!o.ftstamp) { mal.push(i+1); continue; }
+    const id='phc_'+o.ftstamp.replace(/[^A-Za-z0-9]/g,'_');
+    const r = pn[id] = pn[id] || { numero:+o.fno||0, data:o.fdata, estado:'PN', origem:'PHC', phcStamp:o.ftstamp, motivos:[],
+      vendedorUid: porVend[o.vendedor]||null, vendedorNome:o.vendnm, vendedorPHC:o.vendedor, subSfid:o.u_ssfid, nOportunidade:o.u_noportun, phcStatus:o.u_ftstatus, phcTipoActivo:o.u_tpactivo,
+      boUid:null, boNome:'', rpnAgregado:false, clienteParticular:false, atividade:'Elegível/Carteira', notas:'', loja:'', condicoes:{}, contas:{},
+      cliente:{nome:o.nome, nCliente:o.no, nif:o.ncont.replace(/\s/g,''), email:'', interlocutor:'', telefone:'', morada1:'', morada2:'', localidade:'', codPostal:''},
+      linhas:[], fechadoEm:o.fdata+'T12:00:00.000Z', fechadoMes:null, mesRef:o.fdata.slice(0,7), cargaContada:0, confContada:0 };
+    if (o.ref) r.linhas.push({ref:o.ref, designacao:o.design, natureza:o.u_natureza, msisdn:'', nConta:'', rlmc:num(o.rlmc), prazo:+o.u_pzperm||0, tier:o.u_tipotarv, pricingPlan:(o.u_pricplan==='0'?'':o.u_pricplan.replace(/\.0+$/,'')), descontinuado:o.u_descont==='1', upgrade:false, contratoVDF:o.u_contrvdf.toUpperCase(), oportunidade:o.u_oport, scorePHC:num(o.score)});
+  }
+  const lista = Object.entries(pn).map(([id,r])=>{ r.nLinhas=r.linhas.length; r.totRLMC=Math.round(r.linhas.reduce((a,l)=>a+l.rlmc,0)*100)/100; r.totScore=Math.round(r.linhas.reduce((a,l)=>a+l.scorePHC,0)*1000)/1000;
+    r.contratos=[...new Set(r.linhas.map(l=>l.contratoVDF).filter(Boolean))]; return {id, ...r}; });
+  return {lista, mal};
+}
+function admPN(el){
+  let pend=null;
+  el.innerHTML = `<div class="card"><h2>Importar os Processos de Negócio do PHC (histórico)</h2>
+    <ol class="muted" style="font-size:13px;line-height:1.7;margin-top:0">
+      <li>No SQL Server Management Studio, confirme que <b>Tools › Options › Query Results › SQL Server › Results to Grid › Include column headers when copying or saving the results</b> está marcado.</li>
+      <li>Copie a consulta abaixo, cole numa janela <b>New Query</b> e carregue em <b>Execute</b>.</li>
+      <li>Na grelha: botão direito › <b>Save Results As…</b>, tipo <b>Text (Tab delimited) (*.txt)</b>.</li>
+      <li>Escolha aqui o ficheiro e carregue em <b>Analisar ficheiro</b>. Só grava depois de <b>Confirmar importação</b>.</li></ol>
+    <textarea id="psql" rows="5" readonly style="font-family:monospace;font-size:11px;white-space:pre">${esc(PN_SQL)}</textarea>
+    <div class="row" style="margin-top:10px"><button class="btn" id="pcp">Copiar consulta</button><input type="file" id="pfi" accept=".txt,.csv,.tsv,text/plain" style="width:auto"><button class="btn pri" id="pan">Analisar ficheiro</button><button class="btn pri" id="pok" style="display:none"></button></div>
+    <div id="plog" style="margin-top:12px;font-family:monospace;font-size:12px;line-height:1.7;white-space:pre-wrap"></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Os PN importados ficam fechados, só de leitura, com o número do PHC e a marca “histórico PHC”. Não contam para a Produção BO. Repetir a importação não duplica: atualiza os mesmos processos.</p></div>`;
+  const log=(t,err)=>{ const d=document.createElement('div'); d.textContent=t; if(err) d.style.color='var(--red-d)'; $('#plog').appendChild(d); };
+  $('#pcp').onclick=()=>{ const t=$('#psql'); t.select(); (navigator.clipboard?navigator.clipboard.writeText(t.value):Promise.reject()).catch(()=>document.execCommand('copy')).finally(()=>toast('Consulta copiada.')); };
+  $('#pan').onclick=async()=>{ const f=$('#pfi').files[0]; if(!f) return toast('Escolha primeiro o ficheiro exportado do PHC.',true);
+    $('#plog').innerHTML=''; $('#pok').style.display='none'; pend=null;
+    try { const r=pnParse(await lerFicheiroTexto(f)); if (r.erro) return log(r.erro,true);
+      const L=r.lista, anos={}, semV={}; let nl=0, semC=0, semNif=0;
+      L.forEach(p=>{ anos[p.data.slice(0,4)]=(anos[p.data.slice(0,4)]||0)+1; nl+=p.nLinhas; if(!p.vendedorUid) semV[p.vendedorNome||('vendedor '+p.vendedorPHC)]=(semV[p.vendedorNome||('vendedor '+p.vendedorPHC)]||0)+1; if(!p.cliente.nif) semNif++; semC+=p.linhas.filter(l=>!l.contratoVDF).length; });
+      log(`${L.length} PN e ${nl} linhas no ficheiro.`);
+      log('Por ano: '+Object.entries(anos).sort().map(([a,n])=>`${a}: ${n}`).join(' · '));
+      log(`Linhas sem contrato VDF: ${semC} · PN sem NIF: ${semNif} · PN sem linhas: ${L.filter(p=>!p.nLinhas).length}`);
+      const sv=Object.entries(semV).sort((a,b)=>b[1]-a[1]); if (sv.length) log('PN de vendedores sem conta (só visíveis a Master/Coordenador/BO): '+sv.map(([n,c])=>`${n} (${c})`).join(', '), true);
+      if (r.mal.length) log(`${r.mal.length} linha(s) do ficheiro com formato errado (ignoradas): ${r.mal.slice(0,15).join(', ')}`, true);
+      if (!L.length) return;
+      pend=L; log('Nada foi gravado ainda. Confira os números e carregue em “Confirmar importação”.');
+      $('#pok').textContent=`Confirmar importação de ${L.length} PN`; $('#pok').style.display='';
+    } catch(e){ log(errTxt(e),true); } };
+  $('#pok').onclick=async()=>{ if(!pend) return; const L=pend; pend=null; $('#pok').style.display='none'; $('#pan').disabled=true;
+    try { for (let i=0;i<L.length;i+=300){ const b=writeBatch(db);
+        L.slice(i,i+300).forEach(({id,...r})=>b.set(doc(db,'rpn',id),{...r, importadoEm:serverTimestamp(), importadoPor:S.me.uid}));
+        await b.commit(); log(`gravados: ${Math.min(i+300,L.length)} / ${L.length}`); }
+      log('Importação terminada.'); toast('PN importados.'); $('#pfi').value='';
+    } catch(e){ log('ERRO: '+errTxt(e)+' — pode repetir a importação, não duplica.',true); }
+    $('#pan').disabled=false; };
 }
 function admUsers(el){
   const us = Object.entries(S.users).sort((a,b)=>(a[1].nome||'').localeCompare(b[1].nome||''));
@@ -942,7 +1032,8 @@ async function admCarga(el){
       Object.keys(S.users).forEach(u=>{ c[u]=0; cf[u]=0; });
       s.forEach(d=>{ const r=d.data(); const cnt=(ABERTOS.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt;
         const cc=(r.estado==='Em Conferência'&&r.confUid)?(r.nLinhas||0):0; if(cc) cf[r.confUid]=(cf[r.confUid]||0)+cc;
-        if(((r.cargaContada||0)!==cnt || (r.confContada||0)!==cc) && n<450){ b.update(d.ref,{cargaContada:cnt,confContada:cc}); n++; } });
+        if(((r.cargaContada||0)!==cnt || (r.confContada||0)!==cc) && n<450){ b.update(d.ref,{cargaContada:cnt,confContada:cc}); n++; }
+        if (FECHADOS.includes(r.estado) && !r.mesRef && n<450){ b.update(d.ref,{mesRef: r.fechadoMes || String(r.fechadoEm||r.data||'').slice(0,7)}); n++; } });
       b.set(doc(db,'config','cargaBO'),{carga:c,conf:cf,atualizadoEm:serverTimestamp()},{merge:true}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
 }
 </script>
