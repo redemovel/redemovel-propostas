@@ -431,8 +431,8 @@ function tabPrincipal(tc, dis, p){
       <div class="scroll" id="lines"></div>
     </div>
     <div class="card"><div class="grid g2">
-      <div><label>Resumo do negócio</label><textarea data-f="condicoes.resumo" ${dis} rows="5">${esc(r.condicoes?.resumo)}</textarea></div>
       <div><label>Notas para a BackOffice</label><textarea data-f="notas" ${dis} rows="5">${esc(r.notas)}</textarea></div>
+      <div><label>Resumo do negócio</label><textarea data-f="condicoes.resumo" ${dis} rows="5">${esc(r.condicoes?.resumo)}</textarea></div>
     </div></div>
     <div id="t-out"></div><div id="t-cond"></div>
     <datalist id="dl-prod">${S.prodList.map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)} · ${esc(x.tier)}</option>`).join('')}</datalist>`;
