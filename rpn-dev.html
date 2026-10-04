@@ -45,7 +45,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .b-Submetido{background:#e7f0fb;color:var(--info)}
 .b-Em-Implementação{background:#e8e4fb;color:#4b2fb0}
 .b-Pendente-Comercial,.b-Pendente-Documentos{background:#fff3df;color:var(--warn)}
-.b-Concluído{background:#e6f4ea;color:var(--ok)}
+.b-Concluído,.b-PN{background:#e6f4ea;color:var(--ok)}
+.b-Em-Conferência{background:#e0f4f7;color:#0b6b7a}
 .b-Cancelado,.b-Reprovado{background:#fde8e8;color:var(--red-d)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;min-width:110px}
@@ -106,7 +107,9 @@ const auth = getAuth(app), db = getFirestore(app), st = getStorage(app);
 if (EMU) { connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true}); connectFirestoreEmulator(db,'127.0.0.1',8080); connectStorageEmulator(st,'127.0.0.1',9199); }
 
 // ---------- 2. TABELAS DE NEGÓCIO ----------
-const ESTADOS  = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Concluído','Cancelado','Reprovado'];
+const ESTADOS  = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Em Conferência','PN','Cancelado','Reprovado'];
+const ESTADOS_MAN = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','Cancelado','Reprovado'];   // os que a BO escolhe à mão; Conferência e PN só pelos botões
+const FECHADOS = ['PN','Concluído','Cancelado','Reprovado'];   // 'Concluído' = estado antigo, anterior à conferência
 const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos'];   // contam para a carga da BO
 const EDIT_COM = ['Em Elaboração','Pendente Comercial','Pendente Documentos'];                // comercial pode editar
 const MOTIVOS  = ['Doc. Identificação','Contrato','CRC','Morada','Condições Comerciais','Dívida','STOP 08','STOP 15','STOP 22','STOP 31','1229','1229 via OS'];
@@ -137,6 +140,7 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const eur = n => (+n||0).toLocaleString('pt-PT',{minimumFractionDigits:2,maximumFractionDigits:2});
 const n3  = n => (+n||0).toLocaleString('pt-PT',{minimumFractionDigits:3,maximumFractionDigits:3});
 const hoje = () => new Date().toISOString().slice(0,10);
+const mesLocal = (d=new Date()) => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
 const fmtD = d => d ? d.split('-').reverse().join('.') : '';
 const tsTxt = t => { const d = t?.toDate ? t.toDate() : (t ? new Date(t) : null); return d ? d.toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'}) : ''; };
 const perfil = () => S.me?.perfil;
@@ -191,6 +195,7 @@ function render(){
   clearSubs();
   const h = location.hash || '#/lista';
   const nav = [['#/lista','RPNs'],['#/novo','Novo RPN']];
+  if (isBO()) nav.push(['#/producao','Produção BO']);
   if (isMaster()) nav.push(['#/admin','Administração']);
   $('#app').innerHTML = `<header>
       <span class="brand">Redemóvel · RPN</span>
@@ -202,6 +207,7 @@ function render(){
   $('#pw').onclick = mudarPassword;
   if (h.startsWith('#/rpn/')) return viewFicha(h.slice(6));
   if (h.startsWith('#/novo')) return viewFicha(null);
+  if (h.startsWith('#/producao') && isBO()) return viewProducao();
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
   return viewLista();
 }
@@ -230,7 +236,7 @@ async function viewLista(){
 }
 function drawLista(){
   const f = S.filtros, all = S.list;
-  const base = all.filter(r => (!f.meus || r.boUid===S.me.uid)
+  const base = all.filter(r => (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
     && (!f.mes || (r.data||'').startsWith(f.mes))
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
@@ -241,7 +247,7 @@ function drawLista(){
   $('#main').innerHTML = `
     <div class="chips">
       <div class="chip ${!f.estado?'on':''}" data-e=""><span class="muted">Todos</span><b>${base.length}</b></div>
-      ${ESTADOS.map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}
+      ${[...ESTADOS,...(cnt['Concluído']?['Concluído']:[])].map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
@@ -250,17 +256,18 @@ function drawLista(){
         ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
         <select id="fb" style="width:180px"><option value="">Todas as BO</option>${bos().map(b=>`<option value="${b.uid}" ${f.bo===b.uid?'selected':''}>${esc(b.nome)}</option>`).join('')}</select>`:''}
         ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fme" ${f.meus?'checked':''}> Só os meus</label>`:''}
-        <span class="sp"></span><button class="btn pri" id="nv">+ Novo RPN</button>
+        <span class="sp"></span>${isBO()?`<button class="btn" id="aus">Ausências · redistribuir</button>`:''}<button class="btn pri" id="nv">+ Novo RPN</button>
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b></td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span>${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b></td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span>${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
   document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ f.estado=c.dataset.e; drawLista(); });
   document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
   $('#nv').onclick=()=>go('#/novo');
+  if ($('#aus')) $('#aus').onclick=()=>ausencias().catch(e=>toast(errTxt(e),true));
   const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
   $('#fm').onchange=e=>{ f.mes=e.target.value; drawLista(); };
   if ($('#fv')) { $('#fv').onchange=e=>{ f.vend=e.target.value; drawLista(); }; $('#fb').onchange=e=>{ f.bo=e.target.value; drawLista(); }; }
@@ -297,7 +304,9 @@ async function viewFicha(id){
 function perms(){
   const r = S.cur, own = r.vendedorUid===S.me.uid, nov = !r.id;
   const edCom = (own||nov) && EDIT_COM.includes(r.estado);
-  return { own, nov, bo:isBO(), edit: isBO() || edCom, edCom };
+  // um PN está fechado: só o Master o altera
+  const boEd = isBO() && (!['PN','Concluído'].includes(r.estado) || isMaster());
+  return { own, nov, bo:isBO(), edit: boEd || edCom, edCom };
 }
 
 function drawFicha(){
@@ -309,18 +318,26 @@ function drawFicha(){
   if ((p.own||p.nov) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
   if (r.id && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
+  if (isBO() && r.id && ['Submetido','Em Implementação'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
+  if (isBO() && r.estado==='Em Conferência' && r.boUid!==S.me.uid && (r.confUid===S.me.uid || isMaster())) acts.push(`<button class="btn pri" id="a-ok">Conferido · fechar como PN</button><button class="btn" id="a-dev">Devolver à implementação</button>`);
+  if (isBO() && r.id && ABERTOS.includes(r.estado)) acts.push(`<button class="btn" id="a-real">Realocar BO</button>`);
+  if (isBO() && r.estado==='Em Conferência') acts.push(`<button class="btn" id="a-realc">Realocar conferência</button>`);
+  if (isMaster() && ['PN','Concluído'].includes(r.estado)) acts.push(`<button class="btn" id="a-reab">Reabrir</button>`);
   if (r.id) acts.push(`<button class="btn" id="a-mail">Email</button>`);
 
   $('#main').innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <button class="btn ghost" id="back">← Lista</button>
-      <h1>${r.numero?`RPN ${r.numero}`:'Novo RPN'}</h1>
+      <h1>${r.numero?`${r.estado==='PN'?'PN':'RPN'} ${r.numero}`:'Novo RPN'}</h1>
       <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(r.estado)}</span>
       ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
+      ${r.estado==='Em Conferência'?`<span class="muted">Conferência: <b>${esc(r.confNome||'em fila (sem BO disponível)')}</b></span>`:''}
+      ${r.estado==='PN'?`<span class="muted">Conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:''}
       <span class="sp"></span>${acts.join('')}
     </div>
     ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}${r.propostaTarif?`<div class="muted" style="font-size:12px;margin-top:4px">Serviços na proposta: ${esc(r.propostaTarif)}</div>`:''}</div>`:''}
-    ${(r.motivos||[]).length && !['Concluído','Cancelado','Reprovado'].includes(r.estado)?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
+    ${r.confNota && ABERTOS.includes(r.estado)?`<div class="warnbox"><b>Devolvido pela conferência${r.confNome?` (${esc(r.confNome)})`:''}:</b> ${esc(r.confNota)}</div>`:''}
+    ${(r.motivos||[]).length && !FECHADOS.includes(r.estado) && r.estado!=='Em Conferência'?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
     <div class="tabs">${tabs.map(([k,t])=>`<a data-t="${k}" class="${S.tab===k?'on':''}">${t}</a>`).join('')}</div>
     <div id="tabc"></div>`;
   $('#back').onclick=()=>go('#/lista');
@@ -329,6 +346,13 @@ function drawFicha(){
   $('#a-sub')?.addEventListener('click',()=>guardar({submeter:true}));
   $('#a-resp')?.addEventListener('click',()=>guardar({devolver:true}));
   $('#a-del')?.addEventListener('click',eliminar);
+  $('#a-conf')?.addEventListener('click',()=>{ const sem=(S.cur.linhas||[]).filter(l=>!String(l.contratoVDF||'').trim()).length;
+    if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return; guardar({conferencia:true}); });
+  $('#a-ok')?.addEventListener('click',()=>{ if(confirm(`Confirma que conferiu a implementação do RPN ${S.cur.numero} na Vodafone?\n\nO RPN fica fechado como PN (Processo de Negócio).`)) guardar({conferido:true}); });
+  $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>guardar({devolverImpl:rz})));
+  $('#a-real')?.addEventListener('click',()=>realocar('bo'));
+  $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
+  $('#a-reab')?.addEventListener('click',()=>{ if(confirm('Reabrir este processo? Volta a “Em Implementação”.')) guardar({reabrir:true}); });
   $('#a-mail')?.addEventListener('click',()=>enviarEmail(''));
   const tc = $('#tabc');
   if (S.tab==='principal') tabPrincipal(tc, dis, p);
@@ -349,22 +373,23 @@ const fld = (lab, path, dis, type='text', extra='') => { const v=getPath(S.cur,p
 const sel = (lab, path, opts, dis) => `<div><label>${lab}</label><select data-f="${path}" ${dis}>${opts.map(o=>{ const [v,t]=Array.isArray(o)?o:[o,o]; return `<option value="${esc(v)}" ${String(getPath(S.cur,path))===String(v)?'selected':''}>${esc(t)}</option>`; }).join('')}</select></div>`;
 
 function tabPrincipal(tc, dis, p){
-  const r = S.cur, boDis = isBO()?'':'disabled';
+  const r = S.cur, boDis = isBO()&&p.edit?'':'disabled';
   const vendOpts = Object.entries(S.users).filter(([,u])=>u.ativo&&['comercial','coordenador','master'].includes(u.perfil)).map(([uid,u])=>[uid,u.nome]);
   tc.innerHTML = `
     <div class="card"><div class="grid g4">
       ${fld('Cliente','cliente.nome',dis)}${fld('NIF','cliente.nif',dis)}${fld('Nº Cliente (PHC)','cliente.nCliente',dis)}${fld('Data','data',dis,'date')}
       ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}
       ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
-      ${sel('Estado','estado',ESTADOS,isBO()&&r.id?'':'disabled')}
-      ${sel('Resp. BackOffice','boUid',[['','— atribuição automática —'],...bos().map(b=>[b.uid,b.nome])],isBO()&&r.id?'':'disabled')}
+      ${sel('Estado','estado',ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN],isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
+      <div><label>Resp. BackOffice</label><input value="${esc(r.boNome||'— atribuição automática ao submeter —')}" disabled></div>
+      ${r.confNome||r.estado==='Em Conferência'?`<div><label>Conferência</label><input value="${esc(r.confNome||'em fila')}" disabled></div>`:''}
       ${sel('Atividade incentivada','atividade',ATIVIDADE,dis)}
       <div class="row" style="align-items:flex-end;gap:16px">
         <label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" data-f="rpnAgregado" ${r.rpnAgregado?'checked':''} ${dis}> RPN agregado</label>
         <label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" data-f="clienteParticular" ${r.clienteParticular?'checked':''} ${dis}> Cliente particular</label>
       </div>
     </div>
-    ${isBO()&&r.id?`<div style="margin-top:12px"><label>Motivo(s) de pendência</label><div class="motivos">${MOTIVOS.map(mo=>`<label><input type="checkbox" class="mot" value="${esc(mo)}" ${(r.motivos||[]).includes(mo)?'checked':''}> ${esc(mo)}</label>`).join('')}</div></div>`:''}
+    ${isBO()&&r.id?`<div style="margin-top:12px"><label>Motivo(s) de pendência</label><div class="motivos">${MOTIVOS.map(mo=>`<label><input type="checkbox" class="mot" value="${esc(mo)}" ${(r.motivos||[]).includes(mo)?'checked':''} ${p.edit?'':'disabled'}> ${esc(mo)}</label>`).join('')}</div></div>`:''}
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:8px"><h2 style="margin:0">Linhas do negócio</h2><span class="sp"></span>
@@ -523,11 +548,96 @@ function validarSubmissao(r){
   r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
   return e;
 }
-function escolherBO(carga){
-  const lista = bos(); if(!lista.length) throw new Error('Não há BackOffices ativas configuradas para receber RPNs (Administração → Utilizadores → “Recebe RPN”).');
+// aus = BackOffices ausentes (config/cargaBO.ausentes); excl = uids a excluir
+function escolherBO(carga, aus={}, excl=[]){
+  const lista = bos().filter(b=>!aus[b.uid] && !excl.includes(b.uid)); if(!lista.length) throw new Error('Não há BackOffices ativas configuradas para receber RPNs (Administração → Utilizadores → “Recebe RPN”).');
   const min = Math.min(...lista.map(b=>carga[b.uid]||0));
   const cand = lista.filter(b=>(carga[b.uid]||0)===min);
   return cand[Math.floor(Math.random()*cand.length)];
+}
+// conferência: mesma regra (menos linhas em conferência), nunca quem implementou; devolve null se não houver ninguém
+function escolherConf(conf, aus={}, excl=[]){
+  const lista = bos().filter(b=>!aus[b.uid] && !excl.includes(b.uid)); if(!lista.length) return null;
+  const min = Math.min(...lista.map(b=>conf[b.uid]||0));
+  const cand = lista.filter(b=>(conf[b.uid]||0)===min);
+  return cand[Math.floor(Math.random()*cand.length)];
+}
+// realocar a BO que implementa ('bo') ou a que confere ('conf'); uidNovo vazio = automático
+async function realocarTx(id, tipo, uidNovo, motivo){
+  let txt='';
+  await runTransaction(db, async tx => {
+    const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO');
+    const s=await tx.get(ref), cs=await tx.get(cargaRef); const r=s.data(), cd=cs.exists()?cs.data():{};
+    const carga={...(cd.carga||{})}, conf={...(cd.conf||{})}, aus=cd.ausentes||{};
+    const upd={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
+    if (tipo==='bo') {
+      if (!ABERTOS.includes(r.estado)) throw new Error('Este RPN já não está em implementação.');
+      const novo = uidNovo ? {uid:uidNovo, nome:userNome(uidNovo)} : escolherBO(carga, aus, [r.boUid]);
+      if (novo.uid===r.boUid) throw new Error('Já está atribuído a essa BackOffice.');
+      const cnt=r.cargaContada||0, nc=r.nLinhas||0;
+      if (r.boUid && cnt) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-cnt);
+      if (nc) carga[novo.uid]=(carga[novo.uid]||0)+nc;
+      upd.boUid=novo.uid; upd.boNome=novo.nome; upd.cargaContada=nc;
+      if (r.confUid===novo.uid) { upd.confUid=null; upd.confNome=''; }   // quem implementa não pode conferir
+      txt=`BO: ${r.boNome||'—'} → ${novo.nome}`;
+    } else {
+      if (r.estado!=='Em Conferência') throw new Error('Este RPN já não está em conferência.');
+      const novo = uidNovo ? {uid:uidNovo, nome:userNome(uidNovo)} : escolherConf(conf, aus, [r.boUid, r.confUid]);
+      if (!novo) throw new Error('Não há outra BackOffice disponível para conferir.');
+      if (novo.uid===r.boUid) throw new Error('Quem implementou o RPN não o pode conferir.');
+      if (novo.uid===r.confUid) throw new Error('Já está atribuído a essa BackOffice.');
+      const cnt=r.confContada||0, nc=r.nLinhas||0;
+      if (r.confUid && cnt) conf[r.confUid]=Math.max(0,(conf[r.confUid]||0)-cnt);
+      if (nc) conf[novo.uid]=(conf[novo.uid]||0)+nc;
+      upd.confUid=novo.uid; upd.confNome=novo.nome; upd.confContada=nc;
+      txt=`Conferência: ${r.confNome||'em fila'} → ${novo.nome}`;
+    }
+    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true});
+    tx.update(ref,upd);
+  });
+  await hist('Realocado', `${txt}. Razão: ${motivo}`, id);
+  return txt;
+}
+function pedirRazao(titulo, extra, botao, cb){
+  modal(`<h2>${titulo}</h2><div class="grid">${extra||''}<div><label>Razão (obrigatória)</label><textarea id="rz" rows="3"></textarea></div>
+    <div class="row"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">${botao}</button></div></div>`, (m,close)=>{
+    m.querySelector('#c').onclick=close;
+    m.querySelector('#ok').onclick=()=>{ const rz=m.querySelector('#rz').value.trim(); if(rz.length<3) return toast('Indique a razão.',true); const v=m.querySelector('#rb')?.value||''; close(); cb(rz, v); };
+  });
+}
+function realocar(tipo){
+  const r=S.cur; if (S.dirty) return toast('Guarde primeiro as alterações.',true);
+  const excl = tipo==='bo' ? [r.boUid] : [r.boUid, r.confUid];
+  const cand = bos().filter(b=>!excl.includes(b.uid));
+  pedirRazao(tipo==='bo'?'Realocar a implementação':'Realocar a conferência',
+    `<div><label>Passar para</label><select id="rb"><option value="">— automático (menor carga) —</option>${cand.map(b=>`<option value="${b.uid}">${esc(b.nome)}</option>`).join('')}</select></div>`,
+    'Realocar', async (rz, uid)=>{ try { const t=await realocarTx(r.id, tipo, uid||null, rz); toast('Realocado. '+t); S.cur=null; viewFicha(r.id); } catch(e){ toast(errTxt(e),true); } });
+}
+// ausências e redistribuição em bloco (qualquer BackOffice)
+async function ausencias(){
+  const cs = await getDoc(doc(db,'config','cargaBO')); const cd=cs.data()||{}; const aus=cd.ausentes||{}, carga=cd.carga||{}, conf=cd.conf||{};
+  modal(`<h2>Ausências e redistribuição</h2>
+    <table><thead><tr><th>BackOffice</th><th class="num">Linhas a implementar</th><th class="num">Linhas a conferir</th><th>Situação</th><th></th></tr></thead><tbody>
+    ${bos().map(b=>`<tr><td>${esc(b.nome)}</td><td class="num">${carga[b.uid]||0}</td><td class="num">${conf[b.uid]||0}</td><td>${aus[b.uid]?'<span class="badge b-Pendente-Comercial">Ausente</span>':'Presente'}</td>
+      <td>${aus[b.uid]?`<button class="btn sm" data-pres="${b.uid}">Marcar presente</button>`:`<button class="btn sm" data-aus="${b.uid}">Ausente · redistribuir</button>`}</td></tr>`).join('')}</tbody></table>
+    <p class="muted" style="font-size:12px">Uma BackOffice ausente deixa de receber RPN novos e conferências. “Ausente · redistribuir” passa os RPN abertos e as conferências dela para as restantes, pela regra habitual.</p>
+    <div class="row"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{
+    m.querySelector('#c').onclick=close;
+    m.querySelectorAll('[data-pres]').forEach(b=>b.onclick=async()=>{ try{ await setDoc(doc(db,'config','cargaBO'),{ausentes:{[b.dataset.pres]:false}},{merge:true}); toast('Marcada como presente.'); close(); ausencias(); }catch(e){ toast(errTxt(e),true); } });
+    m.querySelectorAll('[data-aus]').forEach(b=>b.onclick=()=>{ const uid=b.dataset.aus; close();
+      pedirRazao(`Ausência de ${esc(userNome(uid))}`, '', 'Marcar ausente e redistribuir', async rz=>{
+        try {
+          await setDoc(doc(db,'config','cargaBO'),{ausentes:{[uid]:true}},{merge:true});
+          const [a,b2] = await Promise.all([getDocs(query(collection(db,'rpn'),where('boUid','==',uid))), getDocs(query(collection(db,'rpn'),where('confUid','==',uid)))]);
+          const impl=a.docs.filter(d=>ABERTOS.includes(d.data().estado)), cf=b2.docs.filter(d=>d.data().estado==='Em Conferência');
+          let ok=0; const falhas=[];
+          for (const d of impl) { try{ await realocarTx(d.id,'bo',null,rz); ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
+          for (const d of cf)   { try{ await realocarTx(d.id,'conf',null,rz); ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
+          toast(`${userNome(uid)} marcada como ausente. ${ok} RPN realocado(s).`+(falhas.length?` Não foi possível: ${falhas.join('; ')}`:''), !!falhas.length);
+          if (location.hash.startsWith('#/lista')||!location.hash) viewLista(); 
+        } catch(e){ toast(errTxt(e),true); }
+      }); });
+  });
 }
 async function guardar(opts={}){
   const r = S.cur; recalc();
@@ -540,34 +650,65 @@ async function guardar(opts={}){
     const data = JSON.parse(JSON.stringify({...r})); ['id','criadoEm','atualizadoEm'].forEach(k=>delete data[k]);
     if (opts.submeter) { data.estado='Submetido'; data.submetidoEm=new Date().toISOString(); }
     if (opts.devolver) { data.estado='Em Implementação'; data.motivos=[]; }
-    if (['Concluído','Cancelado','Reprovado'].includes(data.estado) && !data.fechadoEm) data.fechadoEm=new Date().toISOString();
-    if (!['Concluído','Cancelado','Reprovado'].includes(data.estado)) data.fechadoEm=null;
+    if (opts.conferencia) { data.estado='Em Conferência'; data.motivos=[]; data.confNota=''; data.implementadoEm=new Date().toISOString(); }
+    if (opts.conferido) { data.estado='PN'; data.conferidoEm=new Date().toISOString(); data.conferidoPorUid=S.me.uid; data.conferidoPorNome=S.me.nome; }
+    if (opts.devolverImpl) { data.estado='Em Implementação'; data.confNota=opts.devolverImpl; }
+    if (opts.reabrir) { data.estado='Em Implementação'; }
+    if (FECHADOS.includes(data.estado) && !data.fechadoEm) { data.fechadoEm=new Date().toISOString(); data.fechadoMes=mesLocal(); }
+    if (!FECHADOS.includes(data.estado)) { data.fechadoEm=null; data.fechadoMes=null; }
     let old=null, boEscolhida=null;
     await runTransaction(db, async tx => {
       const cargaRef = doc(db,'config','cargaBO'), cntRef = doc(db,'counters','rpn');
-      const cs = await tx.get(cargaRef); const carga = cs.exists() ? {...(cs.data().carga||{})} : {};
+      const cs = await tx.get(cargaRef); const cd = cs.exists() ? cs.data() : {};
+      const carga = {...(cd.carga||{})}, conf = {...(cd.conf||{})}, aus = cd.ausentes||{};
       let numero = data.numero;
       if (isNew) { const c = await tx.get(cntRef); numero = c.exists() ? c.data().next : 1; tx.set(cntRef,{next:numero+1}); data.numero=numero; data.criadoEm=serverTimestamp(); data.criadoPor=S.me.uid; }
-      else { const s = await tx.get(rpnRef); old = s.data(); }
-      if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; }
+      else { const s = await tx.get(rpnRef); old = s.data();
+        // a BO e a conferente só mudam por atribuição automática ou realocação — nunca por um ecrã desatualizado
+        data.boUid=old.boUid??null; data.boNome=old.boNome||''; data.confUid=old.confUid??null; data.confNome=old.confNome||''; }
+      if ((opts.conferido||opts.devolverImpl) && old) {
+        if (old.estado!=='Em Conferência') throw new Error('Este RPN já não está em conferência.');
+        if (old.boUid===S.me.uid) throw new Error('Quem implementou o RPN não o pode conferir.');
+        if (old.confUid!==S.me.uid && !isMaster()) throw new Error('A conferência deste RPN está atribuída a '+(old.confNome||'outra BackOffice')+'.');
+      }
+      if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga, aus); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; }
+      if (data.estado==='Em Conferência' && (!data.confUid || data.confUid===data.boUid || aus[data.confUid])) {
+        const c = escolherConf(conf, aus, [data.boUid]); data.confUid=c?c.uid:null; data.confNome=c?c.nome:''; }
+      // registos para a Produção BO: quem implementou (fixado ao enviar para conferência) e devoluções
+      data.devolucoes = old?.devolucoes||[]; data.devMeses = old?.devMeses||[];
+      if (old) { data.implPorUid=old.implPorUid??null; data.implPorNome=old.implPorNome||''; }
+      if (opts.conferencia) { data.implPorUid=data.boUid; data.implPorNome=data.boNome; }
+      if (opts.devolverImpl && old) {
+        data.devolucoes = [...data.devolucoes, {em:new Date().toISOString(), mes:mesLocal(), porUid:S.me.uid, porNome:S.me.nome, aUid:old.implPorUid||old.boUid, aNome:old.implPorNome||old.boNome||'', linhas:old.nLinhas||0, motivo:opts.devolverImpl, anulada:false}];
+        data.devMeses = [...new Set([...data.devMeses, mesLocal()])];
+      }
       const oldBo=old?.boUid||null, oldCnt=old?.cargaContada||0;
       const newCnt = (ABERTOS.includes(data.estado) && data.boUid) ? data.nLinhas : 0;
       if (oldBo && oldCnt) carga[oldBo] = Math.max(0,(carga[oldBo]||0) - oldCnt);
       if (data.boUid && newCnt) carga[data.boUid] = (carga[data.boUid]||0) + newCnt;
       data.cargaContada = newCnt;
-      if (oldCnt || newCnt) tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()});
+      const oldCf=old?.confUid||null, oldCfCnt=old?.confContada||0;
+      const newCfCnt = (data.estado==='Em Conferência' && data.confUid) ? data.nLinhas : 0;
+      if (oldCf && oldCfCnt) conf[oldCf] = Math.max(0,(conf[oldCf]||0) - oldCfCnt);
+      if (data.confUid && newCfCnt) conf[data.confUid] = (conf[data.confUid]||0) + newCfCnt;
+      data.confContada = newCfCnt;
+      if (oldCnt || newCnt || oldCfCnt || newCfCnt) tx.set(cargaRef,{carga, conf, atualizadoEm:serverTimestamp()},{merge:true});
       data.atualizadoEm = serverTimestamp(); data.atualizadoPor = S.me.uid;
       if (isNew) tx.set(rpnRef, data); else tx.set(rpnRef, data, {merge:true});
     });
-    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm;
+    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
     S.dirty = false;
     if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
     // marca a proposta de origem (app Propostas, coleção 'propostas') com o nº do RPN
     if (isNew && r.propostaRef) updateDoc(doc(db,'propostas',r.propostaRef),{rpnId:rpnRef.id,rpnNumero:data.numero}).catch(()=>{});
     if (opts.submeter) await hist('Submetido', `Atribuído a ${data.boNome} (distribuição automática, ${data.nLinhas} linha(s))`);
     else if (opts.devolver) await hist('Devolvido à BO', 'Pendência resolvida pelo comercial');
+    else if (opts.conferencia) await hist('Enviado para conferência', data.confUid?`Implementado por ${data.boNome}. Conferência atribuída a ${data.confNome} (distribuição automática, ${data.nLinhas} linha(s))`:`Implementado por ${data.boNome}. Sem BackOffice disponível para conferir — fica em fila`);
+    else if (opts.conferido) await hist('Conferido → PN', `Conferido por ${S.me.nome}. O RPN passa a Processo de Negócio.`);
+    else if (opts.devolverImpl) await hist('Devolvido à implementação', `Pela conferência (${S.me.nome}): ${opts.devolverImpl}`);
+    else if (opts.reabrir) await hist('Reaberto', `De ${old?.estado} para Em Implementação`);
     else if (old) { const d=diffTxt(old,data); if(d) await hist(old.estado!==data.estado?'Mudança de estado':'Alterado', d); }
-    if (!opts.silencioso) toast(opts.submeter?`Submetido. BackOffice: ${data.boNome}`:'Guardado.');
+    if (!opts.silencioso) toast(opts.submeter?`Submetido. BackOffice: ${data.boNome}` : opts.conferencia?(data.confUid?`Enviado para conferência: ${data.confNome}`:'Enviado para conferência, mas não há BackOffice disponível — fica em fila.') : opts.conferido?`Conferido. O RPN ${data.numero} é agora um PN.` : opts.devolverImpl?`Devolvido a ${data.boNome}.` : 'Guardado.', !!(opts.conferencia&&!data.confUid));
     if (isNew) history.replaceState(null,'','#/rpn/'+rpnRef.id);
     if (!opts.silencioso) drawFicha();
     if (opts.submeter && confirm(`RPN ${data.numero} atribuído a ${data.boNome}. Enviar email de aviso?`)) enviarEmail('Novo RPN submetido.');
@@ -580,7 +721,10 @@ async function eliminar(){
   try {
     await runTransaction(db, async tx => {
       const cargaRef=doc(db,'config','cargaBO'); const cs=await tx.get(cargaRef);
-      if (r.boUid && r.cargaContada) { const carga={...(cs.data()?.carga||{})}; carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-r.cargaContada); tx.set(cargaRef,{carga,atualizadoEm:serverTimestamp()}); }
+      const carga={...(cs.data()?.carga||{})}, conf={...(cs.data()?.conf||{})};
+      if (r.boUid && r.cargaContada) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-r.cargaContada);
+      if (r.confUid && r.confContada) conf[r.confUid]=Math.max(0,(conf[r.confUid]||0)-r.confContada);
+      if ((r.boUid && r.cargaContada)||(r.confUid && r.confContada)) tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true});
       tx.delete(doc(db,'rpn',r.id));
     });
     S.dirty=false; toast('RPN eliminado.'); location.hash='#/lista';
@@ -639,6 +783,72 @@ function handlePropostaParam(){
   // aviso de duplicado
   const q = isStaff() ? query(collection(db,'rpn'),where('propostaRef','==',r.propostaRef)) : query(collection(db,'rpn'),where('vendedorUid','==',S.me.uid),where('propostaRef','==',r.propostaRef));
   if (r.propostaRef) getDocs(q).then(s=>{ if(!s.empty) toast(`Atenção: já existe o RPN ${s.docs[0].data().numero} para esta proposta.`, true); }).catch(()=>{});
+}
+
+// ---------- 9b. PRODUÇÃO BO (pontos e repartição do bolo mensal) ----------
+// pontos por linha: implementar = impl · conferir = conf · cancelado/reprovado = canc · devolução = −impl × pen
+const PESOS_DEF = {impl:2, conf:1, canc:2, pen:1.5};
+let PROD_MES = null;
+function calcProducao(fechados, comDev, mes, P, bolo){
+  const L = {}; const row = (uid,nome) => (L[uid] = L[uid] || {uid, nome:nome||userNome(uid)||'—', li:0, lc:0, lx:0, nd:0, ld:0});
+  bos().forEach(b=>row(b.uid,b.nome));
+  fechados.forEach(r=>{ const n=r.nLinhas||0;
+    if (r.estado==='PN') { const iu=r.implPorUid||r.boUid; if(iu) row(iu, r.implPorNome||r.boNome).li+=n; if(r.conferidoPorUid) row(r.conferidoPorUid, r.conferidoPorNome).lc+=n; }
+    else if (['Cancelado','Reprovado'].includes(r.estado) && r.boUid) row(r.boUid, r.boNome).lx+=n; });
+  const devs=[];
+  comDev.forEach(r=>(r.devolucoes||[]).forEach((d,i)=>{ if(d.mes!==mes) return; devs.push({...d, i, rpnId:r.id, numero:r.numero, cliente:r.cliente?.nome||''});
+    if(!d.anulada && d.aUid){ const x=row(d.aUid,d.aNome); x.nd++; x.ld+=d.linhas||0; } }));
+  const linhas = Object.values(L).map(x=>({...x, pts: x.li*P.impl + x.lc*P.conf + x.lx*P.canc - x.ld*P.impl*P.pen}));
+  const tot = linhas.reduce((a,x)=>a+Math.max(0,x.pts),0);
+  linhas.forEach(x=>{ x.parte = tot ? Math.max(0,x.pts)/tot : 0; x.valor = Math.round(bolo*x.parte*100)/100; });
+  linhas.sort((a,b)=>b.pts-a.pts || a.nome.localeCompare(b.nome));
+  devs.sort((a,b)=>String(a.em).localeCompare(String(b.em)));
+  return {linhas, devs, tot};
+}
+async function viewProducao(){
+  const m=$('#main'); if(!PROD_MES) PROD_MES=mesLocal();
+  m.innerHTML=`<div class="card muted">A carregar…</div>`;
+  try {
+    const [cfgS, fS, dS] = await Promise.all([getDoc(doc(db,'config','producaoBO')),
+      getDocs(query(collection(db,'rpn'),where('fechadoMes','==',PROD_MES))),
+      getDocs(query(collection(db,'rpn'),where('devMeses','array-contains',PROD_MES)))]);
+    const cfg=cfgS.data()||{}; const P={...PESOS_DEF,...(cfg.pesos||{})}; const bolo=+((cfg.bolo||{})[PROD_MES] ?? cfg.boloPadrao ?? 0);
+    const fechados=fS.docs.map(d=>({id:d.id,...d.data()})), comDev=dS.docs.map(d=>({id:d.id,...d.data()}));
+    const {linhas, devs, tot} = calcProducao(fechados, comDev, PROD_MES, P, bolo);
+    const mst=isMaster(), num=(id,v,w=70)=>mst?`<input type="number" step="any" id="${id}" value="${v}" style="width:${w}px">`:`<b>${String(v).replace('.',',')}</b>`;
+    const pt = n => (+n||0).toLocaleString('pt-PT',{maximumFractionDigits:2});
+    m.innerHTML = `
+      <div class="card"><div class="row" style="gap:18px;align-items:flex-end;flex-wrap:wrap">
+        <div><label>Mês</label><input type="month" id="pm" value="${PROD_MES}" style="width:170px"></div>
+        <div><label>Bolo do mês (€)</label>${num('pb',bolo,100)}</div>
+        <div><label>Implementar (pts/linha)</label>${num('pi',P.impl)}</div>
+        <div><label>Conferir (pts/linha)</label>${num('pc',P.conf)}</div>
+        <div><label>Cancelado/Reprovado (pts/linha)</label>${num('px',P.canc)}</div>
+        <div><label>Devolução (× pontos de implementar)</label>${num('pp',P.pen)}</div>
+        ${mst?`<button class="btn pri" id="ps">Guardar</button>`:''}
+      </div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Contam os RPN que passaram a PN (ou foram cancelados/reprovados) neste mês, e as devoluções feitas pela conferência neste mês. Cada devolução tira a quem implementou ${pt(P.impl*P.pen)} pontos por linha. O bolo reparte-se pelos pontos; quem ficar abaixo de zero recebe 0 €.</p></div>
+      <div class="card scroll"><h2>Produção de ${fmtD(PROD_MES)}</h2><table id="ptab">
+        <thead><tr><th>BackOffice</th><th class="num">Linhas implementadas</th><th class="num">Linhas conferidas</th><th class="num">Linhas canc./reprov.</th><th class="num">Devoluções</th><th class="num">Linhas devolvidas</th><th class="num">Pontos</th><th class="num">Parte</th><th class="num">Valor €</th></tr></thead>
+        <tbody>${linhas.map(x=>`<tr data-bo="${x.uid}"><td><b>${esc(x.nome)}</b></td><td class="num">${x.li}</td><td class="num">${x.lc}</td><td class="num">${x.lx}</td><td class="num">${x.nd}</td><td class="num">${x.ld}</td><td class="num"><b>${pt(x.pts)}</b></td><td class="num">${(x.parte*100).toLocaleString('pt-PT',{maximumFractionDigits:1})}%</td><td class="num"><b>${eur(x.valor)}</b></td></tr>`).join('')||'<tr><td colspan="9" class="muted">Sem BackOffices.</td></tr>'}</tbody>
+        <tfoot><tr class="tot"><td>Total</td><td class="num">${linhas.reduce((a,x)=>a+x.li,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.lc,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.lx,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.nd,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.ld,0)}</td><td class="num">${pt(tot)}</td><td></td><td class="num">${eur(linhas.reduce((a,x)=>a+x.valor,0))}</td></tr></tfoot></table></div>
+      <div class="card scroll"><h2>Devoluções do mês</h2><table id="dtab"><thead><tr><th>Quando</th><th>RPN</th><th>Cliente</th><th>Implementou</th><th>Devolveu</th><th class="num">Linhas</th><th>Razão</th><th></th></tr></thead>
+        <tbody>${devs.map(d=>`<tr style="${d.anulada?'opacity:.55':''}"><td>${tsTxt(d.em)}</td><td><a href="#/rpn/${d.rpnId}">${d.numero}</a></td><td>${esc(d.cliente)}</td><td>${esc(d.aNome)}</td><td>${esc(d.porNome)}</td><td class="num">${d.linhas}</td><td>${esc(d.motivo)}${d.anulada?` <span class="badge">penalização anulada${d.anuladaPor?' por '+esc(d.anuladaPor):''}</span>`:''}</td>
+          <td>${mst?`<button class="btn sm" data-anl="${d.rpnId}" data-i="${d.i}" data-v="${d.anulada?0:1}">${d.anulada?'Repor penalização':'Anular penalização'}</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Sem devoluções neste mês.</td></tr>'}</tbody></table></div>
+      <div class="card scroll"><h2>Processos fechados no mês (${fechados.length})</h2><table><thead><tr><th>Nº</th><th>Cliente</th><th>Estado</th><th class="num">Linhas</th><th>Implementou</th><th>Conferiu</th><th>Fechado em</th></tr></thead>
+        <tbody>${fechados.sort((a,b)=>(a.numero||0)-(b.numero||0)).map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero}</b></td><td>${esc(r.cliente?.nome)}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span></td><td class="num">${r.nLinhas||0}</td><td>${esc(r.estado==='PN'?(r.implPorNome||r.boNome):r.boNome||'—')}</td><td>${esc(r.conferidoPorNome||'—')}</td><td>${tsTxt(r.fechadoEm)}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nenhum processo fechado neste mês.</td></tr>'}</tbody></table></div>`;
+    $('#pm').onchange=e=>{ if(e.target.value){ PROD_MES=e.target.value; viewProducao(); } };
+    document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
+    if (mst) {
+      $('#ps').onclick=async()=>{ const v=id=>parseFloat($(id).value)||0;
+        try{ await setDoc(doc(db,'config','producaoBO'),{pesos:{impl:v('#pi'),conf:v('#pc'),canc:v('#px'),pen:v('#pp')}, bolo:{[PROD_MES]:v('#pb')}, boloPadrao:v('#pb'), atualizadoEm:serverTimestamp()},{merge:true}); toast('Guardado.'); viewProducao(); }catch(e){ toast(errTxt(e),true); } };
+      document.querySelectorAll('[data-anl]').forEach(b=>b.onclick=async()=>{ const anular=b.dataset.v==='1';
+        if(!confirm(anular?'Anular a penalização desta devolução?':'Repor a penalização desta devolução?')) return;
+        try{ const ref=doc(db,'rpn',b.dataset.anl); const sn=await getDoc(ref); const arr=[...(sn.data().devolucoes||[])]; const i=+b.dataset.i;
+          arr[i]={...arr[i], anulada:anular, anuladaPor:anular?S.me.nome:''}; await updateDoc(ref,{devolucoes:arr});
+          await hist(anular?'Penalização anulada':'Penalização reposta', `Devolução de ${tsTxt(arr[i].em)} (${arr[i].motivo})`, b.dataset.anl); viewProducao(); }catch(e){ toast(errTxt(e),true); } });
+    }
+  } catch(e){ console.error(e); m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; }
 }
 
 // ---------- 10. ADMINISTRAÇÃO (master) ----------
@@ -721,16 +931,19 @@ function admCat(el){
 }
 async function admCarga(el){
   const [cs,cn] = await Promise.all([getDoc(doc(db,'config','cargaBO')), getDoc(doc(db,'counters','rpn'))]);
-  const carga = cs.data()?.carga||{};
-  el.innerHTML = `<div class="card"><h2>Carga atual das BackOffices</h2><p class="muted" style="margin-top:0">Linhas em RPNs abertos (Submetido, Em Implementação, Pendentes). Cada novo RPN submetido vai para a BO com menor carga; em empate, sorteio.</p>
-    <table style="max-width:520px"><thead><tr><th>BackOffice</th><th class="num">Linhas abertas</th></tr></thead><tbody>${bos().map(b=>`<tr><td>${esc(b.nome)}</td><td class="num">${carga[b.uid]||0}</td></tr>`).join('')||'<tr><td colspan="2" class="muted">Nenhuma BO marcada com “Recebe RPN”.</td></tr>'}</tbody></table>
+  const carga = cs.data()?.carga||{}, conf = cs.data()?.conf||{}, aus = cs.data()?.ausentes||{};
+  el.innerHTML = `<div class="card"><h2>Carga atual das BackOffices</h2><p class="muted" style="margin-top:0">Implementação: linhas em RPNs abertos (Submetido, Em Implementação, Pendentes). Conferência: linhas em RPNs “Em Conferência”. Cada RPN vai para a BO presente com menor carga; em empate, sorteio. Quem implementou nunca confere. As ausências marcam-se na lista de RPN, em “Ausências · redistribuir”.</p>
+    <table style="max-width:680px"><thead><tr><th>BackOffice</th><th class="num">A implementar</th><th class="num">A conferir</th><th>Situação</th></tr></thead><tbody>${bos().map(b=>`<tr><td>${esc(b.nome)}</td><td class="num">${carga[b.uid]||0}</td><td class="num">${conf[b.uid]||0}</td><td>${aus[b.uid]?'Ausente':'Presente'}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Nenhuma BO marcada com “Recebe RPN”.</td></tr>'}</tbody></table>
     <button class="btn" id="rc" style="margin-top:12px">Recalcular a partir dos RPN</button></div>
     <div class="card"><h2>Numeração</h2><div class="row"><div style="width:200px"><label>Próximo nº de RPN</label><input type="number" id="nx" value="${cn.data()?.next||1}"></div><button class="btn" id="nxs" style="align-self:end">Guardar</button></div>
     <p class="muted" style="font-size:12px">Sugestão: começar acima da numeração do sistema atual para evitar confusões (ex.: 60001).</p></div>`;
   $('#nxs').onclick=async()=>{ const v=parseInt($('#nx').value); if(!(v>0)) return; try{ await setDoc(doc(db,'counters','rpn'),{next:v}); toast('Numeração atualizada.'); }catch(e){ toast(errTxt(e),true); } };
-  $('#rc').onclick=async()=>{ try{ const s=await getDocs(collection(db,'rpn')); const c={}; const b=writeBatch(db); let n=0;
-      s.forEach(d=>{ const r=d.data(); const cnt=(ABERTOS.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt; if((r.cargaContada||0)!==cnt && n<450){ b.update(d.ref,{cargaContada:cnt}); n++; } });
-      b.set(doc(db,'config','cargaBO'),{carga:c,atualizadoEm:serverTimestamp()}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
+  $('#rc').onclick=async()=>{ try{ const s=await getDocs(collection(db,'rpn')); const c={}, cf={}; const b=writeBatch(db); let n=0;
+      Object.keys(S.users).forEach(u=>{ c[u]=0; cf[u]=0; });
+      s.forEach(d=>{ const r=d.data(); const cnt=(ABERTOS.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt;
+        const cc=(r.estado==='Em Conferência'&&r.confUid)?(r.nLinhas||0):0; if(cc) cf[r.confUid]=(cf[r.confUid]||0)+cc;
+        if(((r.cargaContada||0)!==cnt || (r.confContada||0)!==cc) && n<450){ b.update(d.ref,{cargaContada:cnt,confContada:cc}); n++; } });
+      b.set(doc(db,'config','cargaBO'),{carga:c,conf:cf,atualizadoEm:serverTimestamp()},{merge:true}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
 }
 </script>
 </body>
