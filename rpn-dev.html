@@ -341,6 +341,7 @@ function drawFicha(){
   tc.querySelectorAll('[data-f]').forEach(el=>{
     const ev = el.type==='checkbox'||el.tagName==='SELECT' ? 'change' : 'input';
     el.addEventListener(ev,()=>{ let v = el.type==='checkbox'?el.checked : el.type==='number'?(parseFloat(el.value)||0) : el.value; setPath(S.cur, el.dataset.f, v); S.dirty=true; if(['clienteParticular','atividade'].includes(el.dataset.f)) updTotals(); });
+    if (el.dataset.f==='cliente.nif') el.addEventListener('change', async()=>{ const r=S.cur; if(await preencherCliente(r) && S.cur===r){ S.dirty=true; drawFicha(); toast('Dados do cliente preenchidos a partir da ficha.'); } });
   });
 }
 
@@ -586,6 +587,20 @@ async function eliminar(){
   } catch(e){ toast(errTxt(e),true); }
 }
 
+// preenche os campos vazios do cliente a partir da ficha (coleção clientesFicha, chave = NIF)
+async function preencherCliente(r){
+  const nif = String(r?.cliente?.nif||'').replace(/\s/g,''); if(nif.length<5) return false;
+  try {
+    const s = await getDoc(doc(db,'clientesFicha',nif)); if(!s.exists()) return false;
+    const c = s.data(), k = r.cliente; let n = 0;
+    const put = (o,f,v) => { if(v && !o[f]) { o[f]=String(v); n++; } };
+    put(k,'nome',c.nome); put(k,'nCliente',c.no); put(k,'email',c.email); put(k,'interlocutor',c.contacto); put(k,'telefone',c.tlmvl||c.telefone);
+    put(k,'morada1',c.morada); put(k,'localidade',c.local); put(k,'codPostal',c.codpost);
+    r.contas = r.contas||{}; put(r.contas,'gsm',c.contaA);
+    return n>0;
+  } catch(e){ return false; }
+}
+
 // ---------- 9. LIGAÇÃO ÀS PROPOSTAS ( ?prop=<base64 JSON> ) ----------
 function handlePropostaParam(){
   const u = new URL(location.href), raw = u.searchParams.get('prop'); if(!raw) return;
@@ -620,6 +635,7 @@ function handlePropostaParam(){
   r.propostaInfo = [TIPO_TXT[p.tipo]||p.tipo, mens?`mensalidade total ${eur(mens)} €`:'', p.duracao?`${p.duracao} meses`:'', p.comercial?`comercial: ${p.comercial}`:''].filter(Boolean).join(' · ');
   r.propostaTarif = String(p.tarif||'');
   S.pendingNovo = r;
+  preencherCliente(r).then(ok=>{ if(ok && S.cur===r) drawFicha(); });
   // aviso de duplicado
   const q = isStaff() ? query(collection(db,'rpn'),where('propostaRef','==',r.propostaRef)) : query(collection(db,'rpn'),where('vendedorUid','==',S.me.uid),where('propostaRef','==',r.propostaRef));
   if (r.propostaRef) getDocs(q).then(s=>{ if(!s.empty) toast(`Atenção: já existe o RPN ${s.docs[0].data().numero} para esta proposta.`, true); }).catch(()=>{});
