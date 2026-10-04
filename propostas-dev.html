@@ -380,9 +380,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
       </div>
     </div>
     <div class="sgrid" id="m-stats"></div>
-    <div class="tw"><div class="tt"><div class="ttit">Propostas</div></div>
-    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Mensalidade</th><th>Estado</th><th>Ações</th></tr></thead><tbody id="m-body"></tbody></table></div>
-    <div id="m-mais" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;border-top:1px solid var(--border)"></div></div>
+    <div class="tw"><div class="tt" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div class="ttit">Propostas</div><div id="m-mais" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"></div></div>
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Cliente</th><th>Tipo</th><th>Mensalidade</th><th>Estado</th><th>Ações</th></tr></thead><tbody id="m-body"></tbody></table></div></div>
   </div>
 
   <!-- DASHBOARD -->
@@ -660,7 +659,7 @@ async function maisPropostas(){
 function renderMais(){
   const el=document.getElementById('m-mais');if(!el)return;
   el.innerHTML='<span style="color:var(--muted);font-size:12px">A mostrar: propostas <b>em aberto</b>'+(WIN_DIAS?' + ganhas e perdidas dos <b>últimos '+WIN_DIAS+' dias</b>':'')+'</span>'
-    +'<button class="btn btn-g btn-sm" id="m-mais-b" onclick="maisPropostas()">'+(WIN_DIAS?'＋ mais '+WIN_PASSO+' dias (até '+(WIN_DIAS+WIN_PASSO)+')':'Ver ganhas e perdidas dos últimos '+WIN_PASSO+' dias')+'</button>';
+    +'<button class="btn btn-r btn-sm" id="m-mais-b" onclick="maisPropostas()">'+(WIN_DIAS?'＋ mais '+WIN_PASSO+' dias (até '+(WIN_DIAS+WIN_PASSO)+')':'Ver ganhas e perdidas dos últimos '+WIN_PASSO+' dias')+'</button>';
 }
 function fbErr(e){
   const c=(e&&e.code)||'';
@@ -1536,7 +1535,7 @@ function renderM(){
   const tx=tot>0?Math.round(gan/tot*100):0;
   document.getElementById('m-stats').innerHTML='<div class="sc"><div class="sv">'+tot+'</div><div class="sl">Total</div></div><div class="sc cg"><div class="sv">'+gan+'</div><div class="sl">Ganhos</div></div><div class="sc co"><div class="sv">'+pen+'</div><div class="sl">Pendentes</div></div><div class="sc cb"><div class="sv">'+tx+'%</div><div class="sl">Taxa Sucesso</div></div>';
   const tbody=document.getElementById('m-body');tbody.innerHTML='';
-  if(!data.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">'+((fS&&fS!=='pendente'&&!WIN_DIAS)?'As propostas ganhas e perdidas não estão carregadas. Use o botão abaixo da tabela.':'Sem propostas para mostrar')+'</td></tr>';return;}
+  if(!data.length){tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">'+((fS&&fS!=='pendente'&&!WIN_DIAS)?'As propostas ganhas e perdidas não estão carregadas. Use o botão vermelho por cima da tabela.':'Sem propostas para mostrar')+'</td></tr>';return;}
   [...data].reverse().forEach(p=>{
     const tr=document.createElement('tr');
     const mens=p.mensalidade?parseFloat(p.mensalidade).toFixed(2).replace('.',',')+' €':'—';
