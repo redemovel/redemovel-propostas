@@ -217,6 +217,7 @@ function render(){
   clearSubs();
   const h = location.hash || '#/lista';
   const nav = [['#/lista','RPNs'],['#/novo','Novo RPN']];
+  if (isStaff()) nav.push(['#/catalogo','Catálogo']);
   if (isBO()) nav.push(['#/producao','Produção BO']);
   if (isMaster()) nav.push(['#/admin','Administração']);
   $('#app').innerHTML = `<header>
@@ -229,6 +230,7 @@ function render(){
   $('#pw').onclick = mudarPassword;
   if (h.startsWith('#/rpn/')) return viewFicha(h.slice(6));
   if (h.startsWith('#/novo')) return viewFicha(null);
+  if (h.startsWith('#/catalogo') && isStaff()) return viewCatalogo();
   if (h.startsWith('#/producao') && isBO()) return viewProducao();
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
   return viewLista();
@@ -941,6 +943,47 @@ function handlePropostaParam(){
   // aviso de duplicado
   const q = isStaff() ? query(collection(db,'rpn'),where('propostaRef','==',r.propostaRef)) : query(collection(db,'rpn'),where('vendedorUid','==',S.me.uid),where('propostaRef','==',r.propostaRef));
   if (r.propostaRef) getDocs(q).then(s=>{ if(!s.empty) toast(`Atenção: já existe o RPN ${s.docs[0].data().numero} para esta proposta.`, true); }).catch(()=>{});
+}
+
+// ---------- 9a. CATÁLOGO DE REFERÊNCIAS (Coordenador, BackOffice e Master criam, editam e apagam) ----------
+let CAT_Q = '';
+const SUBFAMS = ['GSM','BL','Fixo'];
+function viewCatalogo(){
+  const m=$('#main'), t=semAcento(CAT_Q).trim(), pal=t.split(/\s+/).filter(Boolean);
+  const L = S.prodList.filter(p=>!pal.length || pal.every(w=>semAcento(p.ref+' '+p.designacao+' '+(p.tier||'')+' '+(p.pricingPlan||'')+' '+(p.subfamilia||'')).includes(w)));
+  m.innerHTML = `<div class="card"><div class="row" style="margin-bottom:12px">
+      <input id="cq" type="search" autocomplete="off" placeholder="Procurar por referência, designação, tier ou pricing plan…" value="${esc(CAT_Q)}" style="max-width:420px">
+      <span class="muted">${L.length} de ${S.prodList.length} referência(s)</span><span class="sp"></span><button class="btn pri" id="cn">+ Nova referência</button></div>
+    <div class="scroll"><table id="ctab"><thead><tr><th>Referência</th><th>Designação</th><th>Sub-fam.</th><th>Categoria</th><th>Tier</th><th>Pricing plan</th><th>Desc.</th><th></th></tr></thead>
+      <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b></td><td>${esc(p.designacao)}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
+        <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
+    ${L.length>300?'<p class="muted" style="font-size:12px;margin-bottom:0">A mostrar as primeiras 300. Afine a pesquisa.</p>':''}</div>`;
+  const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ viewCatalogo(); const n=$('#cq'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
+  $('#cn').onclick=()=>editarRef(null);
+  m.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editarRef(S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
+  m.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const ref=b.closest('tr').dataset.ref;
+    if(!confirm(`Apagar a referência ${ref}?\n\nOs processos que já a usam não são alterados, mas deixa de aparecer na pesquisa das linhas.`)) return;
+    try{ await deleteDoc(doc(db,'produtos',prodId(ref))); await loadProdutos(); toast('Referência apagada.'); viewCatalogo(); }catch(e){ toast(errTxt(e),true); } });
+}
+function editarRef(p){
+  const nova=!p; p=p||{ref:'',designacao:'',subfamilia:'GSM',tier:'Gold',pricingPlan:'',descontinuado:false};
+  modal(`<h2>${nova?'Nova referência':'Editar '+esc(p.ref)}</h2><div class="grid g2">
+    <div><label>Referência</label><input id="e-ref" value="${esc(p.ref)}" ${nova?'':'disabled'} maxlength="18" style="text-transform:uppercase"></div>
+    <div><label>Sub-família</label><select id="e-sub">${[...new Set([...SUBFAMS,p.subfamilia||'GSM'])].map(x=>`<option ${x===(p.subfamilia||'GSM')?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+    <div style="grid-column:1/-1"><label>Designação</label><input id="e-des" value="${esc(p.designacao)}"></div>
+    <div><label>Tier</label><select id="e-tier">${['Gold','Silver','Bronze','Estanho',''].map(x=>`<option ${x===(p.tier||'')?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div><label>Pricing plan</label><input id="e-pp" value="${esc(p.pricingPlan||'')}" inputmode="numeric"></div>
+    <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="e-dsc" ${p.descontinuado?'checked':''}> Descontinuado</label>
+    <div class="row" style="grid-column:1/-1"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Guardar</button></div></div>`, (m,close)=>{
+    m.querySelector('#c').onclick=close;
+    m.querySelector('#ok').onclick=async()=>{
+      const ref=m.querySelector('#e-ref').value.trim().toUpperCase(), des=m.querySelector('#e-des').value.trim(), sub=m.querySelector('#e-sub').value;
+      if(!ref) return toast('Falta a referência.',true); if(!des) return toast('Falta a designação.',true);
+      if(nova && S.prodMap[ref]) return toast('Já existe uma referência '+ref+'.',true);
+      const pp=m.querySelector('#e-pp').value.replace(/\D/g,'');
+      const d={ref, designacao:des, subfamilia:sub, tier:m.querySelector('#e-tier').value, pricingPlan:pp, descontinuado:m.querySelector('#e-dsc').checked, categoria:/^fixo/i.test(sub)?'Fixo':'Móvel', atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome};
+      try{ await setDoc(doc(db,'produtos',prodId(ref)), d, {merge:true}); await loadProdutos(); close(); toast(nova?'Referência criada.':'Referência guardada.'); if(location.hash.startsWith('#/catalogo')) viewCatalogo(); }catch(e){ toast(errTxt(e),true); } };
+  });
 }
 
 // ---------- 9b. PRODUÇÃO BO (pontos e repartição do bolo mensal) ----------
