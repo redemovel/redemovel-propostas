@@ -304,7 +304,7 @@ function drawLista(){
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(r.estado)}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${r.grupoId?' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>':''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(r.estado)}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -328,7 +328,7 @@ function rpnVazio(){
     loja:'Externos', dtAtivacao:'', dtFimEquip:'', prazoPermanencia:24, classificacao:'',
     condicoes:{pnEspecial:false,aprovacaoGA:false,novoNif:false,desconto:0,subsidiacao:0,reuniao:'',infoRisco:'',resumo:''},
     contas:{gsm:'',dados:'',adsl:'',gsm2:'',novaConta:''}, notas:'', linhas:[], nLinhas:0, totRLMC:0, totScore:0,
-    propostaRef:'', propostaInfo:'', propostaTarif:'', cargaContada:0 };
+    propostaRef:'', propostaInfo:'', propostaTarif:'', cargaContada:0, grupoId:'' };
 }
 // ---- referências compostas (bundles): a linha abre nas filhas, cada uma com a sua % da RLMC total ----
 const novoGid = () => Math.random().toString(36).slice(2,10);
@@ -356,6 +356,7 @@ function linhaVazia(t){ if (t && t.bGid) return {...linhaVazia(), natureza:t.nat
 async function viewFicha(id){
   const m = $('#main');
   if (!id || S.cur?.id !== id) S.tab = 'principal';
+  S.grupo = null;
   if (!id) {
     S.cur = S.pendingNovo || rpnVazio(); S.pendingNovo = null; S.cur.id = null; S.tab='principal';
     S.dirty = !!S.cur.propostaRef;
@@ -383,7 +384,8 @@ function drawFicha(){
   if (!tabs.some(t=>t[0]===S.tab)) S.tab='principal';
   const acts = [];
   if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button>`);
-  if ((p.own||p.nov) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração' && r.origem!=='PHC' && unidades(r).length>1) acts.push(`<button class="btn" id="a-div" title="Vários processos para o mesmo negócio (ex.: prazos de fidelização diferentes)">Dividir em vários RPN</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
   if (r.id && r.origem!=='PHC' && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
   if (isBO() && r.id && ['Submetido','Em Implementação','A aguardar'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
@@ -404,6 +406,7 @@ function drawFicha(){
       <span class="sp"></span>${acts.join('')}
     </div>
     ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}${r.propostaTarif?`<div class="muted" style="font-size:12px;margin-top:4px">Serviços na proposta: ${esc(r.propostaTarif)}</div>`:''}</div>`:''}
+    <div id="grp"></div>
     ${r.estado==='A aguardar'?`<div class="warnbox" ${esperaVencida(r)?'style="border-color:var(--red);background:#fde8e8"':''}><b>${esperaVencida(r)?'Verificar na Vodafone':'A aguardar'}:</b> ${esc(esperaTxt(r))}${esperaVencida(r)?'. Se está tudo certo, envie para conferência; se deu erro, volte a “Em Implementação”.':''}</div>`:''}
     ${r.confNota && ABERTOS.includes(r.estado)?`<div class="warnbox"><b>Devolvido pela conferência${r.confNome?` (${esc(r.confNome)})`:''}:</b> ${esc(r.confNota)}</div>`:''}
     ${(r.motivos||[]).length && !FECHADOS.includes(r.estado) && r.estado!=='Em Conferência'?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
@@ -412,13 +415,15 @@ function drawFicha(){
   $('#back').onclick=()=>go('#/lista');
   document.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ S.tab=a.dataset.t; clearSubs(); drawFicha(); });
   $('#a-save')?.addEventListener('click',()=>guardar());
-  $('#a-sub')?.addEventListener('click',()=>guardar({submeter:true}));
+  $('#a-sub')?.addEventListener('click',()=>acaoGrupo('submeter',{submeter:true}));
+  $('#a-div')?.addEventListener('click',dividir);
+  desenharGrupo();
   $('#a-resp')?.addEventListener('click',()=>guardar({devolver:true}));
   $('#a-del')?.addEventListener('click',eliminar);
   $('#a-conf')?.addEventListener('click',()=>{ const sem=(S.cur.linhas||[]).filter(l=>!String(l.contratoVDF||'').trim()).length;
-    if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return; guardar({conferencia:true}); });
-  $('#a-ok')?.addEventListener('click',()=>{ if(confirm(`Confirma que conferiu a implementação do RPN ${S.cur.numero} na Vodafone?\n\nO RPN fica fechado como PN (Processo de Negócio).`)) guardar({conferido:true}); });
-  $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>guardar({devolverImpl:rz})));
+    if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return; acaoGrupo('conferencia',{conferencia:true}); });
+  $('#a-ok')?.addEventListener('click',()=>{ if(confirm(`Confirma que conferiu a implementação do RPN ${S.cur.numero} na Vodafone?\n\nO RPN fica fechado como PN (Processo de Negócio).${S.grupo?.lista?.length?`\n\nOs outros RPN do grupo em conferência (${S.grupo.lista.filter(x=>x.estado==='Em Conferência').map(x=>x.numero).join(', ')||'nenhum'}) fecham também.`:''}`)) acaoGrupo('conferido',{conferido:true}); });
+  $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>acaoGrupo('devolverImpl',{devolverImpl:rz})));
   $('#a-real')?.addEventListener('click',()=>realocar('bo'));
   $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
   $('#a-reab')?.addEventListener('click',()=>{ if(confirm('Reabrir este processo? Volta a “Em Implementação”.')) guardar({reabrir:true}); });
@@ -737,7 +742,7 @@ async function realocarTx(id, tipo, uidNovo, motivo){
       const cnt=r.cargaContada||0, nc=r.nLinhas||0;
       if (r.boUid && cnt) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-cnt);
       if (nc) carga[novo.uid]=(carga[novo.uid]||0)+nc;
-      upd.boUid=novo.uid; upd.boNome=novo.nome; upd.cargaContada=nc;
+      upd.boUid=novo.uid; upd.boNome=novo.nome; upd.cargaContada=nc; realocarTx.uid=novo.uid;
       if (r.confUid===novo.uid) { upd.confUid=null; upd.confNome=''; }   // quem implementa não pode conferir
       txt=`BO: ${r.boNome||'—'} → ${novo.nome}`;
     } else {
@@ -749,7 +754,7 @@ async function realocarTx(id, tipo, uidNovo, motivo){
       const cnt=r.confContada||0, nc=r.nLinhas||0;
       if (r.confUid && cnt) conf[r.confUid]=Math.max(0,(conf[r.confUid]||0)-cnt);
       if (nc) conf[novo.uid]=(conf[novo.uid]||0)+nc;
-      upd.confUid=novo.uid; upd.confNome=novo.nome; upd.confContada=nc;
+      upd.confUid=novo.uid; upd.confNome=novo.nome; upd.confContada=nc; realocarTx.uid=novo.uid;
       txt=`Conferência: ${r.confNome||'em fila'} → ${novo.nome}`;
     }
     tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true});
@@ -771,7 +776,9 @@ function realocar(tipo){
   const cand = bos().filter(b=>!excl.includes(b.uid));
   pedirRazao(tipo==='bo'?'Realocar a implementação':'Realocar a conferência',
     `<div><label>Passar para</label><select id="rb"><option value="">— automático (menor carga) —</option>${cand.map(b=>`<option value="${b.uid}">${esc(b.nome)}</option>`).join('')}</select></div>`,
-    'Realocar', async (rz, uid)=>{ try { const t=await realocarTx(r.id, tipo, uid||null, rz); toast('Realocado. '+t); S.cur=null; viewFicha(r.id); } catch(e){ toast(errTxt(e),true); } });
+    'Realocar', async (rz, uid)=>{ try { const irm=await irmaos(r); const t=await realocarTx(r.id, tipo, uid||null, rz); const para=realocarTx.uid, tb=[];
+        for (const x of irm) { try{ await realocarTx(x.id, tipo, para, rz+' (com o RPN '+r.numero+', mesmo grupo)'); tb.push(x.numero); }catch(e){} }   // o grupo anda junto
+        toast('Realocado. '+t+(tb.length?` Também os RPN ${tb.join(', ')} do grupo.`:'')); S.cur=null; viewFicha(r.id); } catch(e){ toast(errTxt(e),true); } });
 }
 // ausências e redistribuição em bloco (qualquer BackOffice)
 async function ausencias(){
@@ -791,8 +798,9 @@ async function ausencias(){
           const [a,b2] = await Promise.all([getDocs(query(collection(db,'rpn'),where('boUid','==',uid))), getDocs(query(collection(db,'rpn'),where('confUid','==',uid)))]);
           const impl=a.docs.filter(d=>ABERTOS.includes(d.data().estado)), cf=b2.docs.filter(d=>d.data().estado==='Em Conferência');
           let ok=0; const falhas=[];
-          for (const d of impl) { try{ await realocarTx(d.id,'bo',null,rz); ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
-          for (const d of cf)   { try{ await realocarTx(d.id,'conf',null,rz); ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
+          const gB={}, gC={};   // RPN do mesmo grupo vão todos para a mesma BO
+          for (const d of impl) { const g=d.data().grupoId; try{ await realocarTx(d.id,'bo',(g&&gB[g])||null,rz); if(g) gB[g]=realocarTx.uid; ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
+          for (const d of cf)   { const g=d.data().grupoId; try{ await realocarTx(d.id,'conf',(g&&gC[g])||null,rz); if(g) gC[g]=realocarTx.uid; ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
           toast(`${userNome(uid)} marcada como ausente. ${ok} RPN realocado(s).`+(falhas.length?` Não foi possível: ${falhas.join('; ')}`:''), !!falhas.length);
           if (location.hash.startsWith('#/lista')||!location.hash) viewLista(); 
         } catch(e){ toast(errTxt(e),true); }
@@ -889,6 +897,104 @@ async function guardar(opts={}){
   } catch(e){ console.error(e); toast(errTxt(e), true); return false; }
   finally { btns.forEach(b=>b.disabled=false); }
 }
+// ---------- GRUPOS DE RPN: vários processos para o mesmo negócio — mesma BO, conferência conjunta ----------
+const IMPL = ['Submetido','Em Implementação','A aguardar'];
+function unidades(r){ const un=[]; (r.linhas||[]).forEach(l=>{ const u=l.bGid && un.find(x=>x.g===l.bGid); if(u) u.ls.push(l); else un.push({g:l.bGid||null, ls:[l]}); }); return un; }   // linha solta ou bundle inteiro
+async function irmaos(r){
+  if (!r?.grupoId || !r.id) return [];
+  const meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
+  const sn = await getDocs(query(collection(db,'rpn'), where('grupoId','==',r.grupoId), ...meu));
+  return sn.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.id!==r.id).sort((a,b)=>(a.numero||0)-(b.numero||0));
+}
+function totais(r){ r.linhas.forEach(l=>l.score=scoreLinha(l,r)); r.nLinhas=r.linhas.length;
+  r.totRLMC=Math.round(r.linhas.reduce((a,l)=>a+(+l.rlmc||0),0)*100)/100; r.totScore=Math.round(r.linhas.reduce((a,l)=>a+scoreLinha(l,r),0)*1000)/1000;
+  r.contratos=[...new Set(r.linhas.map(l=>String(l.contratoVDF||'').trim()).filter(Boolean))]; r.msisdns=listaMsisdn(r.linhas); return r; }
+async function desenharGrupo(){
+  const el=$('#grp'), r=S.cur; if(!el || !r?.grupoId || !r.id) return;
+  if (S.grupo?.de!==r.id) { try { S.grupo={de:r.id, lista:await irmaos(r)}; } catch(e){ return; } }
+  const el2=$('#grp'); if(!el2 || S.cur?.id!==r.id || !S.grupo.lista.length) return;
+  el2.innerHTML=`<div class="warnbox" style="background:#eef2ff;border-color:#c7d2fe">⛓ <b>Grupo de ${S.grupo.lista.length+1} RPN do mesmo negócio</b> — implementados pela mesma BackOffice e conferidos em conjunto: ${S.grupo.lista.map(x=>`<a href="#/rpn/${x.id}"><b>${x.estado==='PN'?'PN':'RPN'} ${x.numero}</b></a> <span class="muted">(${esc(x.estado)} · ${x.nLinhas||0} linha(s))</span>`).join(' · ')}</div>`;
+}
+// aplica aos outros RPN do grupo a mesma passagem de estado que acabou de ser feita no RPN aberto (L)
+async function aplicarNoIrmao(id, tipo, L, nota){
+  let feito=null;
+  await runTransaction(db, async tx => {
+    const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO');
+    const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(), cd=cs.exists()?cs.data():{};
+    const carga={...(cd.carga||{})}, conf={...(cd.conf||{})}, agora=new Date().toISOString();
+    const u={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}; let estado=o.estado, bo=o.boUid||null, cf=o.confUid||null;
+    if (tipo==='submeter') { if(o.estado!=='Em Elaboração') return; estado='Submetido'; bo=L.boUid; Object.assign(u,{submetidoEm:agora, boUid:L.boUid, boNome:L.boNome||''}); }
+    else if (tipo==='conferencia') { if(!IMPL.includes(o.estado)) return; estado='Em Conferência'; cf=L.confUid||null;
+      Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); }
+    else if (tipo==='conferido') { if(o.estado!=='Em Conferência' || o.boUid===S.me.uid) return; estado='PN';
+      Object.assign(u,{conferidoEm:agora, conferidoPorUid:S.me.uid, conferidoPorNome:S.me.nome, fechadoEm:agora, fechadoMes:mesLocal(), mesRef:mesLocal()}); }
+    else if (tipo==='devolverImpl') { if(o.estado!=='Em Conferência') return; estado='Em Implementação';
+      Object.assign(u,{confNota:nota||'', devMeses:[...new Set([...(o.devMeses||[]), mesLocal()])],
+        devolucoes:[...(o.devolucoes||[]), {em:agora, mes:mesLocal(), porUid:S.me.uid, porNome:S.me.nome, aUid:o.implPorUid||o.boUid, aNome:o.implPorNome||o.boNome||'', linhas:o.nLinhas||0, motivo:nota||'', anulada:false}]}); }
+    else return;
+    u.estado=estado;
+    const n=o.nLinhas||0, nc=(ABERTOS.includes(estado)&&bo)?n:0, ncf=(estado==='Em Conferência'&&cf)?n:0;
+    if (o.boUid && o.cargaContada) carga[o.boUid]=Math.max(0,(carga[o.boUid]||0)-o.cargaContada);
+    if (bo && nc) carga[bo]=(carga[bo]||0)+nc;
+    if (o.confUid && o.confContada) conf[o.confUid]=Math.max(0,(conf[o.confUid]||0)-o.confContada);
+    if (cf && ncf) conf[cf]=(conf[cf]||0)+ncf;
+    u.cargaContada=nc; u.confContada=ncf;
+    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,u); feito=o.numero;
+  });
+  if (feito!=null) await hist({submeter:'Submetido',conferencia:'Enviado para conferência',conferido:'Conferido → PN',devolverImpl:'Devolvido à implementação'}[tipo],
+    `Em conjunto com o RPN ${L.numero} (mesmo grupo)`+(tipo==='submeter'?`. BackOffice: ${L.boNome}`:tipo==='conferencia'?`. Conferência: ${L.confNome||'em fila'}`:tipo==='devolverImpl'?`: ${nota}`:`, por ${S.me.nome}`), id);
+  return feito;
+}
+async function acaoGrupo(tipo, opts){
+  const r=S.cur; let irm=[];
+  if (r.grupoId && r.id) {
+    try { irm=await irmaos(r); } catch(e){ return toast(errTxt(e),true); }
+    if (tipo==='submeter') for (const x of irm.filter(x=>x.estado==='Em Elaboração')) { const e=validarSubmissao(x); if(e.length) return toast(`O RPN ${x.numero} do mesmo grupo não está pronto — falta: ${e.join(', ')}`,true); }
+    if (tipo==='conferencia') { const mal=irm.filter(x=>!IMPL.includes(x.estado) && !FECHADOS.includes(x.estado) && x.estado!=='Em Conferência');
+      if (mal.length) return toast(`Os RPN do grupo vão juntos para conferência. Ainda não pode: ${mal.map(x=>`o ${x.numero} está em «${x.estado}»`).join('; ')}.`,true); }
+  }
+  const ok=await guardar(opts); if(ok!==true || !irm.length) return;
+  const feitos=[];
+  for (const x of irm) { try { const n=await aplicarNoIrmao(x.id, tipo, S.cur, opts.devolverImpl); if(n!=null) feitos.push(n); } catch(e){ toast(`RPN ${x.numero}: ${errTxt(e)}`,true); } }
+  S.grupo=null; desenharGrupo();
+  if (feitos.length) toast(`Grupo: ${ {submeter:'submetidos',conferencia:'enviados para conferência',conferido:'fechados como PN',devolverImpl:'devolvidos à implementação'}[tipo] } também os RPN ${feitos.join(', ')}.`);
+}
+function dividir(){
+  const r=S.cur; recalc(); const un=unidades(r);
+  if (un.length<2) return toast('Precisa de pelo menos 2 linhas (ou bundles) para dividir.',true);
+  const prazos=[...new Set(un.map(u=>+u.ls[0].prazo||0))], N=Math.min(4,un.length);
+  modal(`<h2>Dividir em vários RPN</h2>
+    <p class="muted" style="margin-top:0">Escolha em que RPN fica cada linha. A sugestão separa por prazo de fidelização. Os RPN ficam no mesmo grupo: são submetidos juntos, implementados pela mesma BackOffice e conferidos em conjunto.</p>
+    <div class="scroll" style="max-height:340px"><table id="dv"><thead><tr><th>Linha</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th><th>Fica no</th></tr></thead><tbody>
+    ${un.map((u,i)=>`<tr><td>${u.g?`📦 <b>${esc(u.ls[0].bRef)}</b> <span class="muted">(${u.ls.length} linhas)</span>`:`<b>${esc(u.ls[0].ref)}</b> ${esc(u.ls[0].designacao||'')}`}</td><td>${esc(u.ls.map(l=>l.msisdn).filter(Boolean).join(', '))}</td><td class="num">${+u.ls[0].prazo||0}</td><td class="num">${eur(u.ls.reduce((a,l)=>a+(+l.rlmc||0),0))}</td>
+      <td><select data-u="${i}">${Array.from({length:N},(_,k)=>`<option value="${k}" ${Math.min(prazos.indexOf(+u.ls[0].prazo||0),N-1)===k?'selected':''}>${k===0?`RPN ${r.numero||'atual'}`:`novo RPN ${k+1}`}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Dividir</button></div>`, (m,close)=>{
+    m.querySelector('#c').onclick=close;
+    m.querySelector('#ok').onclick=async()=>{
+      const g={}; m.querySelectorAll('[data-u]').forEach(sel=>{ (g[sel.value]=g[sel.value]||[]).push(...un[+sel.dataset.u].ls); });
+      const ks=Object.keys(g).sort(); if (ks.length<2) return toast('Ponha linhas em pelo menos 2 RPN diferentes.',true);
+      if (!g['0']) return toast('O RPN atual tem de ficar com pelo menos uma linha.',true);
+      m.querySelector('#ok').disabled=true;
+      const antes=r.linhas, gAntes=r.grupoId;
+      r.linhas=g['0']; r.grupoId=r.grupoId||('g'+Date.now().toString(36)+novoGid());
+      if (await guardar({silencioso:true})!==true) { r.linhas=antes; r.grupoId=gAntes; m.querySelector('#ok').disabled=false; return; }
+      try {
+        const nums=[];
+        for (const k of ks.filter(k=>k!=='0')) {
+          const d=JSON.parse(JSON.stringify(S.cur)); ['id','criadoEm','atualizadoEm','submetidoEm'].forEach(x=>delete d[x]);
+          Object.assign(d,{linhas:g[k], estado:'Em Elaboração', motivos:[], boUid:null, boNome:'', confUid:null, confNome:'', cargaContada:0, confContada:0, mesRef:null, fechadoEm:null, fechadoMes:null, devolucoes:[], devMeses:[]}); totais(d);
+          const nref=doc(collection(db,'rpn'));
+          await runTransaction(db, async tx=>{ const cr=doc(db,'counters','rpn'), c=await tx.get(cr); d.numero=c.exists()?c.data().next:1; tx.set(cr,{next:d.numero+1});
+            tx.set(nref,{...d, criadoEm:serverTimestamp(), criadoPor:S.me.uid, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
+          await hist('Criado', `Dividido do RPN ${S.cur.numero} (mesmo negócio, ${d.nLinhas} linha(s))`, nref.id); nums.push(d.numero);
+        }
+        await hist('Dividido', `Linhas passadas para o(s) RPN ${nums.join(', ')} do mesmo grupo`);
+        if (S.cur.propostaRef) { const todos=[S.cur.numero, ...(await irmaos(S.cur)).map(x=>x.numero)].sort((a,b)=>a-b); updateDoc(doc(db,'propostas',S.cur.propostaRef),{rpnId:S.cur.id, rpnNumero:todos.join(' + ')}).catch(()=>{}); }
+        close(); S.grupo=null; drawFicha(); toast(`Dividido. Criado(s) o(s) RPN ${nums.join(', ')} no mesmo grupo.`);
+      } catch(e){ console.error(e); toast(errTxt(e),true); m.querySelector('#ok').disabled=false; }
+    };
+  });
+}
 async function eliminar(){
   const r=S.cur;
   if (r.estado==='Em Elaboração') { if(!confirm(`Eliminar definitivamente o RPN ${r.numero}?`)) return; }
@@ -905,7 +1011,8 @@ async function eliminar(){
       if ((r.boUid && r.cargaContada)||(r.confUid && r.confContada)) tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true});
       tx.delete(doc(db,'rpn',r.id));
     });
-    if (r.propostaRef) await updateDoc(doc(db,'propostas',r.propostaRef),{rpnId:'',rpnNumero:''}).catch(()=>{});   // a proposta fica outra vez livre
+    if (r.propostaRef) { const irm=await irmaos(r).catch(()=>[]);   // sem mais RPN, a proposta fica outra vez livre
+      await updateDoc(doc(db,'propostas',r.propostaRef), irm.length?{rpnId:irm[0].id,rpnNumero:irm.map(x=>x.numero).join(' + ')}:{rpnId:'',rpnNumero:''}).catch(()=>{}); }
     S.dirty=false; toast('RPN eliminado.'); location.hash='#/lista';
   } catch(e){ toast(errTxt(e),true); }
 }
