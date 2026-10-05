@@ -84,7 +84,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 <script type="module">
 // =====================================================================
 //  RPN — Registo de Processo de Negócio · Redemóvel   (Fase 1)
-//  DEV: rpn-dev.html   ·   PRODUÇÃO: rpn.html
+//  DEV: rpn.html   ·   PRODUÇÃO: rpn.html
 // =====================================================================
 
 // ---------- 1. CONFIGURAÇÃO FIREBASE (colar do Firebase Console) ----------
@@ -1123,8 +1123,8 @@ function handlePropostaParam(){
 
 // ---------- 9c. PROJETOS: renegociação 6 meses antes do fim da fidelização ----------
 // Um Projeto por cliente e por mês (projetos/{NIF}_{AAAA-MM}), para o vendedor que está na ficha do cliente nesse momento.
-const PROPOSTAS_URL = 'propostas-dev.html';   // produção: propostas.html
-const MANUAL_URL = 'manual-dev.html';   // produção: manual.html
+const PROPOSTAS_URL = 'propostas.html';   // produção: propostas.html
+const MANUAL_URL = 'manual.html';   // produção: manual.html
 const PROJ_ESTADOS = ['Por tratar','Em negociação','Ganho','Perdido','Adiado'];
 const PROJ_PEND = ['Por tratar','Adiado'];   // ainda à espera de decisão (um adiado volta a contar quando a nova data chega)
 const PROJ_ADIA_MAX = 180;   // dias, a contar da data de alerta original
