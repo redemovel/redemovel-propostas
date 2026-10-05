@@ -2417,7 +2417,7 @@ async function admResumo(){
 
 // ── Tarifários: lista e edição ──
 let _cat=null,_tfFiltro='todos';
-const refKey=r=>String(r||'').trim().toUpperCase();
+const refKey=r=>{const k=String(r||'').trim().toUpperCase();return /^[.\-]*$/.test(k)?'':k;};   // "." e "-" são marcadores de «sem referência»
 function tfEstado(t){
   if(!_cat)return '';
   const k=refKey(t.refPHC);
