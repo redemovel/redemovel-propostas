@@ -1162,6 +1162,8 @@ async function projetosAoEntrar(){
     }
   } catch(e){ console.warn('Projetos:', e); }
 }
+// quem pode ter Projetos: comerciais e qualquer conta com carteira (nº de vendedor PHC), mais quem já tem algum atribuído
+const vendedoresProj = (extra=[]) => Object.entries(S.users).filter(([uid,u])=>(u.ativo!==false && (u.perfil==='comercial' || u.vendedorPHC)) || extra.includes(uid)).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
 const PJ = {tab:'tratar', mes:null, vend:'', lista:[]};
 async function viewProjetos(){
   const m=$('#main'); PJ.mes=PJ.mes||mesLocal();
@@ -1180,7 +1182,7 @@ function desenharProjetos(){
   L.sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||'')||(a.clienteNome||'').localeCompare(b.clienteNome||''));
   if (!stf && PJ.tab==='tratar' && L.length!==(S.projN||0)) { S.projN=L.length; const b=$('#pj-n'); if(b) b.textContent=L.length||''; }
   const tot=k=>L.reduce((a,p)=>a+(+p[k]||0),0), cnt=e=>L.filter(p=>p.estado===e).length;
-  const vends=Object.entries(S.users).filter(([,u])=>u.perfil==='comercial'&&u.ativo!==false).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const vends=vendedoresProj(PJ.lista.map(p=>p.vendedorUid));
   const porV={}; if (stf && PJ.tab==='mapa') PJ.lista.forEach(p=>{ const k=p.vendedorUid||'__sem', o=porV[k]=porV[k]||{nome:p.vendedorNome||'Por atribuir',n:0,rl:0,sc:0,tr:0,ga:0}; o.n++; o.rl+=+p.totRLMC||0; o.sc+=+p.totScore||0; if(p.estado!=='Por tratar') o.tr++; if(p.estado==='Ganho') o.ga++; });
   m.innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
@@ -1219,7 +1221,7 @@ function projParaProposta(p){
 }
 function abrirProjeto(p){
   if(!p) return; const stf=isStaff(), aberto=['Por tratar','Em negociação'].includes(p.estado), meu=p.vendedorUid===S.me.uid;
-  const vends=Object.entries(S.users).filter(([,u])=>u.perfil==='comercial'&&u.ativo!==false).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const vends=vendedoresProj([p.vendedorUid]);
   modal(`<h2>${esc(p.clienteNome)} <span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span></h2>
     <p class="muted" style="margin-top:0">NIF ${esc(p.nif)} · vendedor: <b>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</b> · alerta ${fmtD(p.alertaEm)} · primeiro fim de contrato ${fmtD(p.fimEm)}${p.propostaId?` · proposta <b>${esc(p.propostaId)}</b>`:''}${p.motivoPerda?`<br>Motivo: ${esc(p.motivoPerda)}`:''}</p>
     <div class="scroll" style="max-height:320px"><table id="pj-l"><thead><tr><th>Referência</th><th>Designação</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>PN de origem</th></tr></thead>
