@@ -47,7 +47,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .b-Pendente-Comercial,.b-Pendente-Documentos{background:#fff3df;color:var(--warn)}
 .b-Concluído,.b-PN{background:#e6f4ea;color:var(--ok)}
 .b-Em-Conferência{background:#e0f4f7;color:#0b6b7a}
-.b-A-aguardar-ciclo{background:#eef0f4;color:#4a5568}.venc{background:#fde8e8!important;color:var(--red-d)!important}
+.b-A-aguardar,.b-A-aguardar-ciclo{background:#eef0f4;color:#4a5568}.venc{background:#fde8e8!important;color:var(--red-d)!important}
 .b-Cancelado,.b-Reprovado{background:#fde8e8;color:var(--red-d)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;min-width:110px}
@@ -108,10 +108,10 @@ const auth = getAuth(app), db = getFirestore(app), st = getStorage(app);
 if (EMU) { connectAuthEmulator(auth,'http://127.0.0.1:9099',{disableWarnings:true}); connectFirestoreEmulator(db,'127.0.0.1',8080); connectStorageEmulator(st,'127.0.0.1',9199); }
 
 // ---------- 2. TABELAS DE NEGÓCIO ----------
-const ESTADOS  = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar ciclo','Em Conferência','PN','Cancelado','Reprovado'];
-const ESTADOS_MAN = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar ciclo','Cancelado','Reprovado'];   // os que a BO escolhe à mão; Conferência e PN só pelos botões
+const ESTADOS  = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar','Em Conferência','PN','Cancelado','Reprovado'];
+const ESTADOS_MAN = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar','Cancelado','Reprovado'];   // os que a BO escolhe à mão; Conferência e PN só pelos botões
 const FECHADOS = ['PN','Concluído','Cancelado','Reprovado'];
-const EM_CURSO = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar ciclo','Em Conferência'];
+const EM_CURSO = ['Em Elaboração','Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar','A aguardar ciclo','Em Conferência'];
 // ciclos de faturação da Vodafone: a BO implementa e espera pelo fecho do ciclo para verificar se a alteração entrou sem erro
 const CICLOS = [['08','Dia 8'],['15','Dia 15'],['22','Dia 22'],['31','Fim do mês']];
 function proxCiclo(dia, de=new Date()){
@@ -121,10 +121,17 @@ function proxCiclo(dia, de=new Date()){
   return iso(new Date(a, m, alvo(a,m)));
 }
 window.__rpn = {proxCiclo};   // exposto só para os testes automáticos
-const cicloVencido = r => r.estado==='A aguardar ciclo' && r.cicloData && r.cicloData < hoje();   // 'Concluído' = estado antigo, anterior à conferência
-const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar ciclo'];   // contam para a carga da BO
+// esperas do lado da BO: o processo está implementado (ou pedido) e aguarda algo da Vodafone antes de seguir para conferência
+const ESPERAS = [['ciclo','Ciclo de faturação'],['instalacao','Instalação marcada'],['1229','Enviado 1229'],['1229os','1229 via OS'],['portabilidade','Portabilidade enviada'],['aprovacao','Aprovação Vodafone']];
+const ESPERA_TXT = Object.fromEntries(ESPERAS);
+// (versão anterior: estado 'A aguardar ciclo' com cicloData) → 'A aguardar' com motivo e data
+function normEspera(r){ if (r && r.estado==='A aguardar ciclo') { r.estado='A aguardar'; r.esperaMotivo='ciclo'; r.esperaData=r.esperaData||r.cicloData||''; } return r; }
+const diasDesde = iso => iso ? Math.max(0, Math.floor((new Date(hoje()) - new Date(String(iso).slice(0,10))) / 864e5)) : 0;
+const esperaVencida = r => r.estado==='A aguardar' && r.esperaData && r.esperaData < hoje();
+const esperaTxt = r => { const m = ESPERA_TXT[r.esperaMotivo]||'A aguardar'; return r.esperaData ? `${m} · ${esperaVencida(r)?'verificar, passou ':'até '}${fmtD(r.esperaData)}` : `${m} · há ${diasDesde(r.esperaDesde)} dia(s)`; };
+const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar','A aguardar ciclo'];   // contam para a carga da BO
 const EDIT_COM = ['Em Elaboração','Pendente Comercial','Pendente Documentos'];                // comercial pode editar
-const MOTIVOS  = ['Doc. Identificação','Contrato','CRC','Morada','Condições Comerciais','Dívida','1229','1229 via OS'];
+const MOTIVOS  = ['Doc. Identificação','Contrato','CRC','Morada','Condições Comerciais','Dívida'];
 const NATUREZAS= ['Ref Móvel','Nova Móvel','Ref Fixo','Nova Fixo','Nova SS'];
 const LOJAS    = ['Externos','LOA','L8A','LAR','LLI','LOV','LVO'];
 const PRAZOS   = [12,18,24,30,36,48];
@@ -244,6 +251,7 @@ async function viewLista(){
     const col = collection(db,'rpn'), meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
     const [a, f] = await Promise.all([getDocs(query(col, ...meu, where('estado','in',EM_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',S.filtros.mes)))]);
     const m2 = {}; [...a.docs, ...f.docs, ...(S.extra||[])].forEach(d=>{ const r = typeof d.data==='function' ? {id:d.id,...d.data()} : d; m2[r.id]=r; });
+    Object.values(m2).forEach(normEspera);
     S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0));
   } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
   if (S.filtros.meus===null) S.filtros.meus = perfil()==='backoffice';
@@ -266,7 +274,7 @@ async function procurarHistorico(){
 function drawLista(){
   const f = S.filtros, all = S.list;
   const base = all.filter(r => (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
-    && (!f.ciclo || cicloVencido(r))
+    && (!f.ciclo || esperaVencida(r))
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
   const cnt = {}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
@@ -286,12 +294,12 @@ function drawLista(){
         ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
         <select id="fb" style="width:180px"><option value="">Todas as BO</option>${bos().map(b=>`<option value="${b.uid}" ${f.bo===b.uid?'selected':''}>${esc(b.nome)}</option>`).join('')}</select>`:''}
         ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fme" ${f.meus?'checked':''}> Só os meus</label>
-        <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fci" ${f.ciclo?'checked':''}> Ciclos por verificar (${all.filter(x=>cicloVencido(x)&&(!f.meus||x.boUid===S.me.uid)).length})</label>`:''}
+        <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fci" ${f.ciclo?'checked':''}> Esperas por verificar (${all.filter(x=>esperaVencida(x)&&(!f.meus||x.boUid===S.me.uid)).length})</label>`:''}
         <span class="sp"></span>${isBO()?`<button class="btn" id="aus">Ausências · redistribuir</button>`:''}<button class="btn pri" id="nv">+ Novo RPN</button>
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${cicloVencido(r)?'venc':''}">${esc(r.estado)}</span>${r.estado==='A aguardar ciclo'&&r.cicloData?` <span class="${cicloVencido(r)?'':'muted'}" style="font-size:11px;${cicloVencido(r)?'color:var(--red-d);font-weight:600':''}">${cicloVencido(r)?'verificar · fechou a ':'fecha a '}${fmtD(r.cicloData)}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(r.estado)}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -327,7 +335,7 @@ async function viewFicha(id){
     S.dirty = !!S.cur.propostaRef;
   } else {
     m.innerHTML = `<div class="card muted">A carregar…</div>`;
-    try { const s = await getDoc(doc(db,'rpn',id)); if(!s.exists()) { m.innerHTML='<div class="card">RPN não encontrado.</div>'; return; } S.cur = {id, ...s.data()}; }
+    try { const s = await getDoc(doc(db,'rpn',id)); if(!s.exists()) { m.innerHTML='<div class="card">RPN não encontrado.</div>'; return; } S.cur = normEspera({id, ...s.data()}); }
     catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
     S.dirty = false;
   }
@@ -352,7 +360,7 @@ function drawFicha(){
   if ((p.own||p.nov) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
   if (r.id && r.origem!=='PHC' && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
-  if (isBO() && r.id && ['Submetido','Em Implementação','A aguardar ciclo'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
+  if (isBO() && r.id && ['Submetido','Em Implementação','A aguardar'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
   if (isBO() && r.estado==='Em Conferência' && r.boUid!==S.me.uid && (r.confUid===S.me.uid || isMaster())) acts.push(`<button class="btn pri" id="a-ok">Conferido · fechar como PN</button><button class="btn" id="a-dev">Devolver à implementação</button>`);
   if (isBO() && r.id && ABERTOS.includes(r.estado)) acts.push(`<button class="btn" id="a-real">Realocar BO</button>`);
   if (isBO() && r.estado==='Em Conferência') acts.push(`<button class="btn" id="a-realc">Realocar conferência</button>`);
@@ -370,7 +378,7 @@ function drawFicha(){
       <span class="sp"></span>${acts.join('')}
     </div>
     ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}${r.propostaTarif?`<div class="muted" style="font-size:12px;margin-top:4px">Serviços na proposta: ${esc(r.propostaTarif)}</div>`:''}</div>`:''}
-    ${r.estado==='A aguardar ciclo' && r.cicloData?`<div class="warnbox" ${cicloVencido(r)?'style="border-color:var(--red);background:#fde8e8"':''}><b>${cicloVencido(r)?'Ciclo fechado — verificar na Vodafone':'A aguardar o fecho do ciclo'}:</b> ${fmtD(r.cicloData)}${cicloVencido(r)?'. Se a alteração entrou sem erro, envie para conferência; se deu erro, volte a “Em Implementação”.':''}</div>`:''}
+    ${r.estado==='A aguardar'?`<div class="warnbox" ${esperaVencida(r)?'style="border-color:var(--red);background:#fde8e8"':''}><b>${esperaVencida(r)?'Verificar na Vodafone':'A aguardar'}:</b> ${esc(esperaTxt(r))}${esperaVencida(r)?'. Se está tudo certo, envie para conferência; se deu erro, volte a “Em Implementação”.':''}</div>`:''}
     ${r.confNota && ABERTOS.includes(r.estado)?`<div class="warnbox"><b>Devolvido pela conferência${r.confNome?` (${esc(r.confNome)})`:''}:</b> ${esc(r.confNota)}</div>`:''}
     ${(r.motivos||[]).length && !FECHADOS.includes(r.estado) && r.estado!=='Em Conferência'?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
     <div class="tabs">${tabs.map(([k,t])=>`<a data-t="${k}" class="${S.tab===k?'on':''}">${t}</a>`).join('')}</div>
@@ -414,7 +422,11 @@ function tabPrincipal(tc, dis, p){
       ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}
       ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
       ${sel('Estado','estado',ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN],isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
-      ${r.estado==='A aguardar ciclo'||r.cicloDia?`<div id="cx-ciclo" style="${r.estado==='A aguardar ciclo'?'':'display:none'}"><label>Ciclo de faturação${r.cicloData&&r.estado==='A aguardar ciclo'?` · fecha a ${fmtD(r.cicloData)}`:''}</label><select data-f="cicloDia" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${CICLOS.map(([v,t])=>`<option value="${v}" ${r.cicloDia===v?'selected':''}>${t}</option>`).join('')}</select></div>`:`<div id="cx-ciclo" style="display:none"><label>Ciclo de faturação</label><select data-f="cicloDia"><option value="">— escolher —</option>${CICLOS.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')}</select></div>`}
+      <div id="cx-esp" style="${r.estado==='A aguardar'?'':'display:none'};grid-column:span 2"><div class="grid g2" style="gap:10px">
+        <div><label>A aguardar o quê</label><select data-f="esperaMotivo" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${ESPERAS.map(([v,t])=>`<option value="${v}" ${r.esperaMotivo===v?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div id="cx-ciclo" style="${r.esperaMotivo==='ciclo'?'':'display:none'}"><label>Ciclo${r.esperaMotivo==='ciclo'&&r.esperaData?` · fecha a ${fmtD(r.esperaData)}`:''}</label><select data-f="cicloDia" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${CICLOS.map(([v,t])=>`<option value="${v}" ${r.cicloDia===v?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div id="cx-edata" style="${r.esperaMotivo&&r.esperaMotivo!=='ciclo'?'':'display:none'}"><label id="lb-edata">${r.esperaMotivo==='instalacao'?'Data da instalação':'Voltar a verificar em (opcional)'}</label><input type="date" data-f="esperaData" value="${esc(r.esperaMotivo!=='ciclo'?(r.esperaData||''):'')}" ${isBO()&&p.edit?'':'disabled'}></div>
+      </div></div>
       ${r.origem==='PHC'?`<div><label>Resp. BackOffice (PHC)</label><input value="${esc(r.boNome||'—')}" disabled></div><div><label>Registo PN de origem · estado no PHC</label><input value="${esc([r.phcRpn?('nº '+r.phcRpn):'', r.phcRpnStatus].filter(Boolean).join(' · ')||'—')}" disabled></div>`:`<div><label>Resp. BackOffice</label><input value="${esc(r.boNome||'— atribuição automática ao submeter —')}" disabled></div>`}
       ${r.confNome||r.estado==='Em Conferência'?`<div><label>Conferência</label><input value="${esc(r.confNome||'em fila')}" disabled></div>`:''}
       ${sel('Atividade incentivada','atividade',ATIVIDADE,dis)}
@@ -440,7 +452,9 @@ function tabPrincipal(tc, dis, p){
     <datalist id="dl-prod">${S.prodList.map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)} · ${esc(x.tier)}</option>`).join('')}</datalist>`;
   drawLines(dis);
   tabOutros($('#t-out'), dis); tabCond($('#t-cond'), dis);
-  tc.querySelector('[data-f="estado"]')?.addEventListener('change',e=>{ $('#cx-ciclo').style.display = e.target.value==='A aguardar ciclo' ? '' : 'none'; });
+  tc.querySelector('[data-f="estado"]')?.addEventListener('change',e=>{ $('#cx-esp').style.display = e.target.value==='A aguardar' ? '' : 'none'; });
+  tc.querySelector('[data-f="esperaMotivo"]')?.addEventListener('change',e=>{ const v=e.target.value; $('#cx-ciclo').style.display = v==='ciclo'?'':'none'; $('#cx-edata').style.display = v&&v!=='ciclo'?'':'none'; $('#lb-edata').textContent = v==='instalacao'?'Data da instalação':'Voltar a verificar em (opcional)'; S.cicloMudou=true;
+    S.cur.esperaData=''; const di=tc.querySelector('[data-f="esperaData"]'); if(di) di.value=''; });   // ao mudar de motivo, a data anterior deixa de valer
   tc.querySelector('[data-f="cicloDia"]')?.addEventListener('change',()=>{ S.cicloMudou=true; });
   tc.querySelectorAll('.mot').forEach(c=>c.onchange=()=>{ S.cur.motivos=[...tc.querySelectorAll('.mot:checked')].map(x=>x.value); S.dirty=true; });
   tc.querySelector('[data-f="boUid"]')?.addEventListener('change',e=>{ S.cur.boNome = userNome(e.target.value); });
@@ -577,7 +591,7 @@ function tabHist(tc){
 }
 function hist(acao, detalhe, id){ const rid=id||S.cur?.id; if(!rid) return Promise.resolve(); return addDoc(collection(db,'rpn',rid,'historico'),{acao,detalhe:detalhe||'',porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()}).catch(e=>console.warn('hist',e)); }
 
-const CAMPOS_HIST = [['estado','Estado'],['cicloData','Fecho do ciclo'],['boNome','BO'],['vendedorNome','Vendedor'],['cliente.nome','Cliente'],['cliente.nif','NIF'],['nOportunidade','Oportunidade'],['subSfid','Sub-SFID'],['atividade','Atividade'],['dtAtivacao','Dt. ativação'],['nLinhas','Nº linhas'],['totRLMC','RLMC total'],['totScore','Score']];
+const CAMPOS_HIST = [['estado','Estado'],['esperaMotivo','A aguardar'],['esperaData','Data da espera'],['boNome','BO'],['vendedorNome','Vendedor'],['cliente.nome','Cliente'],['cliente.nif','NIF'],['nOportunidade','Oportunidade'],['subSfid','Sub-SFID'],['atividade','Atividade'],['dtAtivacao','Dt. ativação'],['nLinhas','Nº linhas'],['totRLMC','RLMC total'],['totScore','Score']];
 function diffTxt(a,b){
   const out=[]; CAMPOS_HIST.forEach(([k,t])=>{ const x=getPath(a,k), y=getPath(b,k); if(String(x??'')!==String(y??'')) out.push(`${t}: ${x??'—'} → ${y??'—'}`); });
   const ma=(a.motivos||[]).join(', '), mb=(b.motivos||[]).join(', '); if(ma!==mb) out.push(`Motivos: ${ma||'—'} → ${mb||'—'}`);
@@ -699,9 +713,15 @@ async function guardar(opts={}){
     if (opts.conferido) { data.estado='PN'; data.conferidoEm=new Date().toISOString(); data.conferidoPorUid=S.me.uid; data.conferidoPorNome=S.me.nome; }
     if (opts.devolverImpl) { data.estado='Em Implementação'; data.confNota=opts.devolverImpl; }
     if (opts.reabrir) { data.estado='Em Implementação'; }
-    if (data.estado==='A aguardar ciclo') { if (!data.cicloDia) { btns.forEach(b=>b.disabled=false); return toast('Escolha o ciclo de faturação (dia 8, 15, 22 ou fim do mês).', true); }
-      if (!data.cicloData || S.cicloMudou) data.cicloData = proxCiclo(data.cicloDia); }
-    else { data.cicloData = null; }
+    if (data.estado==='A aguardar') {
+      const falha = t => { btns.forEach(b=>b.disabled=false); toast(t, true); };
+      if (!data.esperaMotivo) return falha('Indique o que está a aguardar (ciclo, instalação, 1229, portabilidade, aprovação).');
+      if (data.esperaMotivo==='ciclo') { if (!data.cicloDia) return falha('Escolha o ciclo de faturação (dia 8, 15, 22 ou fim do mês).');
+        if (!data.esperaData || S.cicloMudou) data.esperaData = proxCiclo(data.cicloDia); }
+      else if (data.esperaMotivo==='instalacao' && !data.esperaData) return falha('Indique a data da instalação.');
+      if (!data.esperaDesde) data.esperaDesde = hoje();
+    } else { data.esperaMotivo=''; data.esperaData=''; data.esperaDesde=''; }
+    data.cicloData = null;
     S.cicloMudou = false;
     if (FECHADOS.includes(data.estado) && !data.fechadoEm) { data.fechadoEm=new Date().toISOString(); data.fechadoMes=mesLocal(); }
     data.mesRef = FECHADOS.includes(data.estado) ? (data.fechadoMes||mesLocal()) : null;   // mês em que aparece na lista dos fechados
@@ -748,7 +768,7 @@ async function guardar(opts={}){
       data.atualizadoEm = serverTimestamp(); data.atualizadoPor = S.me.uid;
       if (isNew) tx.set(rpnRef, data); else tx.set(rpnRef, data, {merge:true});
     });
-    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.cicloData=data.cicloData; S.cur.mesRef=data.mesRef; S.cur.contratos=data.contratos; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
+    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.esperaMotivo=data.esperaMotivo; S.cur.esperaData=data.esperaData; S.cur.esperaDesde=data.esperaDesde; S.cur.mesRef=data.mesRef; S.cur.contratos=data.contratos; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
     S.dirty = false;
     if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
     // marca a proposta de origem (app Propostas, coleção 'propostas') com o nº do RPN
