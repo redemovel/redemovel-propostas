@@ -890,8 +890,13 @@ async function guardar(opts={}){
   finally { btns.forEach(b=>b.disabled=false); }
 }
 async function eliminar(){
-  const r=S.cur; if(!confirm(`Eliminar definitivamente o RPN ${r.numero}?`)) return;
+  const r=S.cur;
+  if (r.estado==='Em Elaboração') { if(!confirm(`Eliminar definitivamente o RPN ${r.numero}?`)) return; }
+  else { const t=prompt(`O ${r.estado==='PN'?'PN':'RPN'} ${r.numero} está em «${r.estado}». Vai ser apagado com anexos, mensagens e histórico, e não pode ser recuperado.\n\nPara confirmar, escreva o número ${r.numero}:`); if(t===null) return; if(String(t).trim()!==String(r.numero)) return toast('Número errado. Nada foi apagado.',true); }
   try {
+    // anexos (ficheiros + registos), mensagens e histórico: apaga o que as permissões deixarem, antes do próprio RPN
+    for (const sub of ['anexos','mensagens','historico']) { try { const sn=await getDocs(collection(db,'rpn',r.id,sub));
+      for (const d of sn.docs) { if(sub==='anexos' && d.data().path) await deleteObject(sref(st,d.data().path)).catch(()=>{}); await deleteDoc(d.ref).catch(()=>{}); } } catch(e){ console.warn(sub,e); } }
     await runTransaction(db, async tx => {
       const cargaRef=doc(db,'config','cargaBO'); const cs=await tx.get(cargaRef);
       const carga={...(cs.data()?.carga||{})}, conf={...(cs.data()?.conf||{})};
@@ -900,6 +905,7 @@ async function eliminar(){
       if ((r.boUid && r.cargaContada)||(r.confUid && r.confContada)) tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true});
       tx.delete(doc(db,'rpn',r.id));
     });
+    if (r.propostaRef) await updateDoc(doc(db,'propostas',r.propostaRef),{rpnId:'',rpnNumero:''}).catch(()=>{});   // a proposta fica outra vez livre
     S.dirty=false; toast('RPN eliminado.'); location.hash='#/lista';
   } catch(e){ toast(errTxt(e),true); }
 }
