@@ -49,6 +49,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .b-Em-Conferência{background:#e0f4f7;color:#0b6b7a}
 .b-A-aguardar,.b-A-aguardar-ciclo{background:#eef0f4;color:#4a5568}.venc{background:#fde8e8!important;color:var(--red-d)!important}
 .b-Cancelado,.b-Reprovado{background:#fde8e8;color:var(--red-d)}
+.pj-0{background:#fff4d6;color:#8a5a00}.pj-1{background:#e0ecff;color:#1d4ed8}.pj-2{background:#dcfce7;color:#166534}.pj-3{background:#fde8e8;color:var(--red-d)}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;min-width:110px}
 .chip b{display:block;font-size:20px}.chip.on{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
@@ -187,9 +188,11 @@ onAuthStateChanged(auth, async user => {
     const snap = await getDoc(doc(db,'users',user.uid));
     if (!snap.exists() || !snap.data().ativo) { $('#app').innerHTML = `<div class="login card"><h2>Conta sem acesso</h2><p class="muted">A conta ${esc(user.email)} não tem perfil ativo. Contacte o administrador.</p><button class="btn" id="out">Sair</button></div>`; $('#out').onclick=()=>signOut(auth); return; }
     S.me = {uid:user.uid, ...snap.data()};
+    S.projN = 0; Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[]});
     await Promise.all([loadUsers(), loadProdutos()]);
     handlePropostaParam();
     render();
+    projetosAoEntrar();   // não bloqueia a entrada
   } catch(e){ toast(errTxt(e), true); console.error(e); }
 });
 window.addEventListener('hashchange', () => { if (S.me) render(); });
@@ -218,6 +221,7 @@ function render(){
   clearSubs();
   const h = location.hash || '#/lista';
   const nav = [['#/lista','RPNs'],['#/novo','Novo RPN']];
+  nav.push(['#/projetos','Projetos'+(S.projN?` <b id="pj-n" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px">${S.projN}</b>`:'')]);
   if (isStaff()) nav.push(['#/catalogo','Catálogo']);
   if (isBO()) nav.push(['#/producao','Produção BO']);
   if (isMaster()) nav.push(['#/admin','Administração']);
@@ -231,6 +235,7 @@ function render(){
   $('#pw').onclick = mudarPassword;
   if (h.startsWith('#/rpn/')) return viewFicha(h.slice(6));
   if (h.startsWith('#/novo')) return viewFicha(null);
+  if (h.startsWith('#/projetos')) return viewProjetos();
   if (h.startsWith('#/catalogo') && isStaff()) return viewCatalogo();
   if (h.startsWith('#/producao') && isBO()) return viewProducao();
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
@@ -1094,6 +1099,146 @@ function handlePropostaParam(){
   // aviso de duplicado
   const q = isStaff() ? query(collection(db,'rpn'),where('propostaRef','==',r.propostaRef)) : query(collection(db,'rpn'),where('vendedorUid','==',S.me.uid),where('propostaRef','==',r.propostaRef));
   if (r.propostaRef) getDocs(q).then(s=>{ if(!s.empty) toast(`Atenção: já existe o RPN ${s.docs[0].data().numero} para esta proposta.`, true); }).catch(()=>{});
+}
+
+// ---------- 9c. PROJETOS: renegociação 6 meses antes do fim da fidelização ----------
+// Um Projeto por cliente e por mês (projetos/{NIF}_{AAAA-MM}), para o vendedor que está na ficha do cliente nesse momento.
+const PROPOSTAS_URL = 'propostas-dev.html';   // produção: propostas.html
+const PROJ_ESTADOS = ['Por tratar','Em negociação','Ganho','Perdido'];
+const PROJ_PRAZOS = [12,18,24,30,36,48];
+const PROJ_ANTECEDENCIA = 6;   // meses antes do fim do contrato
+const somaMeses = (ym,n) => { let [y,m]=ym.split('-').map(Number); m+=n; y+=Math.floor((m-1)/12); m=((m-1)%12+12)%12+1; return y+'-'+String(m).padStart(2,'0'); };
+const diaNoMes = (ym,d) => { const [y,m]=ym.split('-').map(Number); return ym+'-'+String(Math.min(d, new Date(y,m,0).getDate())).padStart(2,'0'); };   // dia 31 num mês de 30 → dia 30
+const dataPN = r => String(r.fechadoEm||r.conferidoEm||r.data||'').slice(0,10);
+const hojeLocal = () => { const d=new Date(); return mesLocal(d)+'-'+String(d.getDate()).padStart(2,'0'); };
+async function gerarProjetos(M){
+  const cand={};
+  for (const P of PROJ_PRAZOS) {   // um PN com prazo P fechado no mês M−(P−6) chega aos 6 meses do fim no mês M
+    const sn=await getDocs(query(collection(db,'rpn'), where('mesRef','==',somaMeses(M,-(P-PROJ_ANTECEDENCIA)))));
+    sn.forEach(d=>{ const r=d.data(); if(!['PN','Concluído'].includes(r.estado)) return; const nif=String(r.cliente?.nif||'').trim(); if(!nif) return;
+      (r.linhas||[]).forEach(l=>{ if((+l.prazo||0)===P) (cand[nif]=cand[nif]||[]).push({pnId:d.id, r, l, P}); }); });
+  }
+  const porVend={}; Object.entries(S.users).forEach(([uid,u])=>{ if(u.vendedorPHC && u.ativo!==false) porVend[String(u.vendedorPHC)]=uid; });
+  const res={mes:M, clientes:Object.keys(cand).length, criados:0, jaHavia:0, semLinhas:0, semVendedor:0, tiradas:0, linhas:0}, ops=[];
+  for (const nif of Object.keys(cand)) {
+    const pid=nif+'_'+M;
+    const [todos, ficha, ex] = await Promise.all([getDocs(query(collection(db,'rpn'), where('cliente.nif','==',nif))), getDoc(doc(db,'clientesFicha',nif)), getDoc(doc(db,'projetos',pid))]);
+    if (ex.exists()) { res.jaHavia++; continue; }
+    const outros=todos.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>!['Cancelado','Reprovado'].includes(x.estado));
+    const linhas=[];
+    cand[nif].forEach(({pnId,r,l,P})=>{
+      const dPN=dataPN(r), ms=normMsisdn(l.msisdn), temMs=ms.length>=9;
+      // já renegociado (PN posterior) ou em negociação (RPN em curso) com o mesmo MSISDN → a linha não entra
+      if (temMs && outros.some(x=>x.id!==pnId && (!FECHADOS.includes(x.estado) || dataPN(x)>dPN) && (x.msisdns||listaMsisdn(x.linhas)).includes(ms))) { res.tiradas++; return; }
+      const dia=+dPN.slice(8,10)||1, mPN=r.mesRef||dPN.slice(0,7);
+      linhas.push({ref:l.ref||'', designacao:l.designacao||'', msisdn:l.msisdn||'', natureza:l.natureza||'', rlmc:+l.rlmc||0, prazo:P, tier:l.tier||'', score:scoreLinha(l,r), bRef:l.bRef||'', bGid:l.bGid||'',
+        pnId, pnNumero:r.numero||'', pnData:dPN, alerta:diaNoMes(M,dia), fim:diaNoMes(somaMeses(mPN,P),dia), confirmar:!temMs});
+    });
+    if (!linhas.length) { res.semLinhas++; continue; }
+    linhas.sort((a,b)=>a.alerta.localeCompare(b.alerta)||String(a.pnNumero).localeCompare(String(b.pnNumero)));
+    const f=ficha.exists()?ficha.data():null, cod=String(f?.vendedor||''), uid=porVend[cod]||null; if(!uid) res.semVendedor++;
+    ops.push([pid,{nif, clienteNome:f?.nome||cand[nif][0].r.cliente?.nome||'', mes:M, alertaEm:linhas[0].alerta, fimEm:linhas.map(l=>l.fim).sort()[0],
+      vendedorUid:uid, vendedorNome:uid?S.users[uid].nome:'', vendedorPHC:cod, linhas, nLinhas:linhas.length,
+      totRLMC:Math.round(linhas.reduce((a,l)=>a+l.rlmc,0)*100)/100, totScore:Math.round(linhas.reduce((a,l)=>a+(+l.score||0),0)*1000)/1000,
+      estado:'Por tratar', propostaId:'', motivoPerda:'', criadoEm:serverTimestamp(), criadoPor:S.me.uid}]);
+    res.linhas+=linhas.length;
+  }
+  for (let i=0;i<ops.length;i+=300){ const b=writeBatch(db); ops.slice(i,i+300).forEach(([id,d])=>b.set(doc(db,'projetos',id),d)); await b.commit(); }
+  res.criados=ops.length;
+  await setDoc(doc(db,'config','projetos'),{gerados:{[M]:{em:new Date().toISOString(), por:S.me.nome, criados:res.criados}}},{merge:true});
+  return res;
+}
+// à entrada: Master/Coordenador/BO geram o mês corrente (se faltar) e, a partir do dia 28, o mês seguinte; o comercial fica a saber quantos tem para tratar
+async function projetosAoEntrar(){
+  try {
+    if (isStaff()) {
+      const cur=mesLocal(), alvo=[cur]; if (new Date().getDate()>=28) alvo.push(somaMeses(cur,1));
+      const g=(await getDoc(doc(db,'config','projetos'))).data()?.gerados||{};
+      for (const M of alvo) if (!g[M]) { const x=await gerarProjetos(M); if (x.criados) toast(`Projetos de ${M.split('-').reverse().join('/')}: ${x.criados} criados para a equipa.`); }
+    } else {
+      const sn=await getDocs(query(collection(db,'projetos'), where('vendedorUid','==',S.me.uid), where('estado','==','Por tratar')));
+      const h=hojeLocal(), n=sn.docs.filter(d=>(d.data().alertaEm||'')<=h).length;
+      if (n!==(S.projN||0)) { S.projN=n; if (!S.dirty && !location.hash.startsWith('#/rpn/') && !location.hash.startsWith('#/novo')) render(); }
+    }
+  } catch(e){ console.warn('Projetos:', e); }
+}
+const PJ = {tab:'tratar', mes:null, vend:'', lista:[]};
+async function viewProjetos(){
+  const m=$('#main'); PJ.mes=PJ.mes||mesLocal();
+  m.innerHTML=`<div class="card muted">A carregar…</div>`;
+  try {
+    const col=collection(db,'projetos'), meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)];
+    const sn=await getDocs(query(col, ...meu, PJ.tab==='tratar'?where('estado','==','Por tratar'):where('mes','==',PJ.mes)));
+    PJ.lista=sn.docs.map(d=>({id:d.id, ...d.data()}));
+  } catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
+  desenharProjetos();
+}
+function desenharProjetos(){
+  const m=$('#main'), h=hojeLocal(), stf=isStaff();
+  let L=PJ.lista.filter(p=>PJ.tab!=='tratar' || (p.alertaEm||'')<=h);
+  if (stf && PJ.vend) L=L.filter(p=>PJ.vend==='__sem' ? !p.vendedorUid : p.vendedorUid===PJ.vend);
+  L.sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||'')||(a.clienteNome||'').localeCompare(b.clienteNome||''));
+  if (!stf && PJ.tab==='tratar' && L.length!==(S.projN||0)) { S.projN=L.length; const b=$('#pj-n'); if(b) b.textContent=L.length||''; }
+  const tot=k=>L.reduce((a,p)=>a+(+p[k]||0),0), cnt=e=>L.filter(p=>p.estado===e).length;
+  const vends=Object.entries(S.users).filter(([,u])=>u.perfil==='comercial'&&u.ativo!==false).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const porV={}; if (stf && PJ.tab==='mapa') PJ.lista.forEach(p=>{ const k=p.vendedorUid||'__sem', o=porV[k]=porV[k]||{nome:p.vendedorNome||'Por atribuir',n:0,rl:0,sc:0,tr:0,ga:0}; o.n++; o.rl+=+p.totRLMC||0; o.sc+=+p.totScore||0; if(p.estado!=='Por tratar') o.tr++; if(p.estado==='Ganho') o.ga++; });
+  m.innerHTML=`<div class="card">
+    <div class="row" style="margin-bottom:12px">
+      <div class="tabs" style="margin:0;border:0"><a data-pt="tratar" class="${PJ.tab==='tratar'?'on':''}">Para tratar</a><a data-pt="mapa" class="${PJ.tab==='mapa'?'on':''}">Mapa do mês</a></div>
+      ${PJ.tab==='mapa'?`<input type="month" id="pj-m" value="${PJ.mes}" style="max-width:170px">`:''}
+      ${stf?`<select id="pj-v" style="max-width:220px"><option value="">Todos os vendedores</option><option value="__sem" ${PJ.vend==='__sem'?'selected':''}>Por atribuir</option>${vends.map(v=>`<option value="${v.uid}" ${PJ.vend===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select>`:''}
+      <span class="sp"></span>
+      ${stf&&PJ.tab==='mapa'?`<button class="btn" id="pj-g" title="Procura os PN que chegam aos 6 meses do fim do contrato neste mês. Não duplica os que já existem.">Gerar Projetos de ${PJ.mes.split('-').reverse().join('/')}</button>`:''}
+    </div>
+    <p class="muted" style="margin:0 0 12px;font-size:12px">${PJ.tab==='tratar'?'Projetos cuja data de alerta já chegou e que ainda não têm proposta. Cada Projeto nasce 6 meses antes do fim da fidelização, no dia do PN de origem.':'Todos os Projetos do mês, incluindo os que ainda não chegaram à data de alerta. O Score potencial assume renovação com a mesma RLMC e o mesmo prazo.'}</p>
+    <div class="chips" id="pj-k" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <div class="chip" style="cursor:default"><span class="muted">Projetos</span><b>${L.length}</b></div>
+      <div class="chip" style="cursor:default"><span class="muted">Linhas</span><b>${tot('nLinhas')}</b></div>
+      <div class="chip" style="cursor:default"><span class="muted">RLMC potencial</span><b>${eur(tot('totRLMC'))} €</b></div>
+      <div class="chip" style="cursor:default"><span class="muted">Score potencial</span><b>${n3(tot('totScore'))}</b></div>
+      ${PJ.tab==='mapa'?PROJ_ESTADOS.map(e=>`<div class="chip" style="cursor:default"><span class="muted">${e}</span><b>${cnt(e)}</b></div>`).join(''):''}
+    </div>
+    ${Object.keys(porV).length?`<div class="scroll" style="margin-bottom:14px"><table id="pj-vt"><thead><tr><th>Vendedor</th><th class="num">Projetos</th><th class="num">RLMC potencial</th><th class="num">Score potencial</th><th class="num">Já tratados</th><th class="num">Ganhos</th></tr></thead><tbody>${Object.values(porV).sort((a,b)=>b.sc-a.sc).map(o=>`<tr><td>${esc(o.nome)}</td><td class="num">${o.n}</td><td class="num">${eur(o.rl)}</td><td class="num">${n3(o.sc)}</td><td class="num">${o.tr} (${Math.round(o.tr/o.n*100)}%)</td><td class="num">${o.ga}</td></tr>`).join('')}</tbody></table></div>`:''}
+    <div class="scroll"><table id="pj-t"><thead><tr><th>Alerta</th><th>Cliente</th><th>NIF</th>${stf?'<th>Vendedor</th>':''}<th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>Estado</th></tr></thead>
+      <tbody>${L.map(p=>`<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}${(p.alertaEm||'')>h?' <span class="muted" style="font-size:11px">· ainda não</span>':''}</td><td><b>${esc(p.clienteNome)}</b></td><td>${esc(p.nif)}</td>${stf?`<td>${p.vendedorUid?esc(p.vendedorNome):'<span style="color:var(--red-d)">por atribuir</span>'}</td>`:''}<td class="num">${p.nLinhas||0}${(p.linhas||[]).some(l=>l.confirmar)?' <span title="Há linhas sem MSISDN: confirmar se ainda estão ativas" style="color:#b45309">⚠</span>':''}</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}</td></tr>`).join('')||`<tr><td colspan="9" class="muted">${PJ.tab==='tratar'?'Nada para tratar neste momento.':'Sem Projetos neste mês.'}</td></tr>`}</tbody></table></div></div>`;
+  m.querySelectorAll('[data-pt]').forEach(a=>a.onclick=()=>{ PJ.tab=a.dataset.pt; viewProjetos(); });
+  const pm=$('#pj-m'); if(pm) pm.onchange=()=>{ if(pm.value){ PJ.mes=pm.value; viewProjetos(); } };
+  const pv=$('#pj-v'); if(pv) pv.onchange=()=>{ PJ.vend=pv.value; desenharProjetos(); };
+  const pg=$('#pj-g'); if(pg) pg.onclick=async()=>{ if(!confirm(`Gerar os Projetos de ${PJ.mes.split('-').reverse().join('/')}?\n\nProcura os PN que chegam aos 6 meses do fim do contrato nesse mês. Os Projetos que já existem não são alterados.`)) return; pg.disabled=true; pg.textContent='A gerar…';
+    try{ const x=await gerarProjetos(PJ.mes); toast(`${x.criados} Projeto(s) criados (${x.linhas} linhas) · ${x.jaHavia} já existiam · ${x.tiradas} linha(s) já renegociadas ou em curso · ${x.semVendedor} por atribuir.`); viewProjetos(); }catch(e){ toast(errTxt(e),true); pg.disabled=false; } };
+  m.querySelectorAll('[data-pj]').forEach(tr=>tr.onclick=()=>abrirProjeto(PJ.lista.find(p=>p.id===tr.dataset.pj)));
+}
+function projParaProposta(p){
+  const vistos=new Set(), ls=[];
+  (p.linhas||[]).forEach(l=>{ if(l.bGid){ if(vistos.has(l.bGid)) return; vistos.add(l.bGid); }
+    const ref=l.bRef||l.ref, pr=S.prodMap[String(ref).toUpperCase()];
+    const irm=l.bGid?(p.linhas||[]).filter(x=>x.bGid===l.bGid):[l];
+    ls.push({ref, des:pr?.designacao||l.designacao||'', msisdn:normMsisdn(irm.map(x=>x.msisdn).find(Boolean)||''), prazo:l.prazo, desc:!!(pr?(pr.descontinuado||pr.inativo):true)}); });
+  const d={id:p.id, cliente:p.clienteNome, nif:p.nif, comercial:p.vendedorNome||'', linhas:ls};
+  return btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function abrirProjeto(p){
+  if(!p) return; const stf=isStaff(), aberto=['Por tratar','Em negociação'].includes(p.estado), meu=p.vendedorUid===S.me.uid;
+  const vends=Object.entries(S.users).filter(([,u])=>u.perfil==='comercial'&&u.ativo!==false).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
+  modal(`<h2>${esc(p.clienteNome)} <span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span></h2>
+    <p class="muted" style="margin-top:0">NIF ${esc(p.nif)} · vendedor: <b>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</b> · alerta ${fmtD(p.alertaEm)} · primeiro fim de contrato ${fmtD(p.fimEm)}${p.propostaId?` · proposta <b>${esc(p.propostaId)}</b>`:''}${p.motivoPerda?`<br>Motivo: ${esc(p.motivoPerda)}`:''}</p>
+    <div class="scroll" style="max-height:320px"><table id="pj-l"><thead><tr><th>Referência</th><th>Designação</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>PN de origem</th></tr></thead>
+      <tbody>${(p.linhas||[]).map(l=>`<tr><td><b>${esc(l.ref)}</b></td><td>${esc(l.designacao)}</td><td>${l.confirmar?'<span style="color:#b45309">sem MSISDN · confirmar</span>':esc(l.msisdn)}</td><td class="num">${l.prazo}</td><td class="num">${eur(l.rlmc)}</td><td class="num">${n3(l.score)}</td><td>${fmtD(l.fim)}</td><td>${stf||meu?`<a href="#/rpn/${esc(l.pnId)}" data-pn>PN ${esc(l.pnNumero)}</a>`:`PN ${esc(l.pnNumero)}`} <span class="muted" style="font-size:11px">${fmtD(l.pnData)}</span></td></tr>`).join('')}</tbody>
+      <tfoot><tr class="tot"><td colspan="4">${p.nLinhas} linha(s)</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td colspan="2"></td></tr></tfoot></table></div>
+    ${stf&&aberto?`<div class="row" style="margin-top:12px"><label style="margin:0">Vendedor</label><select id="pj-av" style="max-width:240px"><option value="">— por atribuir —</option>${vends.map(v=>`<option value="${v.uid}" ${p.vendedorUid===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select><button class="btn sm" id="pj-as">Atribuir</button></div>`:''}
+    <div class="row" style="margin-top:14px"><span class="sp"></span><button class="btn" id="c">Fechar</button>
+      ${p.estado==='Perdido'&&!p.propostaId?`<button class="btn" id="pj-re">Reabrir</button>`:''}
+      ${aberto&&!p.propostaId?`<button class="btn" id="pj-pd" style="color:var(--red-d)">Perdido sem proposta</button>`:''}
+      ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}</div>`, (m,close)=>{
+    m.style.width='min(980px,94vw)';
+    const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); viewProjetos(); }catch(e){ toast(errTxt(e),true); } };
+    m.querySelector('#c').onclick=close;
+    m.querySelectorAll('[data-pn]').forEach(a=>a.onclick=()=>close());
+    m.querySelector('#pj-cp')?.addEventListener('click',()=>{ window.open(PROPOSTAS_URL+'?proj='+projParaProposta(p),'_blank'); close(); toast('Proposta aberta noutro separador. O Projeto passa a “Em negociação” quando a gravar.'); });
+    m.querySelector('#pj-pd')?.addEventListener('click',()=>{ close(); pedirRazao('Perdido sem proposta','', 'Marcar como perdido', rz=>grava({estado:'Perdido', motivoPerda:rz, perdidoEm:new Date().toISOString()},'Projeto marcado como perdido.')); });
+    m.querySelector('#pj-re')?.addEventListener('click',()=>grava({estado:'Por tratar', motivoPerda:''},'Projeto reaberto.'));
+    m.querySelector('#pj-as')?.addEventListener('click',()=>{ const uid=m.querySelector('#pj-av').value; grava({vendedorUid:uid||null, vendedorNome:uid?S.users[uid].nome:'', vendedorPHC:uid?String(S.users[uid].vendedorPHC||''):''}, uid?`Atribuído a ${S.users[uid].nome}.`:'Ficou por atribuir.'); });
+  });
 }
 
 // ---------- 9a. CATÁLOGO DE REFERÊNCIAS (Coordenador, BackOffice e Master criam, editam e apagam) ----------
