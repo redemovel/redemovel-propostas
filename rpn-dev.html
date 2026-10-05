@@ -544,8 +544,10 @@ function drawLines(dis){
     let res=[], sel=-1; const box=prodDrop();
     const fecha = () => { box.classList.remove('on'); box._dono=null; };
     const aplica = pr => { if(!pr) return; fecha(); const i=+inp.closest('tr').dataset.i; aplicarProduto(L[i],pr); S.dirty=true; drawLines(dis); $('#lines').querySelector(`tr[data-i="${i}"] [data-l="msisdn"]`)?.focus(); };
-    const mostra = () => { if(!inp.isConnected) return; res=procurarProdutos(inp.value); if(!res.length) return fecha();
+    const mostra = () => { if(!inp.isConnected) return; res=procurarProdutos(inp.value); if(inp.value.trim().length<2) return fecha();
       const rc=inp.getBoundingClientRect(); Object.assign(box.style,{left:Math.max(8,Math.min(rc.left, innerWidth-560))+'px', top:(rc.bottom+2)+'px', width:'540px', right:'auto'});
+      // sem resultados: dizer porquê, em vez de não mostrar nada
+      if (!res.length) { box.innerHTML=`<div style="cursor:default;color:#777">${S.prodList.length?`Nenhum produto com “${esc(inp.value.trim())}” nos ${S.prodList.length} do catálogo. Pode escrever a referência à mão.`:'O catálogo de produtos está vazio. O Master tem de o importar em Administração › Catálogo PHC.'}</div>`; box.classList.add('on'); box._dono=inp; box.onmousedown=null; return; }
       box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(p.ref)}</b> — ${esc(p.designacao)}<br><small>${esc([p.categoria,p.tier,p.descontinuado?'descontinuado':''].filter(Boolean).join(' · '))}</small></div>`).join('');
       box.classList.add('on'); box._dono=inp; box.onmousedown=e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); aplica(res[+d.dataset.i]); } }; };
     inp.addEventListener('input', ()=>{ sel=-1; mostra(); });
