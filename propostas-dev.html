@@ -224,6 +224,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
         <div><div class="uname" id="hnm"></div><div class="urole" id="hrl"></div></div>
       </div>
       <button id="pass-badge" onclick="showChangePass(false)" style="border:none;cursor:pointer;font-size:11px;font-weight:700;border-radius:20px;padding:4px 10px;line-height:1.4;display:none;flex-shrink:0"></button>
+      <a id="lk-man" href="manual-dev.html" target="_blank" rel="noopener" style="background:transparent;border:1px solid var(--border2);color:var(--muted);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;text-decoration:none;margin-right:6px;display:inline-block" title="Abre o manual noutro separador" onclick="this.href='manual-dev.html?para='+(CU&&CU.funcao==='comercial'?'v':CU&&CU.funcao==='backoffice'?'b':'')">Manual</a>
       <button class="obtn" onclick="doLogout()">Sair</button>
     </div>
   </header>
