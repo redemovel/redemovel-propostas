@@ -558,7 +558,13 @@ ORDER BY c.no DESC;
       <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);margin-top:10px"><input type="checkbox" id="adm-cli-subst"> Se repetir a importação: substituir as fichas que já existem (perde alterações feitas na plataforma)</label>
     </div>
     <div class="tw" style="margin-bottom:20px"><div class="tt" style="display:flex;justify-content:space-between;align-items:center"><div class="ttit">Tarifários <span id="adm-tf-info" style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px"></span></div><button class="btn btn-r btn-sm" onclick="admTFEdit(-1)">＋ Novo tarifário</button></div>
-    <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tbl"><thead><tr><th>Nome</th><th>Ref PHC</th><th>Resumo</th><th></th></tr></thead><tbody id="adm-tf-body"></tbody></table></div>
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-g btn-sm" id="adm-tf-cruzar" onclick="admRun('Cruzamento',admTFCruzar)">🔗 Cruzar com o catálogo (Ref PHC)</button>
+      <span id="adm-tf-filtros" style="display:none;gap:6px;flex-wrap:wrap"></span>
+    </div>
+    <div id="adm-tf-orfas" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)"></div>
+    <datalist id="adm-tf-refs"></datalist>
+    <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tbl"><thead><tr><th>Nome</th><th>Ref PHC</th><th>Catálogo</th><th>Resumo</th><th></th></tr></thead><tbody id="adm-tf-body"></tbody></table></div>
     <div style="padding:14px 16px;border-top:1px solid var(--border)">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Ou cole do Excel (com a linha de títulos: Nome, Ref PHC, Dados, Chamadas, Partilha, Roaming, Internacional, RoamingTDR, Fixo, Equipamentos, Obs). <b>Substitui</b> a lista.</div>
       <textarea class="finp" id="adm-tf-paste" rows="3" style="font-family:monospace;font-size:11px;margin-bottom:8px"></textarea>
@@ -2408,21 +2414,55 @@ async function admResumo(){
 }
 
 // ── Tarifários: lista e edição ──
+let _cat=null,_tfFiltro='todos';
+const refKey=r=>String(r||'').trim().toUpperCase();
+function tfEstado(t){
+  if(!_cat)return '';
+  const k=refKey(t.refPHC);
+  if(!k)return 'sem';
+  const p=_cat[k];
+  if(!p)return 'inex';
+  return p.descontinuado?'desc':'ok';
+}
+const TF_EST={sem:['Sem Ref PHC','#b45309'],inex:['Ref não existe no catálogo','var(--red)'],desc:['Descontinuado no catálogo','#b45309'],ok:['Certo','#15803d']};
+async function admTFCruzar(){
+  const l=await FB.produtos();
+  _cat={};l.forEach(p=>{if(p.ref)_cat[refKey(p.ref)]=p;});
+  document.getElementById('adm-tf-refs').innerHTML=l.filter(p=>p.ref).sort((a,b)=>a.ref.localeCompare(b.ref)).map(p=>'<option value="'+eh(p.ref)+'">'+eh(p.designacao||'')+'</option>').join('');
+  _tfFiltro='todos';renderAdmTF();
+  const c={sem:0,inex:0,desc:0,ok:0};TF.forEach(t=>c[tfEstado(t)]++);
+  admLog('Cruzamento com o catálogo ('+l.length+' referências): '+c.ok+' certos, '+c.sem+' sem Ref PHC, '+c.inex+' com Ref que não existe no catálogo, '+c.desc+' descontinuados.');
+}
+function admTFFiltro(f){_tfFiltro=f;renderAdmTF();}
 function renderAdmTF(){
   const tb=document.getElementById('adm-tf-body');if(!tb)return;
   const interno=TF===BT;
   document.getElementById('adm-tf-info').textContent=interno?'A usar a lista interna de reserva ('+BT.length+'). Importe ou crie tarifários para a substituir.':TF.length+' tarifário(s)';
+  const fz=document.getElementById('adm-tf-filtros'),orf=document.getElementById('adm-tf-orfas');
+  if(_cat){
+    const c={todos:TF.length,sem:0,inex:0,desc:0,ok:0};TF.forEach(t=>c[tfEstado(t)]++);
+    fz.style.display='flex';
+    fz.innerHTML=[['todos','Todos'],['sem','Sem Ref PHC'],['inex','Ref inexistente'],['desc','Descontinuados'],['ok','Certos']].map(([k,l])=>'<button class="btn btn-sm '+(_tfFiltro===k?'btn-r':'btn-g')+'" data-f="'+k+'" onclick="admTFFiltro(\''+k+'\')">'+l+' ('+c[k]+')</button>').join('');
+    const usadas=new Set(TF.map(t=>refKey(t.refPHC)).filter(Boolean));
+    const livres=Object.keys(_cat).filter(k=>!usadas.has(k)&&!_cat[k].descontinuado).sort();
+    orf.style.display='block';
+    orf.innerHTML='<b>'+livres.length+'</b> referência(s) ativas do catálogo sem tarifário nas Propostas'+(livres.length?' <a href="#" onclick="document.getElementById(\'adm-tf-orfas-l\').style.display=\'block\';return false">ver</a><div id="adm-tf-orfas-l" style="display:none;margin-top:6px;max-height:160px;overflow:auto;font-family:monospace;font-size:11px">'+livres.map(k=>eh(_cat[k].ref)+' — '+eh(_cat[k].designacao||'')).join('<br>')+'</div>':'');
+  }else{fz.style.display='none';orf.style.display='none';}
   tb.innerHTML='';
   TF.forEach((t,i)=>{
+    const e=tfEstado(t);
+    if(_cat&&_tfFiltro!=='todos'&&e!==_tfFiltro)return;
+    const p=_cat&&_cat[refKey(t.refPHC)];
+    const cel=!_cat?'<span style="color:var(--muted)">—</span>':'<span style="font-weight:600;color:'+TF_EST[e][1]+'">'+TF_EST[e][0]+'</span>'+(p?'<div style="font-size:11px;color:var(--muted)">'+eh(p.designacao||'')+(p.tier?' · '+eh(p.tier):'')+'</div>':'');
     const tr=document.createElement('tr');
-    tr.innerHTML='<td style="font-weight:600">'+eh(t.name)+'</td><td style="font-family:monospace;font-size:11px">'+eh(t.refPHC||'—')+'</td><td style="font-size:11px;color:var(--muted)">'+eh([t.dados,t.chamadas,t.fixo].filter(Boolean).join(' · ')||t.obs||'')+'</td>'
+    tr.innerHTML='<td style="font-weight:600">'+eh(t.name)+'</td><td style="font-family:monospace;font-size:11px">'+eh(t.refPHC||'—')+'</td><td style="font-size:11px">'+cel+'</td><td style="font-size:11px;color:var(--muted)">'+eh([t.dados,t.chamadas,t.fixo].filter(Boolean).join(' · ')||t.obs||'')+'</td>'
       +'<td style="white-space:nowrap"><button class="btn btn-g btn-sm" style="padding:5px 10px" onclick="admTFEdit('+i+')">✏️</button> <button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--red);border-color:var(--red)" onclick="admTFDel('+i+')">🗑</button></td>';
     tb.appendChild(tr);
   });
 }
 function admTFEdit(i){
   _tfEdit=i;const t=i>=0?TF[i]:{};
-  document.getElementById('mo-tf-b').innerHTML=TF_CAMPOS.map(([k,l])=>'<div class="fg"><label class="flbl">'+l+'</label><input class="finp" id="tf-'+k+'" style="margin-bottom:0" value="'+eh(t[k]||'')+'"></div>').join('');
+  document.getElementById('mo-tf-b').innerHTML=TF_CAMPOS.map(([k,l])=>'<div class="fg"><label class="flbl">'+l+'</label><input class="finp" id="tf-'+k+'"'+(k==='refPHC'?' list="adm-tf-refs"':'')+' style="margin-bottom:0" value="'+eh(t[k]||'')+'"></div>').join('');
   openM('mo-tf');
 }
 async function admTFSave(){
@@ -2522,6 +2562,7 @@ window.FB = {
     await updatePassword(u, nova);
     await updateDoc(doc(db, 'users', u.uid), { passAlteradaEm: hoje });
   },
+  async produtos() { const s = await getDocs(collection(db, 'produtos')); return s.docs.map(d => d.data()); },
   async tarifarios() { const s = await getDoc(doc(db, 'config', 'tarifarios')); return s.exists() ? s.data() : null; },
   saveTarifarios: obj => setDoc(doc(db, 'config', 'tarifarios'), { lista: obj.lista, headers: obj.headers || null, atualizadoEm: serverTimestamp() }),
   // uid = null → todas (Master / Coordenador / BackOffice); caso contrário só as do próprio
