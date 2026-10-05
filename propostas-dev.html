@@ -722,6 +722,7 @@ async function enterApp(user){
     document.getElementById('app').style.display='block';
     setupApp();
     loadLogAndClients();
+    abrirProjetoParam();
   }catch(e){
     console.error('Erro de arranque:',e);
     errEl.textContent='Erro de ligação: '+fbErr(e);errEl.style.display='block';
@@ -1235,7 +1236,8 @@ async function confirmSave(){
   const nif=document.getElementById('cnif')?.value?.trim()||'';
   const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,nif};
   entry.comercialUid=(CM.find(c=>c.nome===cNm)||CU).uid;entry.ord=Date.now();
-  try{await FB.saveProposta(entry);}
+  entry.projetoId=window._projetoId||((LD.find(x=>x.id===window._editingOriginalId)||{}).projetoId)||'';
+  try{await FB.saveProposta(entry);window._projetoId=null;}
   catch(e){console.error(e);window._currentPropRef=id;toast('⚠','ERRO: a proposta NÃO foi gravada — '+fbErr(e));return;}
   LD.push(entry);SAVED=true;PREVIEWED=false;
   const ss=document.getElementById('sst');ss.className='sstat svd';ss.textContent='✓ Gravada';
@@ -1651,7 +1653,7 @@ function editL(id){
   setBtn(false);
 
   // Store original ID to mark as substituída when saved
-  window._editingOriginalId = id;
+  window._editingOriginalId = id;window._projetoId=null;
   window._currentPropRef = null; // força nova referência para a versão editada
   PREVIEWED=true; // editL calls genPrev() above
   toast('✏️','Proposta carregada para edição — grave para criar nova versão');
@@ -1695,7 +1697,7 @@ function dupL(id){
   }
   if(!SV.length)addSvc(); else renderSV();
   // Clear original tracking - duplicate does NOT mark anything as substituída
-  window._editingOriginalId = null;
+  window._editingOriginalId = null;window._projetoId=null;
   SAVED=false;markU();
   toast('📋','Proposta duplicada — ajuste os dados e grave');
 }
@@ -2007,7 +2009,7 @@ function resetP(){
   const cvR=document.getElementById('cvalidade');if(cvR)cvR.value='';
   const cpR=document.getElementById('cplafond');if(cpR)cpR.value='';
   document.getElementById('cli-search').value='';
-  SV=[];SID=0;TIPO=null;CTA='b';window._currentPropRef=null;
+  SV=[];SID=0;TIPO=null;CTA='b';window._currentPropRef=null;window._projetoId=null;
   ['tp-novo','tp-refid','tp-upgrade'].forEach(id=>document.getElementById(id).className='tyc');
   selCTA('b');renderSV();addSvc();
   document.getElementById('pdoc').style.display='none';document.getElementById('pdoc').innerHTML='';
@@ -2283,6 +2285,46 @@ function toRPN(id){
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   window.open(RPN_URL+'?prop='+b64,'_blank');
 }
+// ══ LIGAÇÃO AOS PROJETOS ( ?proj=<base64 JSON> vindo do RPN › Projetos ) ═══════
+function abrirProjetoParam(){
+  let raw;
+  try{const u=new URL(location.href);raw=u.searchParams.get('proj');if(!raw)return;u.searchParams.delete('proj');history.replaceState(null,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams:'')+u.hash);}catch(e){return;}
+  let p;
+  try{const b=raw.replace(/-/g,'+').replace(/_/g,'/');p=JSON.parse(decodeURIComponent(escape(atob(b+'==='.slice((b.length+3)%4)))));}catch(e){toast('⚠','Dados do Projeto inválidos');return;}
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('act'));
+  document.querySelector('[onclick*="proposta"]').classList.add('act');
+  document.querySelectorAll('.pg').forEach(pg=>pg.classList.remove('act'));
+  document.getElementById('pg-proposta').classList.add('act');
+  const selCom=document.getElementById('sc');
+  for(let i=0;i<selCom.options.length;i++){if(selCom.options[i].value===p.comercial){selCom.selectedIndex=i;break;}}
+  fillCom();
+  setTipo('refid');
+  document.getElementById('cn').value=p.cliente||'';
+  document.getElementById('cli-search').value=p.cliente||'';
+  document.getElementById('cnif').value=p.nif||'';
+  document.getElementById('cm').value='';
+  SV=[];SID=0;
+  (p.linhas||[]).forEach(l=>{
+    const t=TF.find(x=>refKey(x.refPHC)&&refKey(x.refPHC)===refKey(l.ref));
+    const aviso=!t?'⚠ escolher tarifário (antes: '+(l.des||l.ref)+')':(l.desc?'⚠ tarifário antigo descontinuado — rever':'');
+    SV.push({id:++SID,type:l.msisdn?'number':'qty',ref:l.msisdn||'1',tariff:t?t.name:'',note:'',aviso,_t0:t?t.name:'',duracao:String(l.prazo||lastDuracao),refs:[]});
+  });
+  if(!SV.length)addSvc();else renderSV();
+  window._editingOriginalId=null;window._projetoId=p.id;
+  SAVED=false;markU();
+  toast('📋','Proposta preparada a partir do Projeto — reveja os tarifários e grave');
+}
+// avisos do Projeto: aparecem só no formulário (nunca na proposta do cliente) e desaparecem quando o vendedor escolhe outro tarifário
+const _renderSV0=renderSV;
+renderSV=function(){
+  _renderSV0();
+  const av=[];SV.forEach((s,i)=>{if(!s.aviso)return;if(s.tariff!==s._t0){delete s.aviso;return;}av.push('Serviço '+(i+1)+(s.type==='number'&&s.ref?' ('+s.ref+')':'')+': '+s.aviso);});
+  if(!av.length)return;
+  const d=document.createElement('div');d.id='proj-aviso';
+  d.style.cssText='border:1px solid #f59e0b;background:rgba(245,158,11,.12);color:var(--text,inherit);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;line-height:1.5';
+  d.innerHTML='<b>Vindo do Projeto</b> — nota só para si, não sai na proposta:<br>'+av.map(eh).join('<br>');
+  document.getElementById('svl').prepend(d);
+};
 function rpnBtn(p){
   if(p.rpnNumero)return '<a class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--green);border-color:var(--green);text-decoration:none" title="Abrir o RPN" target="_blank" href="'+RPN_URL+'#/rpn/'+encodeURIComponent(p.rpnId||'')+'">RPN '+eh(p.rpnNumero)+'</a>';
   if(p.estado==='ganho')return '<button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--green);border-color:var(--green)" title="Transformar em RPN" onclick="toRPN(\''+p.id+'\')">RPN</button>';
@@ -2572,8 +2614,8 @@ const resumoDe = p => ({ c: p.comercial||'', e: p.estado||'pendente', t: p.tipo|
 const toLocal = (id, x) => ({ id, data: x.data||'', comercial: x.comercial||'', cliente: x.cliente||'', tipo: x.tipo||'', tarif: x.tarif||'',
   mensalidade: String(x.mensalidade ?? ''), duracao: String(x.duracao ?? ''), estado: x.estado||'pendente', notas: x.notas||'', cta: x.cta||'b',
   validade: x.validade||'', validadeDias: String(x.validadeDias ?? '15'), refPHC: x.refPHC||'', nif: String(x.nif||''),
-  comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', ord: x.ord||0, dia: x.dia||'' });
-const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); o.dia = diaDe(p.data); return o; };
+  comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', projetoId: x.projetoId||'', ord: x.ord||0, dia: x.dia||'' });
+const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); o.dia = diaDe(p.data); if (p.projetoId) o.projetoId = p.projetoId; return o; };
 async function commitEmBlocos(ops, n = 400, prog) {
   for (let i = 0; i < ops.length; i += n) { const b = writeBatch(db); ops.slice(i, i + n).forEach(f => f(b)); await b.commit(); if (prog) prog(Math.min(i + n, ops.length), ops.length); }
 }
@@ -2655,12 +2697,16 @@ window.FB = {
     b.set(doc(db, 'propostas', p.id), { ...toDoc(p), criadoEm: serverTimestamp(), criadoPorUid: auth.currentUser.uid });
     b.set(doc(db, 'resumoPropostas', anoDe(p.data)), { r: { [p.id]: resumoDe(p) } }, { merge: true });
     await b.commit();
+    // proposta nascida de um Projeto: o Projeto passa a «Em negociação» (se falhar, a proposta fica gravada na mesma)
+    if (p.projetoId) await updateDoc(doc(db, 'projetos', p.projetoId), { propostaId: p.id, estado: 'Em negociação', atualizadoEm: serverTimestamp() }).catch(e => console.warn('Projeto não atualizado:', e));
   },
   async setEstado(p, estado) {
     const b = writeBatch(db);
     b.update(doc(db, 'propostas', p.id), { estado, dia: diaDe(p.data), atualizadoEm: serverTimestamp() });
     b.set(doc(db, 'resumoPropostas', anoDe(p.data)), { r: { [p.id]: resumoDe({ ...p, estado }) } }, { merge: true });
     await b.commit();
+    const ep = { ganho: 'Ganho', perdido: 'Perdido', pendente: 'Em negociação' }[String(estado).toLowerCase()];   // o estado do Projeto segue o da proposta
+    if (p.projetoId && ep) await updateDoc(doc(db, 'projetos', p.projetoId), { estado: ep, propostaId: p.id, atualizadoEm: serverTimestamp() }).catch(e => console.warn('Projeto não atualizado:', e));
   },
   // ── fichas de cliente: clientesFicha/{NIF} (o NIF é a chave → não pode haver dois iguais) ──
   async ficha(nif) { const s = await getDoc(doc(db, 'clientesFicha', String(nif))); return s.exists() ? s.data() : null; },
