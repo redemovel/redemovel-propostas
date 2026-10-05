@@ -561,10 +561,12 @@ ORDER BY c.no DESC;
     <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button class="btn btn-g btn-sm" id="adm-tf-cruzar" onclick="admRun('Cruzamento',admTFCruzar)">🔗 Cruzar com o catálogo (Ref PHC)</button>
       <span id="adm-tf-filtros" style="display:none;gap:6px;flex-wrap:wrap"></span>
+      <input class="finp" id="adm-tf-q" placeholder="Procurar em todas as colunas…" oninput="renderAdmTF()" style="margin:0 0 0 auto;max-width:260px;padding:7px 10px;font-size:12px">
+      <button class="btn btn-g btn-sm" id="adm-tf-copiar" style="display:none" onclick="admTFCopiar()">📋 Copiar lista visível</button>
     </div>
     <div id="adm-tf-orfas" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)"></div>
     <datalist id="adm-tf-refs"></datalist>
-    <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tbl"><thead><tr><th>Nome</th><th>Ref PHC</th><th>Catálogo</th><th>Resumo</th><th></th></tr></thead><tbody id="adm-tf-body"></tbody></table></div>
+    <div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="tbl"><thead><tr id="adm-tf-head"></tr></thead><tbody id="adm-tf-body"></tbody></table></div>
     <div style="padding:14px 16px;border-top:1px solid var(--border)">
       <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Ou cole do Excel (com a linha de títulos: Nome, Ref PHC, Dados, Chamadas, Partilha, Roaming, Internacional, RoamingTDR, Fixo, Equipamentos, Obs). <b>Substitui</b> a lista.</div>
       <textarea class="finp" id="adm-tf-paste" rows="3" style="font-family:monospace;font-size:11px;margin-bottom:8px"></textarea>
@@ -2434,28 +2436,64 @@ async function admTFCruzar(){
   admLog('Cruzamento com o catálogo ('+l.length+' referências): '+c.ok+' certos, '+c.sem+' sem Ref PHC, '+c.inex+' com Ref que não existe no catálogo, '+c.desc+' descontinuados.');
 }
 function admTFFiltro(f){_tfFiltro=f;renderAdmTF();}
+let _tfOrd={k:'',d:1},_tfVis=[];
+const semAc=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const TF_COLS=[['name','Nome'],['refPHC','Ref PHC'],['_cat','Catálogo'],['_res','Resumo'],['dados','Dados'],['chamadas','Chamadas'],['partilha','Partilha'],['roaming','Roaming'],['internacional','Internacional'],['roamingTDR','Roaming TDR'],['fixo','Fixo'],['equipamentos','Equipamentos'],['obs','Obs']];
+const tfRes=t=>[t.dados,t.chamadas,t.fixo].filter(Boolean).join(' · ')||t.obs||'';
+function tfVal(t,k){
+  if(k==='_res')return tfRes(t);
+  if(k==='_cat'){const e=tfEstado(t);if(!e)return '';const p=_cat[refKey(t.refPHC)];return TF_EST[e][0]+(p?' '+(p.designacao||'')+' '+(p.tier||''):'');}
+  return String(t[k]||'');
+}
+function tfRepetidas(){const n={};TF.forEach(t=>{const k=refKey(t.refPHC);if(k)n[k]=(n[k]||0)+1;});return n;}
+function admTFOrd(k){_tfOrd=_tfOrd.k===k?{k,d:-_tfOrd.d}:{k,d:1};renderAdmTF();}
+function admTFCopiar(){
+  const txt=['Nome\tRef PHC\tEstado\tDesignação no catálogo\tDados\tChamadas\tFixo'].concat(_tfVis.map(t=>{const e=tfEstado(t),p=_cat&&_cat[refKey(t.refPHC)];return [t.name,t.refPHC||'',e?TF_EST[e][0]:'',p?p.designacao||'':'',t.dados||'',t.chamadas||'',t.fixo||''].join('\t');})).join('\n');
+  const fim=()=>toast('✓',_tfVis.length+' linha(s) copiadas');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(fim,()=>tfCopiaAlt(txt,fim));else tfCopiaAlt(txt,fim);
+}
+function tfCopiaAlt(txt,fim){const a=document.createElement('textarea');a.value=txt;document.body.appendChild(a);a.select();try{document.execCommand('copy');fim();}catch(e){toast('⚠','Não foi possível copiar');}a.remove();}
 function renderAdmTF(){
   const tb=document.getElementById('adm-tf-body');if(!tb)return;
   const interno=TF===BT;
   document.getElementById('adm-tf-info').textContent=interno?'A usar a lista interna de reserva ('+BT.length+'). Importe ou crie tarifários para a substituir.':TF.length+' tarifário(s)';
   const fz=document.getElementById('adm-tf-filtros'),orf=document.getElementById('adm-tf-orfas');
+  const rep=tfRepetidas();
+  const nRep=TF.filter(t=>rep[refKey(t.refPHC)]>1).length;
+  const c={todos:TF.length,sem:0,inex:0,desc:0,ok:0,rep:nRep};
+  if(_cat)TF.forEach(t=>c[tfEstado(t)]++);
+  const bts=_cat?[['todos','Todos'],['sem','Sem Ref PHC'],['inex','Ref inexistente'],['desc','Descontinuados'],['rep','Ref repetida'],['ok','Certos']]:[['todos','Todos'],['rep','Ref repetida']];
+  if(!bts.some(b=>b[0]===_tfFiltro))_tfFiltro='todos';
+  fz.style.display='flex';
+  fz.innerHTML=bts.map(([k,l])=>'<button class="btn btn-sm '+(_tfFiltro===k?'btn-r':'btn-g')+'" data-f="'+k+'" onclick="admTFFiltro(\''+k+'\')">'+l+' ('+c[k]+')</button>').join('');
   if(_cat){
-    const c={todos:TF.length,sem:0,inex:0,desc:0,ok:0};TF.forEach(t=>c[tfEstado(t)]++);
-    fz.style.display='flex';
-    fz.innerHTML=[['todos','Todos'],['sem','Sem Ref PHC'],['inex','Ref inexistente'],['desc','Descontinuados'],['ok','Certos']].map(([k,l])=>'<button class="btn btn-sm '+(_tfFiltro===k?'btn-r':'btn-g')+'" data-f="'+k+'" onclick="admTFFiltro(\''+k+'\')">'+l+' ('+c[k]+')</button>').join('');
     const usadas=new Set(TF.map(t=>refKey(t.refPHC)).filter(Boolean));
     const livres=Object.keys(_cat).filter(k=>!usadas.has(k)&&!_cat[k].descontinuado).sort();
     orf.style.display='block';
-    orf.innerHTML='<b>'+livres.length+'</b> referência(s) ativas do catálogo sem tarifário nas Propostas'+(livres.length?' <a href="#" onclick="document.getElementById(\'adm-tf-orfas-l\').style.display=\'block\';return false">ver</a><div id="adm-tf-orfas-l" style="display:none;margin-top:6px;max-height:160px;overflow:auto;font-family:monospace;font-size:11px">'+livres.map(k=>eh(_cat[k].ref)+' — '+eh(_cat[k].designacao||'')).join('<br>')+'</div>':'');
-  }else{fz.style.display='none';orf.style.display='none';}
+    orf.innerHTML='<b>'+livres.length+'</b> referência(s) ativas do catálogo sem tarifário nas Propostas'+(livres.length?' <a href="#" style="color:var(--red);font-weight:600;text-decoration:underline" onclick="document.getElementById(\'adm-tf-orfas-l\').style.display=\'block\';return false">ver</a><div id="adm-tf-orfas-l" style="display:none;margin-top:6px;max-height:160px;overflow:auto;font-family:monospace;font-size:11px">'+livres.map(k=>eh(_cat[k].ref)+' — '+eh(_cat[k].designacao||'')).join('<br>')+'</div>':'');
+  }else orf.style.display='none';
+  document.getElementById('adm-tf-head').innerHTML=TF_COLS.map(([k,l])=>'<th data-k="'+k+'" onclick="admTFOrd(\''+k+'\')" style="cursor:pointer;white-space:nowrap;user-select:none">'+l+(_tfOrd.k===k?(_tfOrd.d>0?' ▲':' ▼'):'')+'</th>').join('')+'<th></th>';
+  const q=semAc((document.getElementById('adm-tf-q')||{}).value||'').trim();
+  let linhas=TF.map((t,i)=>({t,i}));
+  if(_tfFiltro==='rep')linhas=linhas.filter(x=>rep[refKey(x.t.refPHC)]>1);
+  else if(_cat&&_tfFiltro!=='todos')linhas=linhas.filter(x=>tfEstado(x.t)===_tfFiltro);
+  if(q)linhas=linhas.filter(x=>semAc(TF_COLS.map(([k])=>tfVal(x.t,k)).join(' ')).includes(q));
+  const cmp=(a,b)=>a.localeCompare(b,'pt',{numeric:true,sensitivity:'base'});
+  if(_tfOrd.k)linhas.sort((a,b)=>{const va=tfVal(a.t,_tfOrd.k),vb=tfVal(b.t,_tfOrd.k);if(!va!==!vb)return va?-1:1;return _tfOrd.d*cmp(va,vb)||a.i-b.i;});
+  else if(_tfFiltro==='rep')linhas.sort((a,b)=>cmp(refKey(a.t.refPHC),refKey(b.t.refPHC))||a.i-b.i);
+  _tfVis=linhas.map(x=>x.t);
+  document.getElementById('adm-tf-copiar').style.display=linhas.length?'':'none';
   tb.innerHTML='';
-  TF.forEach((t,i)=>{
+  if(!linhas.length){tb.innerHTML='<tr><td colspan="'+(TF_COLS.length+1)+'" style="text-align:center;color:var(--muted);padding:18px">Nenhum tarifário com estes critérios.</td></tr>';return;}
+  const m='style="font-size:11px;color:var(--muted)"';
+  linhas.forEach(({t,i})=>{
     const e=tfEstado(t);
-    if(_cat&&_tfFiltro!=='todos'&&e!==_tfFiltro)return;
     const p=_cat&&_cat[refKey(t.refPHC)];
+    const nr=rep[refKey(t.refPHC)]||0;
     const cel=!_cat?'<span style="color:var(--muted)">—</span>':'<span style="font-weight:600;color:'+TF_EST[e][1]+'">'+TF_EST[e][0]+'</span>'+(p?'<div style="font-size:11px;color:var(--muted)">'+eh(p.designacao||'')+(p.tier?' · '+eh(p.tier):'')+'</div>':'');
     const tr=document.createElement('tr');
-    tr.innerHTML='<td style="font-weight:600">'+eh(t.name)+'</td><td style="font-family:monospace;font-size:11px">'+eh(t.refPHC||'—')+'</td><td style="font-size:11px">'+cel+'</td><td style="font-size:11px;color:var(--muted)">'+eh([t.dados,t.chamadas,t.fixo].filter(Boolean).join(' · ')||t.obs||'')+'</td>'
+    tr.innerHTML='<td style="font-weight:600;white-space:nowrap">'+eh(t.name)+'</td><td style="font-family:monospace;font-size:11px">'+eh(t.refPHC||'—')+(nr>1?'<div style="font-family:inherit;font-weight:600;color:#b45309">usada em '+nr+' tarifários</div>':'')+'</td><td style="font-size:11px">'+cel+'</td><td '+m+'>'+eh(tfRes(t))+'</td>'
+      +['dados','chamadas','partilha','roaming','internacional','roamingTDR','fixo','equipamentos','obs'].map(k=>'<td '+m+'>'+eh(t[k]||'')+'</td>').join('')
       +'<td style="white-space:nowrap"><button class="btn btn-g btn-sm" style="padding:5px 10px" onclick="admTFEdit('+i+')">✏️</button> <button class="btn btn-g btn-sm" style="padding:5px 10px;color:var(--red);border-color:var(--red)" onclick="admTFDel('+i+')">🗑</button></td>';
     tb.appendChild(tr);
   });
