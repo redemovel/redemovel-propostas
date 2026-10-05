@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manual · Redemóvel</title>
+<style>
+:root{--red:#e60000;--red-d:#b30000;--ink:#1c1c1c;--muted:#6b7280;--line:#e5e7eb;--bg:#f6f7f9;--card:#fff;--am:#fff7e0;--am-l:#f2c94c;--az:#eef2ff;--az-l:#c7d2fe;--vd:#ecfdf3;--vd-l:#a7e3bd}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+header{position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;padding:10px 20px;flex-wrap:wrap}
+header .brand{font-weight:800;color:var(--red);font-size:17px;margin-right:6px}
+header a.app{text-decoration:none;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:13px;background:#fff}
+header a.app:hover{border-color:var(--red);color:var(--red-d)}
+.sp{flex:1}
+.papel{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.papel button{border:0;background:#fff;padding:7px 13px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}
+.papel button+button{border-left:1px solid var(--line)}
+.papel button.on{background:var(--red);color:#fff;font-weight:600}
+#q{border:1px solid var(--line);border-radius:8px;padding:7px 12px;font:inherit;font-size:13px;width:230px;max-width:100%}
+.wrap{display:grid;grid-template-columns:270px minmax(0,1fr);gap:24px;max-width:1240px;margin:0 auto;padding:20px}
+nav#toc{position:sticky;top:70px;align-self:start;max-height:calc(100vh - 90px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 6px;font-size:13px}
+nav#toc a{display:block;padding:4px 12px;color:var(--ink);text-decoration:none;border-radius:6px}
+nav#toc a:hover{background:#f3f4f6}
+nav#toc a.t1{font-weight:700;margin-top:8px;color:var(--red-d)}
+nav#toc a.t1:first-child{margin-top:0}
+main section,.parte{scroll-margin-top:76px}
+main section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px 24px;margin-bottom:16px}
+h1{font-size:26px;margin:0 0 6px}
+h2{font-size:20px;margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--red)}
+h3{font-size:16px;margin:20px 0 6px}
+p{margin:8px 0}
+ol,ul{margin:6px 0 10px;padding-left:22px}
+li{margin:3px 0}
+.parte{background:var(--red);color:#fff;border-radius:10px;padding:14px 24px;margin:26px 0 16px;font-weight:700;font-size:18px}
+.parte small{display:block;font-weight:400;font-size:13px;opacity:.92}
+.tag{display:inline-block;font-size:11px;font-weight:700;border-radius:10px;padding:1px 9px;vertical-align:middle;margin-left:8px;border:1px solid}
+.tag.v{background:var(--az);border-color:var(--az-l);color:#3730a3}
+.tag.b{background:var(--vd);border-color:var(--vd-l);color:#166534}
+.tag.t{background:#f3f4f6;border-color:var(--line);color:#374151}
+.nota,.aviso,.dica{border-radius:8px;padding:10px 14px;margin:12px 0;border:1px solid;font-size:14px}
+.nota{background:var(--az);border-color:var(--az-l)}
+.aviso{background:var(--am);border-color:var(--am-l)}
+.dica{background:var(--vd);border-color:var(--vd-l)}
+kbd,.bt{display:inline-block;border:1px solid #cfd4dc;border-bottom-width:2px;border-radius:6px;padding:0 7px;font:600 12.5px/1.7 system-ui,sans-serif;background:#fff;white-space:nowrap}
+.bt.r{background:var(--red);border-color:var(--red-d);color:#fff}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#f3f4f6;font-size:12.5px;text-transform:uppercase;letter-spacing:.03em}
+.scroll{overflow-x:auto}
+.fluxo{display:flex;gap:6px;flex-wrap:wrap;align-items:stretch;margin:12px 0}
+.fluxo div{flex:1;min-width:130px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:#fafafa;font-size:13px}
+.fluxo div b{display:block;color:var(--red-d);font-size:14px}
+.fluxo span{align-self:center;color:var(--muted);font-size:18px}
+.est{display:inline-block;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:600;background:#eef0f3}
+.oculto{display:none!important}
+#vazio{display:none;color:var(--muted);padding:30px;text-align:center}
+footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);font-size:12px}
+@media (max-width:900px){.wrap{grid-template-columns:1fr}nav#toc{position:static;max-height:none}}
+@media print{header,nav#toc{display:none}.wrap{display:block;padding:0}body{background:#fff}main section{border:0;padding:0 0 10px;page-break-inside:avoid}.parte{color:#000;background:#eee}}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Redemóvel · Manual</span>
+  <a class="app" href="propostas-dev.html">Propostas</a>
+  <a class="app" href="rpn-dev.html">RPN</a>
+  <span class="sp"></span>
+  <div class="papel" id="papel"><button data-p="" class="on">Tudo</button><button data-p="v">Vendedores</button><button data-p="b">BackOffice</button></div>
+  <input id="q" type="search" placeholder="Procurar no manual…" autocomplete="off">
+  <a class="app" href="#" onclick="window.print();return false">Imprimir</a>
+</header>
+
+<div class="wrap">
+<nav id="toc"></nav>
+<main>
+
+<section data-p="t" id="intro">
+  <h1>Manual da plataforma Redemóvel</h1>
+  <p>Este manual explica, passo a passo, como trabalhar nas duas aplicações da plataforma: <b>Propostas</b> e <b>RPN</b>. Está dividido em três partes: o que é comum a todos, o trabalho dos <b>Vendedores</b> e o trabalho da <b>BackOffice</b>.</p>
+  <p>Use os botões no topo para ver só a sua parte, ou a caixa de pesquisa para encontrar um assunto.</p>
+  <div class="nota">A plataforma está em fase de testes. Se alguma coisa no ecrã não corresponder ao que aqui está escrito, avise o Ricardo: ou o manual está desatualizado, ou há um erro para corrigir.</div>
+</section>
+
+<div class="parte" data-p="t" id="p0">Parte 1 · Para todos<small>O essencial antes de começar</small></div>
+
+<section data-p="t" id="visao">
+  <h2>1.1 As duas aplicações e o caminho de um negócio</h2>
+  <p>Um negócio percorre sempre o mesmo caminho. Cada etapa tem a sua aplicação:</p>
+  <div class="fluxo">
+    <div><b>Projeto</b>Alerta de renegociação, 6 meses antes do fim do contrato. <i>(RPN)</i></div><span>→</span>
+    <div><b>Proposta</b>O que o vendedor apresenta ao cliente. <i>(Propostas)</i></div><span>→</span>
+    <div><b>RPN</b>Registo do Processo de Negócio: o pedido de implementação. <i>(RPN)</i></div><span>→</span>
+    <div><b>PN</b>Processo de Negócio: o RPN implementado e conferido. <i>(RPN)</i></div>
+  </div>
+  <ul>
+    <li><b>Propostas</b>: clientes, criação e acompanhamento de propostas, dashboard e ranking.</li>
+    <li><b>RPN</b>: Projetos, RPN, conferência, PN, catálogo de referências e produção da BackOffice.</li>
+  </ul>
+  <p>As duas aplicações estão ligadas: de uma proposta ganha cria-se o RPN com um clique, e de um Projeto cria-se a proposta já preenchida.</p>
+</section>
+
+<section data-p="t" id="entrar">
+  <h2>1.2 Entrar e password</h2>
+  <ol>
+    <li>Abra a aplicação (Propostas ou RPN).</li>
+    <li>Escreva o seu <b>utilizador</b> (a parte antes de <i>@redemovel.pt</i>) e a <b>password</b>.</li>
+    <li>Carregue em <span class="bt r">Entrar</span>.</li>
+  </ol>
+  <p>A conta e a password são as mesmas nas duas aplicações.</p>
+  <h3>Mudar a password</h3>
+  <ul>
+    <li>Nas Propostas, a password tem de ser mudada <b>de 45 em 45 dias</b>. Quando chegar a altura, a aplicação pede a mudança antes de deixar entrar.</li>
+    <li>No RPN, pode mudar quando quiser no botão <span class="bt">Password</span>, no canto superior direito.</li>
+  </ul>
+  <h3>Esqueci-me da password</h3>
+  <ol>
+    <li>No ecrã de entrada do RPN, escreva o seu utilizador.</li>
+    <li>Carregue em <b>Esqueci-me da password</b>.</li>
+    <li>Abra o email que recebe na sua caixa <i>@redemovel.pt</i> e siga a ligação para escolher uma password nova. Se não chegar em poucos minutos, veja o lixo/spam.</li>
+  </ol>
+  <div class="aviso">Ninguém consegue ver a sua password, nem o administrador. Se a esquecer, a única forma é repô-la por email.</div>
+</section>
+
+<section data-p="t" id="perfis">
+  <h2>1.3 Quem vê o quê</h2>
+  <div class="scroll"><table>
+    <tr><th>Perfil</th><th>O que vê</th><th>O que pode fazer</th></tr>
+    <tr><td><b>Comercial</b> (vendedor)</td><td>Só os seus clientes (a sua carteira), as suas propostas, os seus RPN e os seus Projetos.</td><td>Criar e gerir propostas, criar e submeter RPN, tratar Projetos.</td></tr>
+    <tr><td><b>BackOffice</b></td><td>Todos os clientes, propostas, RPN e Projetos.</td><td>Implementar e conferir RPN, realocar, gerir o catálogo, criar RPN em nome de um vendedor.</td></tr>
+    <tr><td><b>Coordenador</b></td><td>Tudo, de toda a equipa.</td><td>Acompanhar a equipa, gerir o catálogo e os Projetos.</td></tr>
+    <tr><td><b>Master</b></td><td>Tudo.</td><td>Tudo, incluindo utilizadores, importações e configuração.</td></tr>
+  </table></div>
+  <div class="nota">Um vendedor nunca vê clientes, propostas ou processos de outro vendedor. O ranking do dashboard mostra os totais da equipa, sem nomes de clientes.</div>
+</section>
+
+<section data-p="t" id="glossario">
+  <h2>1.4 Palavras que vai encontrar</h2>
+  <div class="scroll"><table>
+    <tr><th>Termo</th><th>Significado</th></tr>
+    <tr><td><b>RPN</b></td><td>Registo de Processo de Negócio. É o pedido que o vendedor faz à BackOffice para implementar um negócio.</td></tr>
+    <tr><td><b>PN</b></td><td>Processo de Negócio. É o RPN depois de implementado e conferido. Fica fechado.</td></tr>
+    <tr><td><b>Linha</b></td><td>Cada serviço do negócio (um cartão, uma net fixa, um aditivo…).</td></tr>
+    <tr><td><b>Referência</b></td><td>O código do artigo (ex.: <i>REDBIZ_V2PLUSJUN25</i>). Vem do catálogo.</td></tr>
+    <tr><td><b>RLMC</b></td><td>Receita mensal líquida da linha, em euros.</td></tr>
+    <tr><td><b>Score</b></td><td>Pontuação da linha. A plataforma calcula-o sozinha a partir da RLMC, do prazo e do tier da referência.</td></tr>
+    <tr><td><b>Tier</b></td><td>Classificação do tarifário (Gold, Silver, Bronze, Estanho). Influencia o Score.</td></tr>
+    <tr><td><b>Prazo</b></td><td>Prazo de permanência (fidelização), em meses.</td></tr>
+    <tr><td><b>MSISDN</b></td><td>O número do serviço: o número de telemóvel ou o número do serviço fixo.</td></tr>
+    <tr><td><b>Bundle</b></td><td>Pacote com vários serviços (ex.: 2P + Móvel). No RPN abre-se sozinho nas suas partes.</td></tr>
+    <tr><td><b>Projeto</b></td><td>Alerta de renegociação criado 6 meses antes do fim da fidelização de um PN.</td></tr>
+    <tr><td><b>Grupo de RPN</b></td><td>Vários RPN do mesmo negócio, que andam sempre juntos.</td></tr>
+  </table></div>
+</section>
+
+<div class="parte" data-p="v" id="pv">Parte 2 · Vendedores<small>Clientes, propostas, RPN e Projetos</small></div>
+
+<section data-p="v" id="v-clientes">
+  <h2>2.1 Clientes <span class="tag v">Vendedores</span></h2>
+  <p>Nas Propostas, abra <span class="bt">👤 Clientes</span>.</p>
+  <h3>Procurar um cliente</h3>
+  <ol>
+    <li>A lista abre vazia. Escreva <b>pelo menos 2 letras</b> do nome, ou o início do NIF.</li>
+    <li>Carregue no cliente para abrir a ficha.</li>
+  </ol>
+  <p>Só aparecem os clientes da sua carteira.</p>
+  <h3>Ver e alterar a ficha</h3>
+  <ol>
+    <li>A ficha está dividida em separadores (Identificação, Contactos, Comercial, Propostas…).</li>
+    <li>Os campos estão bloqueados. Para alterar, carregue em <span class="bt">✏️ Editar</span>, faça as alterações e grave.</li>
+  </ol>
+  <ul>
+    <li>O <b>NIF</b> de um cliente existente não se altera.</li>
+    <li>O <b>vendedor</b> do cliente só pode ser mudado pela chefia.</li>
+    <li>O separador <b>Propostas</b> mostra o histórico de propostas desse NIF.</li>
+  </ul>
+  <h3>Criar um cliente novo</h3>
+  <ol>
+    <li>Carregue em <span class="bt">＋ Novo cliente</span>.</li>
+    <li>Preencha pelo menos o nome e o NIF e grave.</li>
+  </ol>
+  <div class="aviso">Não pode haver dois clientes com o mesmo NIF. Se o NIF já existir, a plataforma recusa e avisa. Nesse caso o cliente já está registado, possivelmente na carteira de outro vendedor: fale com a chefia.</div>
+  <div class="dica">Dentro da ficha, o botão <span class="bt">📝 Nova proposta</span> abre uma proposta já com o cliente e o NIF preenchidos.</div>
+</section>
+
+<section data-p="v" id="v-proposta">
+  <h2>2.2 Criar uma proposta <span class="tag v">Vendedores</span></h2>
+  <p>Nas Propostas, abra <span class="bt">📝 Nova Proposta</span>.</p>
+  <ol>
+    <li><b>Tipo</b>: escolha <i>Novo Serviço</i>, <i>Refidelização</i> ou <i>Upgrade</i>.</li>
+    <li><b>Cliente</b>: escreva em <i>Pesquisar Cliente</i> e escolha da lista. O nome e o NIF ficam preenchidos. Se o cliente ainda não existir, crie-o primeiro em Clientes.</li>
+    <li><b>Mensalidade (€)</b>: o valor mensal total da proposta.</li>
+    <li><b>Duração padrão</b>: o prazo em meses (24 por omissão).</li>
+    <li><b>Serviços Propostos</b>: em cada serviço escolha o tarifário e indique o número (se for um número concreto) ou a quantidade. Use <span class="bt">＋ Adicionar serviço</span> para mais linhas. Cada serviço pode ter a sua duração.</li>
+    <li><b>Comentário Geral</b> e <b>Plafond em Equipamentos</b>: opcionais.</li>
+    <li><b>Validade</b>: 15 dias por omissão.</li>
+    <li><b>Fecho da Proposta</b>: <i>Assinatura</i> (o cliente assina o documento) ou <i>Paper Free</i> (o cliente responde ao email a aceitar).</li>
+    <li>Carregue em <span class="bt">👁 Pré-visualizar</span> e confira o documento à direita.</li>
+    <li>Carregue em <span class="bt">💾 Gravar</span> e confirme em <span class="bt">✓ Confirmar e Gravar</span>.</li>
+  </ol>
+  <div class="aviso">Enquanto o indicador disser <b>● Por gravar</b>, a proposta ainda não existe na plataforma. Só conta depois de gravada.</div>
+  <h3>Enviar ao cliente</h3>
+  <p>Depois de pré-visualizar, tem três formas de a fazer chegar ao cliente: <span class="bt">⬇ PDF</span>, <span class="bt">✉ Email</span> e <span class="bt">📋 Copiar</span>.</p>
+  <h3>Bundles (2P, 3P, 4P com móvel)</h3>
+  <p>Escolha o tarifário do pacote, como qualquer outro. Não precisa de separar a net, a voz e o móvel: quando a proposta passar a RPN, a plataforma faz essa divisão sozinha.</p>
+</section>
+
+<section data-p="v" id="v-minhas">
+  <h2>2.3 Acompanhar as propostas <span class="tag v">Vendedores</span></h2>
+  <p>Abra <span class="bt">📋 Minhas Propostas</span>.</p>
+  <ul>
+    <li>Ao entrar, a lista mostra só as propostas <b>pendentes</b>. Os totais no topo contam todas.</li>
+    <li>Para ver as ganhas e perdidas, use o botão por cima da lista: carrega os últimos 30 dias, e cada novo clique recua mais 30.</li>
+    <li>Pode filtrar por tipo e por estado.</li>
+  </ul>
+  <h3>Estados</h3>
+  <div class="scroll"><table>
+    <tr><th>Estado</th><th>Quando usar</th></tr>
+    <tr><td><span class="est">Pendente</span></td><td>A proposta foi apresentada e aguarda resposta do cliente.</td></tr>
+    <tr><td><span class="est">Ganho</span></td><td>O cliente aceitou. Aparece o botão <b>RPN</b>.</td></tr>
+    <tr><td><span class="est">Perdido</span></td><td>O cliente recusou.</td></tr>
+    <tr><td><span class="est">Substituída</span></td><td>Posto pela plataforma quando edita uma proposta e grava a nova versão.</td></tr>
+  </table></div>
+  <p>Mude o estado diretamente na linha da proposta.</p>
+  <h3>Ações em cada proposta</h3>
+  <ul>
+    <li><span class="bt">👁</span> ver o detalhe.</li>
+    <li><span class="bt">✏️</span> editar: carrega a proposta no formulário. Ao gravar cria uma <b>versão nova</b> e a anterior fica <i>Substituída</i>.</li>
+    <li><span class="bt">📋</span> duplicar: copia para uma proposta nova, sem tocar na original. A mensalidade vem em branco.</li>
+    <li><span class="bt">RPN</span> (só nas ganhas): cria o RPN. Depois de criado, o botão passa a mostrar o número do RPN e abre-o.</li>
+  </ul>
+  <h3>Dashboard e Equipa</h3>
+  <p>Em <span class="bt">📊 Dashboard</span> vê as suas propostas por tipo, a evolução mensal, o valor em propostas pendentes e ganhas, a taxa de conversão e o ranking da equipa.</p>
+</section>
+
+<section data-p="v" id="v-rpn-criar">
+  <h2>2.4 Criar o RPN <span class="tag v">Vendedores</span></h2>
+  <h3>A partir de uma proposta ganha (recomendado)</h3>
+  <ol>
+    <li>Em Minhas Propostas, ponha a proposta em <b>Ganho</b>.</li>
+    <li>Carregue no botão verde <span class="bt">RPN</span>. O RPN abre noutro separador.</li>
+    <li>Vêm preenchidos: cliente, NIF, as linhas com a referência e o prazo, e o MSISDN quando a proposta o tinha.</li>
+    <li>Complete o que falta (ver secção seguinte) e carregue em <span class="bt">Guardar</span> ou <span class="bt r">Submeter à BackOffice</span>.</li>
+  </ol>
+  <div class="aviso">Abrir o RPN a partir da proposta <b>não grava nada</b>. Se fechar o separador sem guardar, o RPN não fica criado e a proposta continua livre.</div>
+  <h3>Diretamente no RPN</h3>
+  <ol>
+    <li>No RPN, abra <span class="bt">Novo RPN</span>.</li>
+    <li>Na caixa de pesquisa de cliente, escreva as primeiras letras do nome ou o início do NIF e escolha o cliente. Só aparecem os da sua carteira.</li>
+    <li>Preencha as linhas e o resto do processo.</li>
+  </ol>
+</section>
+
+<section data-p="v" id="v-rpn-preencher">
+  <h2>2.5 Preencher o RPN <span class="tag v">Vendedores</span></h2>
+  <p>A ficha do RPN tem quatro separadores: <b>Processo</b>, <b>Anexos</b>, <b>Mensagens</b> e <b>Histórico</b>.</p>
+  <h3>Dados do cliente</h3>
+  <p>Ao escolher o cliente, os dados da ficha (email, contacto, morada, conta) são preenchidos. Confirme que estão atuais e corrija o que for preciso.</p>
+  <h3>Linhas</h3>
+  <ol>
+    <li>Carregue em <span class="bt">+ Linha</span>.</li>
+    <li>Na <b>Referência</b> ou na <b>Designação</b>, comece a escrever: a plataforma procura no catálogo pelas duas, em qualquer parte do texto. Escolha com o rato, ou com as setas e <kbd>Enter</kbd>.</li>
+    <li>A designação, o tier e o pricing plan ficam preenchidos. A natureza acerta-se sozinha em Fixo ou Móvel.</li>
+    <li>Preencha a <b>Natureza</b> (Ref ou Nova), o <b>MSISDN</b>, a <b>RLMC</b> e o <b>Prazo</b>.</li>
+    <li>O <b>Score</b> é calculado automaticamente.</li>
+  </ol>
+  <ul>
+    <li><span class="bt">⧉</span> duplica a linha; <span class="bt">✕</span> remove-a.</li>
+    <li><span class="bt">+ Várias MSISDN</span>: cole uma lista de números (um por linha). Cria uma linha por número, copiando referência, RLMC, prazo e natureza da última linha.</li>
+  </ul>
+  <h3>Bundles</h3>
+  <p>Se escolher a referência de um pacote (ex.: <i>2P PRO MINF.2025</i>), a linha abre-se sozinha nas suas partes:</p>
+  <ul>
+    <li>Aparece um cabeçalho cinzento com o nome do pacote e, por baixo, uma linha por cada parte.</li>
+    <li>Escreva a <b>RLMC total do pacote</b> no cabeçalho. A plataforma reparte-a pelas partes segundo as percentagens da Vodafone.</li>
+    <li>A referência e a RLMC de cada parte não se alteram à mão.</li>
+    <li>O prazo é igual em todas as partes: mudar numa muda nas outras.</li>
+    <li>O MSISDN é preenchido em cada parte.</li>
+    <li>Para duplicar ou remover o pacote inteiro, use os botões do cabeçalho.</li>
+  </ul>
+  <h3>Notas e resumo</h3>
+  <ul>
+    <li><b>Notas para a BackOffice</b>: instruções para quem implementa (documentos a aguardar, cuidados, pedidos especiais).</li>
+    <li><b>Resumo do negócio</b>: o que foi vendido, em poucas linhas.</li>
+  </ul>
+  <h3>Anexos</h3>
+  <p>No separador <b>Anexos</b>, carregue os documentos do processo (contrato, identificação, CRC…). É preciso guardar o RPN primeiro.</p>
+</section>
+
+<section data-p="v" id="v-rpn-dividir">
+  <h2>2.6 Vários RPN para o mesmo negócio <span class="tag v">Vendedores</span></h2>
+  <p>Há negócios que têm de ser divididos em mais do que um processo, por exemplo quando há <b>prazos de fidelização diferentes</b>.</p>
+  <ol>
+    <li>Preencha o RPN com todas as linhas.</li>
+    <li>Carregue em <span class="bt">Dividir em vários RPN</span>.</li>
+    <li>A plataforma sugere a divisão por prazo. Em cada linha pode escolher em que RPN fica.</li>
+    <li>Carregue em <span class="bt r">Dividir</span>.</li>
+  </ol>
+  <ul>
+    <li>Cada RPN novo recebe o seu número e uma cópia dos dados do cliente.</li>
+    <li>Ficam num <b>grupo</b>: a ficha mostra uma faixa azul com os outros RPN, e a lista marca-os com ⛓.</li>
+    <li>Ao submeter um, <b>submetem-se todos</b>, e vão para a mesma BackOffice.</li>
+    <li>Um pacote (bundle) nunca é partido entre RPN.</li>
+  </ul>
+  <div class="nota">O botão só funciona com pelo menos duas linhas (ou dois pacotes), e só enquanto o RPN está <i>Em Elaboração</i>.</div>
+</section>
+
+<section data-p="v" id="v-rpn-submeter">
+  <h2>2.7 Guardar, submeter e acompanhar <span class="tag v">Vendedores</span></h2>
+  <ul>
+    <li><span class="bt">Guardar</span>: grava um rascunho. Fica <i>Em Elaboração</i> e ainda não é entregue a nenhuma BackOffice. Pode voltar a ele mais tarde.</li>
+    <li><span class="bt r">Submeter à BackOffice</span>: envia o processo. A plataforma atribui-o automaticamente a uma BackOffice.</li>
+  </ul>
+  <p>Para submeter são obrigatórios: nome do cliente, NIF com 9 dígitos, pelo menos uma linha, e em cada linha a referência e a RLMC. Se faltar alguma coisa, a plataforma diz o quê.</p>
+  <h3>Estados do RPN</h3>
+  <div class="scroll"><table>
+    <tr><th>Estado</th><th>O que significa</th><th>O que o vendedor faz</th></tr>
+    <tr><td><span class="est">Em Elaboração</span></td><td>Rascunho, ainda não enviado.</td><td>Completar e submeter.</td></tr>
+    <tr><td><span class="est">Submetido</span></td><td>Entregue à BackOffice, à espera de ser tratado.</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">Em Implementação</span></td><td>A BackOffice está a implementar.</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">Pendente Comercial</span></td><td>Falta alguma coisa do lado do vendedor.</td><td><b>Resolver e devolver à BO.</b></td></tr>
+    <tr><td><span class="est">Pendente Documentos</span></td><td>Faltam documentos.</td><td><b>Anexar e devolver à BO.</b></td></tr>
+    <tr><td><span class="est">A aguardar</span></td><td>Implementado, à espera de um prazo (ciclo de faturação, instalação, portabilidade…).</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">Em Conferência</span></td><td>Uma segunda BackOffice está a confirmar a implementação.</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">PN</span></td><td>Conferido e fechado.</td><td>Nada. Negócio concluído.</td></tr>
+    <tr><td><span class="est">Cancelado</span> / <span class="est">Reprovado</span></td><td>O processo não avançou.</td><td>Ver o motivo no Histórico ou nas Mensagens.</td></tr>
+  </table></div>
+  <h3>Quando o RPN fica pendente</h3>
+  <ol>
+    <li>A faixa amarela no topo diz o motivo (Doc. Identificação, Contrato, CRC, Morada, Condições Comerciais ou Dívida).</li>
+    <li>Corrija os dados ou anexe o documento em falta. Nestes dois estados o RPN volta a poder ser alterado por si.</li>
+    <li>Carregue em <span class="bt r">Resolvido · devolver à BO</span>.</li>
+  </ol>
+  <h3>Falar com a BackOffice</h3>
+  <ul>
+    <li><b>Mensagens</b>: escreva no separador Mensagens. Fica tudo registado no processo.</li>
+    <li><span class="bt">Email</span>: abre o seu programa de email com uma mensagem para a BackOffice do processo, já com o número e a ligação do RPN.</li>
+    <li><b>Histórico</b>: mostra quem fez o quê e quando.</li>
+  </ul>
+  <h3>Eliminar um RPN</h3>
+  <p>Pode eliminar um RPN seu enquanto está <i>Em Elaboração</i>, com o botão <span class="bt">Eliminar</span>. Depois de submetido, só o Master o pode apagar.</p>
+</section>
+
+<section data-p="v" id="v-projetos">
+  <h2>2.8 Projetos <span class="tag v">Vendedores</span></h2>
+  <p>Um <b>Projeto</b> é um alerta de renegociação. Nasce <b>6 meses antes do fim da fidelização</b> de um PN, no dia do mês em que esse PN foi feito, e é entregue ao vendedor que tem o cliente na carteira nesse momento.</p>
+  <p>No RPN, abra <span class="bt">Projetos</span>.</p>
+  <h3>Os contadores do menu</h3>
+  <ul>
+    <li><b>N em atraso</b> (a vermelho): Projetos de meses anteriores que ainda não têm decisão. <b>Têm de ser fechados.</b></li>
+    <li>Número a cinzento: Projetos deste mês cuja data de alerta já chegou.</li>
+  </ul>
+  <p>Se tiver Projetos em atraso, aparece um aviso com a lista quando entra.</p>
+  <h3>Os dois separadores</h3>
+  <ul>
+    <li><b>Para tratar</b>: os Projetos à espera de decisão, com os <i>Em atraso</i> primeiro, agrupados por mês e com os dias de atraso.</li>
+    <li><b>Mapa do mês</b>: todos os Projetos do mês, incluindo os que ainda não chegaram à data de alerta. É o seu plano de trabalho, com a RLMC e o Score que pode conseguir se renovar todos.</li>
+  </ul>
+  <h3>Tratar um Projeto</h3>
+  <p>Carregue no Projeto para ver as linhas, o prazo, a RLMC, a data de fim do contrato e o PN de origem. Depois tome <b>uma de três decisões</b>:</p>
+  <div class="scroll"><table>
+    <tr><th>Decisão</th><th>Quando</th><th>Como</th></tr>
+    <tr><td><b>Criar proposta</b></td><td>Vai renegociar com o cliente.</td><td>Botão <span class="bt r">Criar proposta</span>. Abre as Propostas com o cliente, o NIF, o tipo Refidelização e uma linha por serviço.</td></tr>
+    <tr><td><b>Adiar</b></td><td>Falou com o cliente e ele não quer renegociar já.</td><td>Botão <span class="bt">Adiar</span>: escolha a nova data de alerta e escreva o motivo. O Projeto volta à lista nessa data.</td></tr>
+    <tr><td><b>Perdido sem proposta</b></td><td>O cliente saiu ou não vai renovar.</td><td>Botão <span class="bt">Perdido sem proposta</span>, com o motivo.</td></tr>
+  </table></div>
+  <h3>A proposta que nasce de um Projeto</h3>
+  <ul>
+    <li>Uma caixa amarela no formulário avisa quando um tarifário antigo está <b>descontinuado</b> ou quando é preciso <b>escolher o tarifário</b>. Esses avisos são só para si: não saem no documento do cliente.</li>
+    <li>Reveja os tarifários, preencha a mensalidade e grave.</li>
+    <li>Ao gravar, o Projeto passa a <i>Em negociação</i>. Quando puser a proposta em Ganho ou Perdido, o Projeto acompanha.</li>
+  </ul>
+  <h3>Regras do adiamento</h3>
+  <ul>
+    <li>O motivo é obrigatório.</li>
+    <li>Pode adiar até <b>180 dias</b> depois da data de alerta original.</li>
+    <li>Cada adiamento fica registado na ficha do Projeto (quem, quando, para que data e porquê).</li>
+  </ul>
+  <h3>Linhas com aviso</h3>
+  <ul>
+    <li><b>sem MSISDN · confirmar</b>: a plataforma não consegue saber se esse serviço já foi renegociado. Confirme com o cliente se ainda está ativo.</li>
+    <li>Uma linha que já tenha sido renegociada num PN mais recente, ou que esteja num RPN em curso, <b>não aparece</b> no Projeto.</li>
+  </ul>
+  <div class="aviso">A chefia pode ligar um bloqueio: a partir de um certo dia do mês, quem tiver Projetos em atraso deixa de conseguir gravar propostas novas. As propostas criadas a partir de um Projeto continuam a ser permitidas. Para não ser apanhado, feche os atrasados com uma das três decisões.</div>
+</section>
+
+<section data-p="v" id="v-faq">
+  <h2>2.9 Perguntas frequentes <span class="tag v">Vendedores</span></h2>
+  <h3>Não encontro um cliente.</h3>
+  <p>Só vê os clientes da sua carteira. Se o cliente existe mas está com outro vendedor, ou sem vendedor, peça à chefia para o atribuir.</p>
+  <h3>Não encontro uma referência nas linhas do RPN.</h3>
+  <p>Experimente outra palavra da designação. Se continuar sem aparecer, a referência não está no catálogo: peça à BackOffice ou ao Coordenador para a criar. Entretanto pode escrevê-la à mão.</p>
+  <h3>Pus a proposta em Ganho por engano.</h3>
+  <p>Mude o estado de novo para Pendente. Se já tinha criado o RPN, fale com a BackOffice.</p>
+  <h3>O RPN diz "Falta: …" quando submeto.</h3>
+  <p>A mensagem enumera o que falta. O mais comum é a RLMC de uma linha, ou a RLMC total de um pacote.</p>
+  <h3>Dividi o RPN e quero voltar atrás.</h3>
+  <p>Elimine os RPN novos enquanto estão Em Elaboração e volte a acrescentar as linhas ao primeiro.</p>
+  <h3>Um Projeto mostra um serviço que o cliente já não tem.</h3>
+  <p>Se for o único, marque o Projeto como <i>Perdido sem proposta</i> com esse motivo. Se houver outros serviços, crie a proposta só com os que interessam.</p>
+</section>
+
+<div class="parte" data-p="b" id="pb">Parte 3 · BackOffice<small>Implementar, conferir e fechar processos</small></div>
+
+<section data-p="b" id="b-lista">
+  <h2>3.1 A lista de RPN <span class="tag b">BackOffice</span></h2>
+  <p>O RPN abre na lista. Para poupar consultas, carrega os processos <b>em curso</b> e os fechados do mês escolhido.</p>
+  <ul>
+    <li><b>Caixas de estado</b> no topo: mostram quantos processos há em cada estado. Carregar numa filtra a lista.</li>
+    <li><b>Pesquisa</b>: por número, cliente, NIF, oportunidade, MSISDN ou contrato.</li>
+    <li><b>Só os meus</b>: mostra só os processos que lhe estão atribuídos.</li>
+    <li><b>Mês</b>: escolhe o mês dos processos fechados (PN, cancelados, reprovados).</li>
+    <li><span class="bt">Procurar no histórico</span>: procura um processo antigo pelo número exato, pelo NIF, por um contrato ou por um MSISDN, sem carregar tudo.</li>
+    <li>⛓ ao lado do número: o RPN faz parte de um grupo.</li>
+    <li>A marca <i>PHC</i> identifica os PN importados do sistema antigo. São só de consulta.</li>
+  </ul>
+</section>
+
+<section data-p="b" id="b-atribuicao">
+  <h2>3.2 Atribuição, ausências e realocação <span class="tag b">BackOffice</span></h2>
+  <h3>Atribuição automática</h3>
+  <p>Quando um vendedor submete, o RPN vai para a BackOffice presente com <b>menos linhas em mãos</b>. Em caso de empate, é por sorteio.</p>
+  <h3>Ausências</h3>
+  <ol>
+    <li>Na lista, carregue em <span class="bt">Ausências · redistribuir</span>.</li>
+    <li>Na linha da colega ausente, carregue em <span class="bt">Ausente · redistribuir</span> e indique a razão.</li>
+    <li>Os RPN abertos e as conferências dela passam para as restantes, pela regra habitual. Enquanto estiver ausente, não recebe processos novos.</li>
+    <li>No regresso, carregue em <span class="bt">Marcar presente</span>.</li>
+  </ol>
+  <h3>Realocar um RPN</h3>
+  <ol>
+    <li>Abra o RPN e carregue em <span class="bt">Realocar BO</span> (ou <span class="bt">Realocar conferência</span>).</li>
+    <li>Escolha a colega, ou deixe em automático.</li>
+    <li>Escreva a <b>razão</b> (obrigatória) e confirme.</li>
+  </ol>
+  <p>Qualquer BackOffice pode realocar. A razão fica no histórico. Se o RPN fizer parte de um grupo, o grupo todo é realocado.</p>
+</section>
+
+<section data-p="b" id="b-implementar">
+  <h2>3.3 Implementar um RPN <span class="tag b">BackOffice</span></h2>
+  <ol>
+    <li>Abra o RPN e leia as <b>Notas para a BackOffice</b>, o resumo do negócio e os anexos.</li>
+    <li>Mude o <b>Estado</b> para <i>Em Implementação</i> e guarde.</li>
+    <li>Implemente na Vodafone.</li>
+    <li>Em cada linha, preencha o <b>Contrato VDF</b> e confirme MSISDN, conta, RLMC e prazo. Pode corrigir o que estiver errado.</li>
+    <li>Quando terminar, siga para a conferência (secção 3.5).</li>
+  </ol>
+  <h3>Quando falta alguma coisa</h3>
+  <ol>
+    <li>Mude o estado para <i>Pendente Comercial</i> ou <i>Pendente Documentos</i>.</li>
+    <li>Assinale o(s) <b>motivo(s) de pendência</b>: Doc. Identificação, Contrato, CRC, Morada, Condições Comerciais, Dívida.</li>
+    <li>Guarde. Se quiser, escreva uma mensagem ou use o botão <span class="bt">Email</span> para avisar o vendedor.</li>
+  </ol>
+  <p>O vendedor corrige e carrega em "Resolvido · devolver à BO". O RPN volta a <i>Em Implementação</i>, consigo.</p>
+  <h3>Cancelar ou reprovar</h3>
+  <p>Mude o estado para <i>Cancelado</i> ou <i>Reprovado</i> e guarde. Deixe o motivo numa mensagem, para o vendedor saber porquê.</p>
+</section>
+
+<section data-p="b" id="b-aguardar">
+  <h2>3.4 A aguardar <span class="tag b">BackOffice</span></h2>
+  <p>Use este estado quando a implementação está feita mas depende de um prazo.</p>
+  <ol>
+    <li>Mude o estado para <i>A aguardar</i>.</li>
+    <li>Escolha o motivo: <b>Ciclo de faturação</b>, <b>Instalação marcada</b>, <b>Enviado 1229</b>, <b>1229 via OS</b>, <b>Portabilidade enviada</b> ou <b>Aprovação Vodafone</b>.</li>
+    <li>No ciclo de faturação, escolha o dia (8, 15, 22 ou fim do mês): a plataforma calcula a data do próximo ciclo. Na instalação, indique a data marcada.</li>
+    <li>Guarde.</li>
+  </ol>
+  <p>Quando a data passa, o RPN fica assinalado a vermelho na lista, com a indicação <b>Verificar na Vodafone</b>. Nessa altura:</p>
+  <ul>
+    <li>Se está tudo certo, envie para conferência.</li>
+    <li>Se deu erro, volte a <i>Em Implementação</i> e corrija.</li>
+  </ul>
+</section>
+
+<section data-p="b" id="b-conferencia">
+  <h2>3.5 Conferência e fecho como PN <span class="tag b">BackOffice</span></h2>
+  <p>Todos os RPN são conferidos por <b>uma segunda BackOffice</b>. Quem implementou nunca confere o seu próprio processo.</p>
+  <h3>Quem implementou</h3>
+  <ol>
+    <li>Carregue em <span class="bt r">Implementação terminada · enviar para conferência</span>.</li>
+    <li>Se houver linhas sem contrato VDF, a plataforma avisa e pergunta se quer enviar na mesma.</li>
+    <li>O RPN passa a <i>Em Conferência</i> e é atribuído automaticamente a outra BackOffice. Se não houver ninguém disponível, fica em fila.</li>
+  </ol>
+  <h3>Quem confere</h3>
+  <ol>
+    <li>Abra o RPN em conferência que lhe está atribuído.</li>
+    <li>Confirme na Vodafone que a implementação corresponde ao processo.</li>
+    <li>Se está certo, carregue em <span class="bt r">Conferido · fechar como PN</span>. O RPN passa a <b>PN</b> e fica fechado.</li>
+    <li>Se está errado, carregue em <span class="bt">Devolver à implementação</span> e escreva a razão. O processo volta a quem o implementou.</li>
+  </ol>
+  <div class="aviso">Uma devolução penaliza a produção de quem implementou (ver secção 3.9). Escreva sempre uma razão clara, para o erro poder ser corrigido à primeira.</div>
+  <p>Um PN só pode ser reaberto pelo Master.</p>
+</section>
+
+<section data-p="b" id="b-grupos">
+  <h2>3.6 Grupos de RPN <span class="tag b">BackOffice</span></h2>
+  <p>Um negócio dividido em vários RPN forma um grupo. Reconhece-o pela faixa azul na ficha e pelo ⛓ na lista.</p>
+  <ul>
+    <li>Todos os RPN do grupo são atribuídos <b>à mesma BackOffice</b> e conferidos <b>pela mesma conferente</b>.</li>
+    <li>Só vão para conferência <b>todos ao mesmo tempo</b>. Se um estiver pendente, a plataforma não deixa enviar e diz qual.</li>
+    <li>Conferir fecha todos como PN; devolver devolve todos.</li>
+    <li>Realocar um realoca o grupo.</li>
+    <li>Os estados <i>Pendente</i> e <i>A aguardar</i> continuam a ser postos em cada RPN.</li>
+  </ul>
+  <p>A BackOffice também pode dividir um RPN que ainda esteja <i>Em Elaboração</i>, e submetê-lo em nome do vendedor.</p>
+</section>
+
+<section data-p="b" id="b-catalogo">
+  <h2>3.7 Catálogo de referências <span class="tag b">BackOffice</span></h2>
+  <p>No RPN, abra <span class="bt">Catálogo</span>. BackOffice, Coordenador e Master podem criar, alterar e apagar referências.</p>
+  <ul>
+    <li><b>Procurar</b>: por referência, designação, tier ou pricing plan.</li>
+    <li><span class="bt">+ Nova referência</span>: referência, sub-família, designação, tier, pricing plan e se está descontinuada.</li>
+    <li><span class="bt">Editar</span>: tudo menos a referência, que não muda depois de criada.</li>
+    <li><span class="bt">Apagar</span>: os processos que já a usam não são alterados; deixa só de aparecer na pesquisa.</li>
+  </ul>
+  <h3>Bundles</h3>
+  <ul>
+    <li>Uma referência é um pacote quando tem <b>Composição</b>: a lista das partes e a percentagem de cada uma.</li>
+    <li>A soma das percentagens tem de dar 100%.</li>
+    <li>Não é possível apagar uma referência que faça parte de um pacote.</li>
+  </ul>
+  <h3>Referências inativas</h3>
+  <p>Uma referência marcada como <b>Inativa</b> não aparece na pesquisa das linhas, mas continua a servir como parte de um pacote.</p>
+  <div class="aviso">O tier e o estado "descontinuado" entram no cálculo do Score. Um erro no catálogo afeta o Score de todos os processos novos com essa referência.</div>
+</section>
+
+<section data-p="b" id="b-projetos">
+  <h2>3.8 Projetos: o papel da BackOffice <span class="tag b">BackOffice</span></h2>
+  <ul>
+    <li><b>Geração</b>: os Projetos são criados automaticamente quando um Master, Coordenador ou BackOffice entra no RPN. O mês corrente é gerado se ainda faltar; a partir do <b>dia 28</b>, é gerado o mês seguinte.</li>
+    <li><b>Geração manual</b>: em Projetos › Mapa do mês, escolha o mês e use <span class="bt">Gerar Projetos de …</span>. Não duplica os que já existem.</li>
+    <li><b>Para tratar</b>: vê os Projetos de toda a equipa e o quadro <b>Em atraso por vendedor</b>, com quantos tem cada um e há quantos dias está o mais antigo.</li>
+    <li><b>Por atribuir</b>: Projetos de clientes sem vendedor na ficha. Abra o Projeto, escolha o vendedor e carregue em <span class="bt">Atribuir</span>.</li>
+  </ul>
+  <div class="nota">Um RPN em curso com o mesmo MSISDN retira essa linha dos Projetos seguintes. Por isso convém que os MSISDN estejam sempre preenchidos nas linhas.</div>
+</section>
+
+<section data-p="b" id="b-producao">
+  <h2>3.9 Produção BO <span class="tag b">BackOffice</span></h2>
+  <p>No RPN, abra <span class="bt">Produção BO</span>. Todas as BackOffices veem a produção de todas.</p>
+  <div class="scroll"><table>
+    <tr><th>Trabalho</th><th>Pontos por linha</th><th>Quando conta</th></tr>
+    <tr><td>Implementar</td><td>2</td><td>Quando o RPN passa a PN.</td></tr>
+    <tr><td>Conferir</td><td>1</td><td>Quando o RPN passa a PN.</td></tr>
+    <tr><td>RPN cancelado ou reprovado</td><td>2</td><td>Para a BackOffice que o tinha atribuído.</td></tr>
+    <tr><td>Devolução pela conferência</td><td>−3 (150% do que receberia)</td><td>Para quem implementou, no mês da devolução.</td></tr>
+  </table></div>
+  <p>O valor mensal definido pela administração é repartido pelas BackOffices na proporção dos pontos de cada uma. Os pesos podem ser alterados pelo Master.</p>
+  <p>Uma penalização por devolução pode ser anulada pelo Master, se a devolução não se justificar.</p>
+</section>
+
+<section data-p="b" id="b-faq">
+  <h2>3.10 Perguntas frequentes <span class="tag b">BackOffice</span></h2>
+  <h3>Não tenho o botão de conferir.</h3>
+  <p>Ou a conferência está atribuída a outra colega, ou foi a própria a implementar. Quem implementou nunca confere.</p>
+  <h3>O RPN está em conferência "em fila".</h3>
+  <p>Não havia outra BackOffice disponível no momento. Use <span class="bt">Realocar conferência</span> quando houver.</p>
+  <h3>O vendedor diz que submeteu e eu não vejo o RPN.</h3>
+  <p>Desligue "Só os meus": pode ter sido atribuído a outra colega. Se continuar sem aparecer, o vendedor pode ter guardado sem submeter (estado Em Elaboração).</p>
+  <h3>Preciso de alterar um PN já fechado.</h3>
+  <p>Peça ao Master para o reabrir. Volta a Em Implementação.</p>
+  <h3>O Score de uma linha parece errado.</h3>
+  <p>Confirme o prazo, o tier e se a referência está descontinuada. Se o erro estiver no catálogo, corrija-o lá. Os PN importados do PHC mantêm o Score que tinham no sistema antigo.</p>
+</section>
+
+<p id="vazio">Nenhuma secção corresponde à pesquisa.</p>
+</main>
+</div>
+<footer>Manual da plataforma Redemóvel · versão de outubro de 2026 · uso interno</footer>
+
+<script>
+(function(){
+  var secs=[].slice.call(document.querySelectorAll('main > section, main > .parte')), toc=document.getElementById('toc'), papel='', q='';
+  function semAc(s){return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();}
+  secs.forEach(function(s){
+    var a=document.createElement('a'), parte=s.classList.contains('parte');
+    a.href='#'+s.id; a.className=parte?'t1':'';
+    a.textContent=parte ? s.firstChild.textContent.trim() : (s.querySelector('h2,h1').firstChild.textContent.trim());
+    a.dataset.para=s.id; toc.appendChild(a); s._txt=semAc(s.textContent);
+  });
+  function aplica(){
+    var n=0;
+    secs.forEach(function(s){
+      var p=s.dataset.p, okP=!papel||p==='t'||p===papel, okQ=!q||(!s.classList.contains('parte')&&s._txt.indexOf(q)>=0);
+      var v=okP&&okQ; s.classList.toggle('oculto',!v); if(v&&!s.classList.contains('parte'))n++;
+      toc.querySelector('[data-para="'+s.id+'"]').classList.toggle('oculto',!v);
+    });
+    document.getElementById('vazio').style.display=n?'none':'block';
+  }
+  document.getElementById('papel').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b)return; papel=b.dataset.p;
+    [].forEach.call(this.children,function(x){x.classList.toggle('on',x===b);}); aplica();
+  });
+  document.getElementById('q').addEventListener('input',function(){q=semAc(this.value.trim()); aplica();});
+  var m=/[?&]para=([vb])/.exec(location.search); if(m){var bt=document.querySelector('#papel [data-p="'+m[1]+'"]'); if(bt)bt.click();}
+})();
+</script>
+</body>
+</html>
