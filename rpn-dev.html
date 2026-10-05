@@ -57,6 +57,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .tabs a.on{border-color:var(--red);color:var(--ink);font-weight:600}
 .lines input,.lines select{padding:4px 6px;font-size:13px}
 .lines td{padding:3px 4px;white-space:nowrap}
+.lines tr.bh td{background:#f3f4f6;border-top:2px solid #d1d5db}.lines tr.bf td:first-child{border-left:3px solid #d1d5db}
 .tot td{font-weight:700;background:#fafafa}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:8px;display:none;z-index:50;max-width:90vw}
 #toast.err{background:var(--red-d)}
@@ -329,7 +330,28 @@ function rpnVazio(){
     contas:{gsm:'',dados:'',adsl:'',gsm2:'',novaConta:''}, notas:'', linhas:[], nLinhas:0, totRLMC:0, totScore:0,
     propostaRef:'', propostaInfo:'', propostaTarif:'', cargaContada:0 };
 }
-function linhaVazia(t){ return t ? {...t, msisdn:'', contratoVDF:'', upgrade:false} : {ref:'',designacao:'',natureza:'Ref Móvel',msisdn:'',nConta:'',rlmc:0,prazo:24,tier:'',pricingPlan:'',descontinuado:false,upgrade:false,contratoVDF:''}; }
+// ---- referências compostas (bundles): a linha abre nas filhas, cada uma com a sua % da RLMC total ----
+const novoGid = () => Math.random().toString(36).slice(2,10);
+const composicaoDe = pr => (pr && Array.isArray(pr.composicao) && pr.composicao.length) ? pr.composicao : null;
+function distribuir(ls, total){
+  total = Math.round((+total||0)*100)/100; if(!ls.length) return; let soma=0, maior=ls[0];
+  ls.forEach(l=>{ l.bTot=total; l.rlmc=Math.round(total*(+l.bPct||0)*100)/100; soma+=l.rlmc; if((+l.bPct||0)>(+maior.bPct||0)) maior=l; });
+  maior.rlmc = Math.round((maior.rlmc+total-soma)*100)/100;   // cêntimos do arredondamento vão para a filha maior
+}
+function linhasDoProduto(base, pr, total){
+  const comp = composicaoDe(pr);
+  if (!comp) { const l={...base}; aplicarProduto(l,pr); return [l]; }
+  const g=novoGid(), nova=/^Nova/.test(base.natureza||'');
+  const ls = comp.map(c=>{ const f=S.prodMap[String(c.ref).toUpperCase()]||{ref:c.ref,designacao:c.ref,categoria:''};
+    return {...linhaVazia(), ref:f.ref, designacao:f.designacao, tier:f.tier||'', pricingPlan:f.pricingPlan||'', descontinuado:!!f.descontinuado,
+      natureza:(nova?'Nova ':'Ref ')+(f.categoria==='Fixo'?'Fixo':'Móvel'), prazo:base.prazo||24, upgrade:!!base.upgrade, nConta:base.nConta||'', contratoVDF:base.contratoVDF||'',
+      bGid:g, bRef:pr.ref, bDes:pr.designacao||'', bPct:+c.pct||0, bTot:0}; });
+  (ls.find(l=>/Móvel/.test(l.natureza))||ls[0]).msisdn = base.msisdn||'';
+  distribuir(ls, total!=null ? total : (+base.rlmc||0));
+  return ls;
+}
+function linhaVazia(t){ if (t && t.bGid) return {...linhaVazia(), natureza:t.natureza, prazo:t.prazo};
+  return t ? {...t, msisdn:'', contratoVDF:'', upgrade:false} : {ref:'',designacao:'',natureza:'Ref Móvel',msisdn:'',nConta:'',rlmc:0,prazo:24,tier:'',pricingPlan:'',descontinuado:false,upgrade:false,contratoVDF:''}; }
 
 async function viewFicha(id){
   const m = $('#main');
@@ -504,21 +526,24 @@ function prodDrop(){
 function procurarProdutos(q){
   const t=semAcento(q).trim(); if (t.length<2) return [];
   const pal=t.split(/\s+/), a=[], b=[], c=[];
-  for (const p of S.prodList) { const r=semAcento(p.ref), d=semAcento(p.designacao);
+  for (const p of S.prodList) { if (p.inativo) continue; const r=semAcento(p.ref), d=semAcento(p.designacao);
     if (r.startsWith(t)) a.push(p); else if (d.startsWith(t)) b.push(p); else if (pal.every(w=>r.includes(w)||d.includes(w))) c.push(p); }
   return [...a,...b,...c].slice(0,12);
 }
 function drawLines(dis){
   const r = S.cur, L = r.linhas;
   $('#lines').innerHTML = `<table class="lines"><thead><tr><th>#</th><th>Referência</th><th>Designação</th><th>Natureza</th><th>MSISDN</th><th>Nº Conta</th><th class="num">RLMC €</th><th title="Prazo de permanência (meses)">Prazo perm.</th><th>Tier</th><th>PricingPlan</th><th>Desc.</th><th>Upgr.</th><th>Contrato VDF</th><th class="num">Score</th><th></th></tr></thead>
-  <tbody>${L.map((l,i)=>`<tr data-i="${i}">
-    <td class="muted">${i+1}</td>
-    <td><input data-l="ref" value="${esc(l.ref)}" ${dis} autocomplete="off" placeholder="referência ou nome…" style="width:170px"></td>
-    <td><input data-l="designacao" value="${esc(l.designacao)}" ${dis} autocomplete="off" style="width:240px"></td>
+  <tbody>${L.map((l,i)=>`${l.bGid && l.bGid!==L[i-1]?.bGid ? `<tr class="bh" data-g="${esc(l.bGid)}"><td>📦</td><td colspan="5"><b>${esc(l.bRef)}</b> — ${esc(l.bDes)} <span class="muted">· bundle</span></td>
+      <td><input type="number" step="0.01" data-bt value="${l.bTot||''}" ${dis} title="RLMC total do bundle" style="width:80px;text-align:right;font-weight:700"></td>
+      <td colspan="7" class="muted" style="font-size:12px">RLMC total do bundle — repartida pelas linhas abaixo</td>
+      <td>${dis?'':`<button class="btn sm ghost" data-gdup title="Duplicar o bundle">⧉</button><button class="btn sm ghost" data-gdel title="Remover o bundle" style="color:var(--red-d)">✕</button>`}</td></tr>`:''}<tr data-i="${i}" ${l.bGid?`class="bf" data-g="${esc(l.bGid)}"`:''}>
+    <td class="muted">${i+1}${l.bGid?`<div style="font-size:10px">${(Math.round((+l.bPct||0)*1000)/10).toLocaleString('pt-PT')}%</div>`:''}</td>
+    <td><input data-l="ref" value="${esc(l.ref)}" ${l.bGid?'disabled':dis} autocomplete="off" placeholder="referência ou nome…" style="width:170px"></td>
+    <td><input data-l="designacao" value="${esc(l.designacao)}" ${l.bGid?'disabled':dis} autocomplete="off" style="width:240px"></td>
     <td><select data-l="natureza" ${dis} style="width:112px">${NATUREZAS.map(n=>`<option ${l.natureza===n?'selected':''}>${n}</option>`).join('')}</select></td>
     <td><input data-l="msisdn" value="${esc(l.msisdn)}" ${dis} style="width:110px"></td>
     <td><input data-l="nConta" value="${esc(l.nConta)}" ${dis} style="width:100px"></td>
-    <td><input type="number" step="0.01" data-l="rlmc" value="${l.rlmc||''}" ${dis} style="width:80px;text-align:right"></td>
+    <td><input type="number" step="0.01" data-l="rlmc" value="${l.bGid?(+l.rlmc||0):(l.rlmc||'')}" ${l.bGid?'disabled':dis} style="width:80px;text-align:right"></td>
     <td><select data-l="prazo" ${dis} style="width:62px">${[...new Set([...PRAZOS, +l.prazo||24])].sort((a,b)=>a-b).map(n=>`<option value="${n}" ${+l.prazo===n?'selected':''}>${n}</option>`).join('')}</select></td>
     <td><select data-l="tier" ${dis} style="width:90px">${['','Gold','Silver','Bronze','Estanho'].map(n=>`<option ${l.tier===n?'selected':''}>${n}</option>`).join('')}</select></td>
     <td><input data-l="pricingPlan" value="${esc(l.pricingPlan)}" ${dis} style="width:95px"></td>
@@ -526,7 +551,7 @@ function drawLines(dis){
     <td style="text-align:center"><input type="checkbox" data-l="upgrade" ${l.upgrade?'checked':''} ${dis}></td>
     <td><input data-l="contratoVDF" value="${esc(l.contratoVDF)}" ${dis} placeholder="POS…" style="width:165px"></td>
     <td class="num sc">${n3(scoreLinha(l,r))}</td>
-    <td>${dis?'':`<button class="btn sm ghost" data-dup title="Duplicar">⧉</button><button class="btn sm ghost" data-del title="Remover" style="color:var(--red-d)">✕</button>`}</td>
+    <td>${dis||l.bGid?'':`<button class="btn sm ghost" data-dup title="Duplicar">⧉</button><button class="btn sm ghost" data-del title="Remover" style="color:var(--red-d)">✕</button>`}</td>
   </tr>`).join('') || `<tr><td colspan="15" class="muted">Sem linhas. ${dis?'':'Use “+ Linha”.'}</td></tr>`}</tbody>
   <tfoot><tr class="tot"><td colspan="6">${L.length} linha(s)</td><td class="num" id="t-rl">${eur(r.totRLMC)}</td><td colspan="6"></td><td class="num" id="t-sc">${n3(r.totScore)}</td><td></td></tr></tfoot></table>`;
   $('#lines').querySelectorAll('[data-l]').forEach(el=>{
@@ -535,22 +560,27 @@ function drawLines(dis){
       const i=+el.closest('tr').dataset.i, k=el.dataset.l, l=L[i];
       l[k] = el.type==='checkbox'?el.checked : k==='rlmc'?(parseFloat(el.value)||0) : k==='prazo'?+el.value : el.value;
       S.dirty = true;
+      // bundle: o prazo é o mesmo em todas as filhas
+      if (l.bGid && k==='prazo') { L.forEach(x=>{ if(x.bGid===l.bGid) x.prazo=l.prazo; }); drawLines(dis); return; }
       // referência escrita por inteiro e sem ambiguidade (nenhuma outra começa da mesma forma): aplica logo
-      if (k==='ref') { const v=el.value.trim().toUpperCase(), pr=S.prodMap[v]; if (pr && S.prodList.filter(x=>String(x.ref).toUpperCase().startsWith(v)).length===1) { aplicarProduto(l,pr); prodDrop().classList.remove('on'); drawLines(dis); return; } }
+      if (k==='ref') { const v=el.value.trim().toUpperCase(), pr=S.prodMap[v]; if (pr && S.prodList.filter(x=>String(x.ref).toUpperCase().startsWith(v)).length===1) { L.splice(i,1,...linhasDoProduto(l,pr)); prodDrop().classList.remove('on'); drawLines(dis); return; } }
       updTotals();
     });
-    if (el.dataset.l==='ref') el.addEventListener('change',()=>{ const l=L[+el.closest('tr').dataset.i], pr=S.prodMap[el.value.trim().toUpperCase()]; if (pr && l.designacao!==pr.designacao) { aplicarProduto(l,pr); drawLines(dis); } });
+    // bundle: ao sair do campo, o contrato copia-se para as filhas que ainda não têm contrato
+    if (el.dataset.l==='contratoVDF') el.addEventListener('change',()=>{ const l=L[+el.closest('tr').dataset.i]; if(!l.bGid || !l.contratoVDF) return;
+      L.forEach((x,j)=>{ if(x.bGid===l.bGid && !String(x.contratoVDF||'').trim()) { x.contratoVDF=l.contratoVDF; const o=$('#lines').querySelector(`tr[data-i="${j}"] [data-l="contratoVDF"]`); if(o) o.value=l.contratoVDF; } }); });
+    if (el.dataset.l==='ref') el.addEventListener('change',()=>{ const i=+el.closest('tr').dataset.i, l=L[i], pr=S.prodMap[el.value.trim().toUpperCase()]; if (pr && (composicaoDe(pr) || l.designacao!==pr.designacao)) { L.splice(i,1,...linhasDoProduto(l,pr)); drawLines(dis); } });
   });
   // pesquisa de produtos: escrever na Referência ou na Designação procura nas duas, em qualquer parte do texto
   if (!dis) $('#lines').querySelectorAll('[data-l="ref"],[data-l="designacao"]').forEach(inp=>{
     let res=[], sel=-1; const box=prodDrop();
     const fecha = () => { box.classList.remove('on'); box._dono=null; };
-    const aplica = pr => { if(!pr) return; fecha(); const i=+inp.closest('tr').dataset.i; aplicarProduto(L[i],pr); S.dirty=true; drawLines(dis); $('#lines').querySelector(`tr[data-i="${i}"] [data-l="msisdn"]`)?.focus(); };
+    const aplica = pr => { if(!pr) return; fecha(); const i=+inp.closest('tr').dataset.i, novas=linhasDoProduto(L[i],pr); L.splice(i,1,...novas); S.dirty=true; drawLines(dis); (novas[0].bGid ? $('#lines').querySelector(`tr.bh[data-g="${novas[0].bGid}"] [data-bt]`) : $('#lines').querySelector(`tr[data-i="${i}"] [data-l="msisdn"]`))?.focus(); };
     const mostra = () => { if(!inp.isConnected) return; res=procurarProdutos(inp.value); if(inp.value.trim().length<2) return fecha();
       const rc=inp.getBoundingClientRect(); Object.assign(box.style,{left:Math.max(8,Math.min(rc.left, innerWidth-560))+'px', top:(rc.bottom+2)+'px', width:'540px', right:'auto'});
       // sem resultados: dizer porquê, em vez de não mostrar nada
       if (!res.length) { box.innerHTML=`<div style="cursor:default;color:#777">${S.prodList.length?`Nenhum produto com “${esc(inp.value.trim())}” nos ${S.prodList.length} do catálogo. Pode escrever a referência à mão.`:'O catálogo de produtos está vazio. O Master tem de o importar em Administração › Catálogo PHC.'}</div>`; box.classList.add('on'); box._dono=inp; box.onmousedown=null; return; }
-      box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(p.ref)}</b> — ${esc(p.designacao)}<br><small>${esc([p.categoria,p.tier,p.descontinuado?'descontinuado':''].filter(Boolean).join(' · '))}</small></div>`).join('');
+      box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(p.ref)}</b> — ${esc(p.designacao)}<br><small>${esc(composicaoDe(p)?'📦 bundle: '+p.composicao.map(c=>c.ref).join(' + '):[p.categoria,p.tier,p.descontinuado?'descontinuado':''].filter(Boolean).join(' · '))}</small></div>`).join('');
       box.classList.add('on'); box._dono=inp; box.onmousedown=e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); aplica(res[+d.dataset.i]); } }; };
     inp.addEventListener('input', ()=>{ sel=-1; mostra(); });
     inp.addEventListener('keydown', e=>{ if(box._dono!==inp || !box.classList.contains('on')) return;
@@ -559,6 +589,12 @@ function drawLines(dis){
       else if (e.key==='Escape') fecha(); });
     inp.addEventListener('blur', ()=>setTimeout(()=>{ if(box._dono===inp) fecha(); },150));
   });
+  $('#lines').querySelectorAll('[data-bt]').forEach(el=>el.addEventListener('input',()=>{ const g=el.closest('tr').dataset.g;
+    distribuir(L.filter(l=>l.bGid===g), parseFloat(el.value)||0); S.dirty=true;
+    L.forEach((l,j)=>{ if(l.bGid===g){ const o=$('#lines').querySelector(`tr[data-i="${j}"] [data-l="rlmc"]`); if(o) o.value=+l.rlmc||0; } }); updTotals(); }));
+  $('#lines').querySelectorAll('[data-gdup]').forEach(b=>b.onclick=()=>{ const g=b.closest('tr').dataset.g, n=novoGid(), fim=L.map(l=>l.bGid).lastIndexOf(g);
+    L.splice(fim+1,0,...L.filter(l=>l.bGid===g).map(l=>({...l,bGid:n,msisdn:'',contratoVDF:'',upgrade:false}))); S.dirty=true; drawLines(dis); });
+  $('#lines').querySelectorAll('[data-gdel]').forEach(b=>b.onclick=()=>{ const g=b.closest('tr').dataset.g; for(let j=L.length-1;j>=0;j--) if(L[j].bGid===g) L.splice(j,1); S.dirty=true; drawLines(dis); });
   $('#lines').querySelectorAll('[data-dup]').forEach(b=>b.onclick=()=>{ const i=+b.closest('tr').dataset.i; L.splice(i+1,0,linhaVazia(L[i])); S.dirty=true; drawLines(dis); });
   $('#lines').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const i=+b.closest('tr').dataset.i; L.splice(i,1); S.dirty=true; drawLines(dis); });
 }
@@ -669,7 +705,7 @@ function validarSubmissao(r){
   const e=[];
   if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)');
   if(!r.linhas.length) e.push('pelo menos 1 linha');
-  r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
+  r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(l.bGid){ if(!(+l.bTot>0) && l.bGid!==r.linhas[i-1]?.bGid) e.push(`RLMC total do bundle ${l.bRef}`); } else if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
   return e;
 }
 // aus = BackOffices ausentes (config/cargaBO.ausentes); excl = uids a excluir
@@ -930,12 +966,14 @@ function handlePropostaParam(){
     const l = linhaVazia();
     Object.assign(l, { designacao: resto.trim(), msisdn, upgrade: upg, prazo: pz ? parseInt(pz) : (+p.duracao||24),
       natureza: (nova?'Nova ':'Ref ') + (fixo?'Fixo':'Móvel') });
+    if (composicaoDe(pr)) { for (let i=0;i<qtd;i++) r.linhas.push(...linhasDoProduto(l,pr)); return; }   // bundle: abre nas filhas
     if (pr) Object.assign(l, {ref:pr.ref, designacao:pr.designacao, tier:pr.tier, pricingPlan:pr.pricingPlan, descontinuado:pr.descontinuado});
     else l.ref = rf||'';
     for (let i=0;i<qtd;i++) r.linhas.push({...l});
   });
   const mens = parseFloat(String(p.mensalidade||'').replace(',','.'))||0;
   if (r.linhas.length===1 && mens) r.linhas[0].rlmc = mens;
+  else if (mens && r.linhas.length && r.linhas[0].bGid && r.linhas.every(l=>l.bGid===r.linhas[0].bGid)) distribuir(r.linhas, mens);   // um único bundle: a mensalidade é a RLMC total
   r.propostaInfo = [TIPO_TXT[p.tipo]||p.tipo, mens?`mensalidade total ${eur(mens)} €`:'', p.duracao?`${p.duracao} meses`:'', p.comercial?`comercial: ${p.comercial}`:''].filter(Boolean).join(' · ');
   r.propostaTarif = String(p.tarif||'');
   S.pendingNovo = r;
@@ -950,18 +988,20 @@ let CAT_Q = '';
 const SUBFAMS = ['GSM','BL','Fixo'];
 function viewCatalogo(){
   const m=$('#main'), t=semAcento(CAT_Q).trim(), pal=t.split(/\s+/).filter(Boolean);
-  const L = S.prodList.filter(p=>!pal.length || pal.every(w=>semAcento(p.ref+' '+p.designacao+' '+(p.tier||'')+' '+(p.pricingPlan||'')+' '+(p.subfamilia||'')).includes(w)));
+  const L = S.prodList.filter(p=>!pal.length || pal.every(w=>semAcento(p.ref+' '+p.designacao+' '+(p.tier||'')+' '+(p.pricingPlan||'')+' '+(p.subfamilia||'')+(p.inativo?' inativa':'')+(composicaoDe(p)?' bundle '+p.composicao.map(c=>c.ref).join(' '):'')).includes(w)));
   m.innerHTML = `<div class="card"><div class="row" style="margin-bottom:12px">
       <input id="cq" type="search" autocomplete="off" placeholder="Procurar por referência, designação, tier ou pricing plan…" value="${esc(CAT_Q)}" style="max-width:420px">
       <span class="muted">${L.length} de ${S.prodList.length} referência(s)</span><span class="sp"></span><button class="btn pri" id="cn">+ Nova referência</button></div>
     <div class="scroll"><table id="ctab"><thead><tr><th>Referência</th><th>Designação</th><th>Sub-fam.</th><th>Categoria</th><th>Tier</th><th>Pricing plan</th><th>Desc.</th><th></th></tr></thead>
-      <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b></td><td>${esc(p.designacao)}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
+      <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b>${p.inativo?' <span class="muted" style="font-size:11px">· inativa</span>':''}</td><td>${esc(p.designacao)}${composicaoDe(p)?`<div class="muted" style="font-size:11px">📦 ${p.composicao.map(c=>esc(c.ref)+' '+(Math.round(c.pct*1000)/10).toLocaleString('pt-PT')+'%').join(' + ')}</div>`:''}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
         <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
     ${L.length>300?'<p class="muted" style="font-size:12px;margin-bottom:0">A mostrar as primeiras 300. Afine a pesquisa.</p>':''}</div>`;
   const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ viewCatalogo(); const n=$('#cq'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
   $('#cn').onclick=()=>editarRef(null);
   m.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editarRef(S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const ref=b.closest('tr').dataset.ref;
+    const pais=S.prodList.filter(x=>(x.composicao||[]).some(c=>String(c.ref).toUpperCase()===ref.toUpperCase())).map(x=>x.ref);
+    if(pais.length) return toast(`Não pode apagar: ${ref} faz parte do(s) bundle(s) ${pais.join(', ')}.`,true);
     if(!confirm(`Apagar a referência ${ref}?\n\nOs processos que já a usam não são alterados, mas deixa de aparecer na pesquisa das linhas.`)) return;
     try{ await deleteDoc(doc(db,'produtos',prodId(ref))); await loadProdutos(); toast('Referência apagada.'); viewCatalogo(); }catch(e){ toast(errTxt(e),true); } });
 }
@@ -974,14 +1014,31 @@ function editarRef(p){
     <div><label>Tier</label><select id="e-tier">${['Gold','Silver','Bronze','Estanho',''].map(x=>`<option ${x===(p.tier||'')?'selected':''}>${x}</option>`).join('')}</select></div>
     <div><label>Pricing plan</label><input id="e-pp" value="${esc(p.pricingPlan||'')}" inputmode="numeric"></div>
     <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="e-dsc" ${p.descontinuado?'checked':''}> Descontinuado</label>
+    <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="e-ina" ${p.inativo?'checked':''}> Inativa (não aparece na pesquisa das linhas)</label>
+    <div style="grid-column:1/-1;border-top:1px solid var(--line);padding-top:10px"><div class="row" style="margin-bottom:6px"><b>Composição (bundle)</b><span class="muted" style="font-size:12px">se tiver filhas, a RLMC total é repartida por elas no RPN</span><span class="sp"></span><span id="e-soma" class="muted"></span></div>
+      <div id="e-comp"></div><button class="btn sm" id="e-add" type="button">+ Filha</button>
+      <datalist id="e-refs">${S.prodList.filter(x=>!composicaoDe(x)).map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)}</option>`).join('')}</datalist></div>
     <div class="row" style="grid-column:1/-1"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Guardar</button></div></div>`, (m,close)=>{
     m.querySelector('#c').onclick=close;
+    let comp=(p.composicao||[]).map(c=>({ref:c.ref,pct:Math.round(c.pct*1000)/10}));
+    const lerComp=()=>{ m.querySelectorAll('#e-comp .row').forEach((r,i)=>{ comp[i].ref=r.querySelector('[data-cr]').value.trim().toUpperCase(); comp[i].pct=parseFloat(String(r.querySelector('[data-cp]').value).replace(',','.'))||0; }); };
+    const somaComp=()=>{ const t=Math.round(comp.reduce((a,c)=>a+c.pct,0)*10)/10; m.querySelector('#e-soma').textContent=comp.length?`soma: ${t.toLocaleString('pt-PT')}%`:''; m.querySelector('#e-soma').style.color=(!comp.length||Math.abs(t-100)<=0.5)?'':'var(--red-d)'; return t; };
+    const drawComp=()=>{ m.querySelector('#e-comp').innerHTML=comp.map((c,i)=>`<div class="row" data-ci="${i}" style="margin-bottom:6px"><input data-cr list="e-refs" value="${esc(c.ref)}" placeholder="referência da filha" style="flex:1;text-transform:uppercase"><input data-cp type="number" step="0.1" value="${c.pct}" style="width:90px;text-align:right"><span class="muted">%</span><button class="btn sm ghost" data-cx type="button" style="color:var(--red-d)">✕</button></div>`).join('');
+      m.querySelectorAll('#e-comp input').forEach(el=>el.oninput=()=>{ lerComp(); somaComp(); });
+      m.querySelectorAll('[data-cx]').forEach(b=>b.onclick=()=>{ lerComp(); comp.splice(+b.closest('.row').dataset.ci,1); drawComp(); }); somaComp(); };
+    m.querySelector('#e-add').onclick=()=>{ lerComp(); comp.push({ref:'',pct:0}); drawComp(); m.querySelector('#e-comp .row:last-child [data-cr]').focus(); };
+    drawComp();
     m.querySelector('#ok').onclick=async()=>{
+      lerComp(); comp=comp.filter(c=>c.ref||c.pct);
+      if (comp.length) { const eu=m.querySelector('#e-ref').value.trim().toUpperCase();
+        for (const c of comp) { const f=S.prodMap[c.ref]; if(!f) return toast(`A filha ${c.ref||'(vazia)'} não existe no catálogo.`,true); if(c.ref===eu) return toast('Um bundle não pode conter-se a si próprio.',true); if(composicaoDe(f)) return toast(`${c.ref} já é um bundle; não pode ser filha.`,true); }
+        if (new Set(comp.map(c=>c.ref)).size!==comp.length) return toast('Há filhas repetidas na composição.',true);
+        if (Math.abs(somaComp()-100)>0.5) return toast('A soma das percentagens tem de dar 100%.',true); }
       const ref=m.querySelector('#e-ref').value.trim().toUpperCase(), des=m.querySelector('#e-des').value.trim(), sub=m.querySelector('#e-sub').value;
       if(!ref) return toast('Falta a referência.',true); if(!des) return toast('Falta a designação.',true);
       if(nova && S.prodMap[ref]) return toast('Já existe uma referência '+ref+'.',true);
       const pp=m.querySelector('#e-pp').value.replace(/\D/g,'');
-      const d={ref, designacao:des, subfamilia:sub, tier:m.querySelector('#e-tier').value, pricingPlan:pp, descontinuado:m.querySelector('#e-dsc').checked, categoria:/^fixo/i.test(sub)?'Fixo':'Móvel', atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome};
+      const d={ref, designacao:des, subfamilia:sub, tier:m.querySelector('#e-tier').value, pricingPlan:pp, descontinuado:m.querySelector('#e-dsc').checked, inativo:m.querySelector('#e-ina').checked, composicao:comp.map(c=>({ref:S.prodMap[c.ref].ref,pct:Math.round(c.pct*10)/1000})), categoria:/^fixo/i.test(sub)?'Fixo':'Móvel', atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome};
       try{ await setDoc(doc(db,'produtos',prodId(ref)), d, {merge:true}); await loadProdutos(); close(); toast(nova?'Referência criada.':'Referência guardada.'); if(location.hash.startsWith('#/catalogo')) viewCatalogo(); }catch(e){ toast(errTxt(e),true); } };
   });
 }
@@ -1188,6 +1245,26 @@ function parseCatalogo(txt){
   });
   return out;
 }
+// Composições: colar export PHC (Composta | Filha | Pct | Designacao | Familia | Inativo | Sub_famili | Tipo_tarif | Princigpla | Descontinu)
+function parseComposicoes(txt){
+  const ls=txt.split(/\r?\n/).filter(l=>l.trim()); if(ls.length<2) return null;
+  const h=ls[0].split('\t').map(x=>semAcento(x).trim()), col=n=>h.findIndex(x=>x.startsWith(n));
+  const ix={c:col('composta'),f:col('filha'),p:col('pct'),d:col('designac'),i:col('inativo'),s:col('sub'),t:col('tipo'),pp:col('princ'),ds:col('descont')};
+  if(ix.pp<0) ix.pp=col('pricing'); if(ix.c<0||ix.f<0||ix.p<0) return null;
+  const g={};
+  ls.slice(1).forEach(l=>{ const c=l.split('\t').map(x=>x.trim()), comp=c[ix.c], ref=c[ix.f]; if(!comp||!ref) return;
+    const tier=c[ix.t]||'', sub=c[ix.s]||'', ppn=parseFloat(String(c[ix.pp]||'').replace(/\./g,'').replace(',','.'))||0;
+    (g[comp]=g[comp]||[]).push({ref, pct:parseFloat(String(c[ix.p]).replace(',','.'))||0,
+      prod:{ref, designacao:c[ix.d]||ref, subfamilia:sub==='-'?'':sub, tier:{gold:'Gold',silver:'Silver',bronze:'Bronze',estanho:'Estanho'}[tier.toLowerCase()]||tier, pricingPlan:ppn?String(Math.round(ppn)):'', descontinuado:/^s/i.test(c[ix.ds]||''), categoria:/^fixo/i.test(sub)?'Fixo':'Móvel', inativo:/^(1|s|true)/i.test(c[ix.i]||'')}}); });
+  const ok=[], fora=[], novas={};
+  Object.entries(g).forEach(([comp,fs])=>{ const soma=Math.round(fs.reduce((a,f)=>a+f.pct,0)*1000)/1000, pai=S.prodMap[comp.toUpperCase()];
+    if(!pai) return fora.push(`${comp}: a referência composta não existe no catálogo`);
+    if(Math.abs(soma-1)>0.005) return fora.push(`${comp}: as percentagens somam ${(soma*100).toLocaleString('pt-PT')}% (não é um bundle repartido)`);
+    if(fs.some(f=>f.ref.toUpperCase()===comp.toUpperCase())) return fora.push(`${comp}: contém-se a si própria`);
+    fs.forEach(f=>{ if(!S.prodMap[f.ref.toUpperCase()]) novas[f.ref.toUpperCase()]=f.prod; });
+    ok.push({ref:pai.ref, composicao:fs.map(f=>({ref:(S.prodMap[f.ref.toUpperCase()]||f.prod).ref, pct:f.pct}))}); });
+  return {ok, fora, novas:Object.values(novas)};
+}
 const prodId = ref => ref.toUpperCase().replace(/[\/\s]+/g,'_').replace(/^\.+$/,'_')||'_';
 function admCat(el){
   el.innerHTML = `<div class="card"><h2>Importar / atualizar catálogo</h2>
@@ -1195,6 +1272,11 @@ function admCat(el){
     <textarea id="ct" rows="8" placeholder="Colar aqui…"></textarea>
     <div class="row" style="margin-top:8px"><button class="btn" id="cp">Pré-visualizar</button><button class="btn pri" id="ci" disabled>Importar</button><span id="cs" class="muted"></span></div>
     <div id="cprev" class="scroll" style="max-height:260px;margin-top:8px"></div></div>
+    <div class="card"><h2>Importar composições (bundles)</h2>
+    <p class="muted" style="margin-top:0">Cole o export das composições do PHC, com a linha de títulos <b>Composta · Filha · Pct · Designacao · Familia · Inativo · Sub_famili · Tipo_tarif · Princigpla · Descontinu</b>. As filhas que faltarem no catálogo são criadas (as inativas no PHC ficam marcadas como inativas). No RPN, uma linha com a referência composta abre nas filhas.</p>
+    <textarea id="bt" rows="6" placeholder="Colar aqui…"></textarea>
+    <div class="row" style="margin-top:8px"><button class="btn" id="bp">Pré-visualizar</button><button class="btn pri" id="bi" disabled>Importar</button><span id="bs" class="muted"></span></div>
+    <div id="bprev" style="margin-top:8px;font-size:13px"></div></div>
     <div class="card"><div class="row" style="margin-bottom:8px"><h2 style="margin:0">Catálogo atual (${S.prodList.length})</h2><span class="sp"></span><input id="cf" placeholder="Filtrar…" style="max-width:260px"></div>
     <div class="scroll" style="max-height:480px" id="clist"></div></div>`;
   const tbl = rows => `<table><thead><tr><th>Sub-fam.</th><th>Referência</th><th>Designação</th><th>Tier</th><th>PricingPlan</th><th>Desc.</th><th>Categoria</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(p.subfamilia)}</td><td>${esc(p.ref)}</td><td>${esc(p.designacao)}</td><td>${esc(p.tier)}</td><td>${esc(p.pricingPlan)||'<span style="color:var(--red-d)">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td><td>${esc(p.categoria)}</td></tr>`).join('')}</tbody></table>`;
@@ -1204,6 +1286,19 @@ function admCat(el){
   $('#cp').onclick=()=>{ parsed=parseCatalogo($('#ct').value); const novos=parsed.filter(p=>!S.prodMap[p.ref.toUpperCase()]).length, semPP=parsed.filter(p=>!p.pricingPlan).length;
     $('#cs').textContent = `${parsed.length} referências lidas · ${novos} novas · ${parsed.length-novos} a atualizar${semPP?` · ${semPP} sem PricingPlan`:''}`;
     $('#cprev').innerHTML = tbl(parsed); $('#ci').disabled = !parsed.length; };
+  let cz=null;
+  $('#bp').onclick=()=>{ cz=parseComposicoes($('#bt').value);
+    if(!cz){ $('#bs').textContent='Não reconheci as colunas. A 1ª linha tem de ter os títulos (Composta, Filha, Pct…).'; $('#bi').disabled=true; $('#bprev').innerHTML=''; return; }
+    $('#bs').textContent=`${cz.ok.length} bundle(s) · ${cz.novas.length} filha(s) a criar no catálogo${cz.fora.length?` · ${cz.fora.length} de fora`:''}`;
+    $('#bprev').innerHTML=(cz.fora.length?`<div class="warnbox"><b>Ficam de fora:</b><br>${cz.fora.map(esc).join('<br>')}</div>`:'')
+      +`<div class="scroll" style="max-height:260px"><table><thead><tr><th>Composta</th><th>Filhas</th></tr></thead><tbody>${cz.ok.map(b=>`<tr><td><b>${esc(b.ref)}</b></td><td>${b.composicao.map(c=>esc(c.ref)+' '+(Math.round(c.pct*1000)/10).toLocaleString('pt-PT')+'%').join(' + ')}</td></tr>`).join('')}</tbody></table></div>`
+      +(cz.novas.length?`<p class="muted" style="margin-bottom:0">Filhas a criar: ${cz.novas.map(n=>esc(n.ref)+(n.inativo?' (inativa)':'')).join(', ')}</p>`:'');
+    $('#bi').disabled=!cz.ok.length; };
+  $('#bi').onclick=async()=>{ $('#bi').disabled=true;
+    try { const ops=[...cz.novas.map(n=>[n.ref,{...n,atualizadoEm:serverTimestamp()}]), ...cz.ok.map(b=>[b.ref,{composicao:b.composicao,atualizadoEm:serverTimestamp()}])];
+      for (let i=0;i<ops.length;i+=400){ const b=writeBatch(db); ops.slice(i,i+400).forEach(([ref,d])=>b.set(doc(db,'produtos',prodId(ref)),d,{merge:true})); await b.commit(); }
+      toast(`${cz.ok.length} bundle(s) importados · ${cz.novas.length} filha(s) criadas.`); await loadProdutos(); admCat(el);
+    } catch(e){ toast(errTxt(e),true); $('#bi').disabled=false; } };
   $('#ci').onclick=async()=>{ $('#ci').disabled=true;
     try { for (let i=0;i<parsed.length;i+=400){ const b=writeBatch(db); parsed.slice(i,i+400).forEach(p=>b.set(doc(db,'produtos',prodId(p.ref)),{...p,atualizadoEm:serverTimestamp()},{merge:true})); await b.commit(); }
       toast(`${parsed.length} referências importadas.`); await loadProdutos(); admCat(el);
