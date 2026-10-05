@@ -385,7 +385,7 @@ function drawFicha(){
   const acts = [];
   if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button>`);
   if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
-  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração' && r.origem!=='PHC' && unidades(r).length>1) acts.push(`<button class="btn" id="a-div" title="Vários processos para o mesmo negócio (ex.: prazos de fidelização diferentes)">Dividir em vários RPN</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-div" title="Vários processos para o mesmo negócio (ex.: prazos de fidelização diferentes)">Dividir em vários RPN</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
   if (r.id && r.origem!=='PHC' && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
   if (isBO() && r.id && ['Submetido','Em Implementação','A aguardar'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
