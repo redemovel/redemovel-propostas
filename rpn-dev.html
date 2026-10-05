@@ -70,6 +70,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .hist td{font-size:13px}
 .motivos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 12px}
 .motivos label{display:flex;gap:6px;align-items:center;color:var(--ink);font-size:13px;margin:0}
+.cli-box{position:relative}.cli-res{position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);max-height:340px;overflow:auto;display:none}
+.cli-res.on{display:block}.cli-res div{padding:8px 12px;cursor:pointer;border-bottom:1px solid #f1f1f1}.cli-res div:hover,.cli-res div.sel{background:#f6f6f6}.cli-res small{color:#777}
 .warnbox{background:#fff3df;border:1px solid #f0d9a8;border-radius:8px;padding:8px 12px;margin-bottom:12px}
 @media (max-width:900px){.g3,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.motivos{grid-template-columns:repeat(2,1fr)}main{padding:12px}}
 </style>
@@ -178,7 +180,7 @@ function clearSubs(){ S.unsub.forEach(u=>u()); S.unsub=[]; }
 
 // ---------- 4. ARRANQUE / AUTENTICAÇÃO ----------
 onAuthStateChanged(auth, async user => {
-  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; clearSubs();
+  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; S.cli = null; clearSubs();
   if (!user) return renderLogin();
   try {
     const snap = await getDoc(doc(db,'users',user.uid));
@@ -416,8 +418,9 @@ const sel = (lab, path, opts, dis) => `<div><label>${lab}</label><select data-f=
 function tabPrincipal(tc, dis, p){
   const r = S.cur, boDis = isBO()&&p.edit?'':'disabled';
   const vendOpts = Object.entries(S.users).filter(([,u])=>u.ativo&&['comercial','coordenador','master'].includes(u.perfil)).map(([uid,u])=>[uid,u.nome]);
+  const podeEscolher = p.edit && r.origem!=='PHC' && (!r.id || r.estado==='Em Elaboração' || isBO());
   tc.innerHTML = `
-    <div class="card"><div class="grid g4">
+    <div class="card">${podeEscolher?`<div class="cli-box" style="margin-bottom:14px"><label>Escolher cliente</label><input id="cli-q" type="search" autocomplete="off" name="procura-cliente" placeholder="Escreva as primeiras letras do nome ou o início do NIF…"><div class="cli-res" id="cli-res"></div></div>`:''}<div class="grid g4">
       ${fld('Cliente','cliente.nome',dis)}${fld('NIF','cliente.nif',dis)}${fld('Nº Cliente (PHC)','cliente.nCliente',dis)}${fld('Data','data',dis,'date')}
       ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}
       ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
@@ -452,6 +455,27 @@ function tabPrincipal(tc, dis, p){
     <datalist id="dl-prod">${S.prodList.map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)} · ${esc(x.tier)}</option>`).join('')}</datalist>`;
   drawLines(dis);
   tabOutros($('#t-out'), dis); tabCond($('#t-cond'), dis);
+  const cq = $('#cli-q');
+  if (cq) {
+    const box = $('#cli-res'); let res = [], sel = -1;
+    const fecha = () => { box.classList.remove('on'); sel=-1; };
+    const mostra = () => { res = procurarClientes(cq.value);
+      box.innerHTML = res.map((c,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(c.nome)}</b><br><small>NIF ${esc(c.nif)}${c.local?' · '+esc(c.local):''}${isStaff()&&c.vend?' · '+esc(c.vend):''}</small></div>`).join('')
+        || (cq.value.trim().length>=2 ? `<div style="cursor:default;color:#777">${S.cli&&S.cli.length?'Nenhum cliente encontrado. Pode preencher o nome e o NIF à mão, ou criá-lo na app Propostas › Clientes.':(isStaff()?'Ainda não há clientes carregados.':'A sua conta não tem carteira de clientes atribuída.')}</div>` : '');
+      box.classList.toggle('on', cq.value.trim().length>=2); };
+    const escolhe = async c => { if(!c) return; fecha(); cq.value='';
+      const rr=S.cur; rr.cliente.nome=c.nome; rr.cliente.nif=c.nif; await preencherCliente(rr, true);
+      if (S.cur===rr) { S.dirty=true; drawFicha(); toast('Cliente escolhido: '+c.nome); } };
+    cq.addEventListener('focus', ()=>{ carregarClientes().then(()=>{ if(cq.value.trim().length>=2) mostra(); }).catch(e=>toast(errTxt(e),true)); });
+    cq.addEventListener('input', ()=>{ sel=-1; if(S.cli) mostra(); else carregarClientes().then(mostra).catch(e=>toast(errTxt(e),true)); });
+    cq.addEventListener('keydown', e=>{ if(!box.classList.contains('on')) return;
+      if (e.key==='ArrowDown'||e.key==='ArrowUp') { e.preventDefault(); sel = Math.max(0, Math.min(res.length-1, sel+(e.key==='ArrowDown'?1:-1))); mostra(); }
+      else if (e.key==='Enter') { e.preventDefault(); escolhe(res[sel>=0?sel:0]); }
+      else if (e.key==='Escape') fecha(); });
+    box.addEventListener('mousedown', e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); escolhe(res[+d.dataset.i]); } });
+    cq.addEventListener('blur', ()=>setTimeout(fecha,150));
+    if (!r.id && !r.cliente?.nome) setTimeout(()=>cq.focus(), 50);
+  }
   tc.querySelector('[data-f="estado"]')?.addEventListener('change',e=>{ $('#cx-esp').style.display = e.target.value==='A aguardar' ? '' : 'none'; });
   tc.querySelector('[data-f="esperaMotivo"]')?.addEventListener('change',e=>{ const v=e.target.value; $('#cx-ciclo').style.display = v==='ciclo'?'':'none'; $('#cx-edata').style.display = v&&v!=='ciclo'?'':'none'; $('#lb-edata').textContent = v==='instalacao'?'Data da instalação':'Voltar a verificar em (opcional)'; S.cicloMudou=true;
     S.cur.esperaData=''; const di=tc.querySelector('[data-f="esperaData"]'); if(di) di.value=''; });   // ao mudar de motivo, a data anterior deixa de valer
@@ -804,12 +828,35 @@ async function eliminar(){
 }
 
 // preenche os campos vazios do cliente a partir da ficha (coleção clientesFicha, chave = NIF)
-async function preencherCliente(r){
+// índice de pesquisa de clientes (o mesmo da app Propostas): carregado uma vez por sessão, só quando é preciso
+const semAcento = v => String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+async function carregarClientes(){
+  if (S.cli) return S.cli;
+  const col = collection(db,'clientes'); let docs = [];
+  if (isStaff()) docs = (await getDocs(col)).docs;
+  else if (S.me.vendedorPHC) docs = (await getDocs(query(col, where('vendedor','==',String(S.me.vendedorPHC))))).docs;
+  S.cli = docs.flatMap(d => (d.data().lista||[]).map(c => ({nome:c.nome||'', nif:String(c.ncont||''), local:c.local||c.area||'', vend:c.vendnm||'', _n:semAcento(c.nome)})));
+  return S.cli;
+}
+function procurarClientes(q){
+  const t = semAcento(q).trim(); if (t.length<2 || !S.cli) return [];
+  const dig = /^\d+$/.test(t.replace(/\s/g,'')) ? t.replace(/\s/g,'') : '';
+  const pal = t.split(/\s+/);
+  const ini=[], meio=[];
+  for (const c of S.cli) {
+    if (dig) { if (c.nif.startsWith(dig)) ini.push(c); else if (c.nif.includes(dig)) meio.push(c); }
+    else if (c._n.startsWith(t)) ini.push(c);
+    else if (pal.every(p=>c._n.includes(p))) meio.push(c);
+    if (ini.length>=12) break;
+  }
+  return [...ini, ...meio].slice(0,12);
+}
+async function preencherCliente(r, substituir){
   const nif = String(r?.cliente?.nif||'').replace(/\s/g,''); if(nif.length<5) return false;
   try {
     const s = await getDoc(doc(db,'clientesFicha',nif)); if(!s.exists()) return false;
     const c = s.data(), k = r.cliente; let n = 0;
-    const put = (o,f,v) => { if(v && !o[f]) { o[f]=String(v); n++; } };
+    const put = (o,f,v) => { if (substituir ? (String(o[f]||'')!==String(v||'')) : (v && !o[f])) { o[f]=String(v||''); n++; } };
     put(k,'nome',c.nome); put(k,'nCliente',c.no); put(k,'email',c.email); put(k,'interlocutor',c.contacto); put(k,'telefone',c.tlmvl||c.telefone);
     put(k,'morada1',c.morada); put(k,'localidade',c.local); put(k,'codPostal',c.codpost);
     r.contas = r.contas||{}; put(r.contas,'gsm',c.contaA);
