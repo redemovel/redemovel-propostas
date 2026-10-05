@@ -228,6 +228,7 @@ function render(){
   $('#app').innerHTML = `<header>
       <span class="brand">Redemóvel · RPN</span>
       <nav>${nav.map(([u,t])=>`<a href="${u}" class="${h.startsWith(u)?'on':''}">${t}</a>`).join('')}</nav>
+      <a id="lk-man" href="${MANUAL_URL}?para=${isBO()?'b':isStaff()?'':'v'}" target="_blank" rel="noopener" class="btn sm" style="text-decoration:none" title="Abre o manual noutro separador">Manual</a>
       <div class="who"><b>${esc(S.me.nome)}</b><br>${PERFIL_TXT[perfil()]||perfil()}</div>
       <button class="btn sm" id="pw">Password</button><button class="btn sm" id="out">Sair</button>
     </header><main id="main"></main>`;
@@ -1104,6 +1105,7 @@ function handlePropostaParam(){
 // ---------- 9c. PROJETOS: renegociação 6 meses antes do fim da fidelização ----------
 // Um Projeto por cliente e por mês (projetos/{NIF}_{AAAA-MM}), para o vendedor que está na ficha do cliente nesse momento.
 const PROPOSTAS_URL = 'propostas-dev.html';   // produção: propostas.html
+const MANUAL_URL = 'manual-dev.html';   // produção: manual.html
 const PROJ_ESTADOS = ['Por tratar','Em negociação','Ganho','Perdido','Adiado'];
 const PROJ_PEND = ['Por tratar','Adiado'];   // ainda à espera de decisão (um adiado volta a contar quando a nova data chega)
 const PROJ_ADIA_MAX = 180;   // dias, a contar da data de alerta original
