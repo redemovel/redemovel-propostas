@@ -49,7 +49,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .b-Em-Conferência{background:#e0f4f7;color:#0b6b7a}
 .b-A-aguardar,.b-A-aguardar-ciclo{background:#eef0f4;color:#4a5568}.venc{background:#fde8e8!important;color:var(--red-d)!important}
 .b-Cancelado,.b-Reprovado{background:#fde8e8;color:var(--red-d)}
-.pj-0{background:#fff4d6;color:#8a5a00}.pj-1{background:#e0ecff;color:#1d4ed8}.pj-2{background:#dcfce7;color:#166534}.pj-3{background:#fde8e8;color:var(--red-d)}
+.pj-0{background:#fff4d6;color:#8a5a00}.pj-1{background:#e0ecff;color:#1d4ed8}.pj-2{background:#dcfce7;color:#166534}.pj-3{background:#fde8e8;color:var(--red-d)}.pj-4{background:#ede9fe;color:#5b21b6}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;min-width:110px}
 .chip b{display:block;font-size:20px}.chip.on{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
@@ -188,7 +188,7 @@ onAuthStateChanged(auth, async user => {
     const snap = await getDoc(doc(db,'users',user.uid));
     if (!snap.exists() || !snap.data().ativo) { $('#app').innerHTML = `<div class="login card"><h2>Conta sem acesso</h2><p class="muted">A conta ${esc(user.email)} não tem perfil ativo. Contacte o administrador.</p><button class="btn" id="out">Sair</button></div>`; $('#out').onclick=()=>signOut(auth); return; }
     S.me = {uid:user.uid, ...snap.data()};
-    S.projN = 0; Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[]});
+    S.projN = 0; S.projAtr = 0; Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[], cfg:{}});
     await Promise.all([loadUsers(), loadProdutos()]);
     handlePropostaParam();
     render();
@@ -221,7 +221,7 @@ function render(){
   clearSubs();
   const h = location.hash || '#/lista';
   const nav = [['#/lista','RPNs'],['#/novo','Novo RPN']];
-  nav.push(['#/projetos','Projetos'+(S.projN?` <b id="pj-n" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px">${S.projN}</b>`:'')]);
+  nav.push(['#/projetos','Projetos'+navProj()]);
   if (isStaff()) nav.push(['#/catalogo','Catálogo']);
   if (isBO()) nav.push(['#/producao','Produção BO']);
   if (isMaster()) nav.push(['#/admin','Administração']);
@@ -1104,7 +1104,9 @@ function handlePropostaParam(){
 // ---------- 9c. PROJETOS: renegociação 6 meses antes do fim da fidelização ----------
 // Um Projeto por cliente e por mês (projetos/{NIF}_{AAAA-MM}), para o vendedor que está na ficha do cliente nesse momento.
 const PROPOSTAS_URL = 'propostas-dev.html';   // produção: propostas.html
-const PROJ_ESTADOS = ['Por tratar','Em negociação','Ganho','Perdido'];
+const PROJ_ESTADOS = ['Por tratar','Em negociação','Ganho','Perdido','Adiado'];
+const PROJ_PEND = ['Por tratar','Adiado'];   // ainda à espera de decisão (um adiado volta a contar quando a nova data chega)
+const PROJ_ADIA_MAX = 180;   // dias, a contar da data de alerta original
 const PROJ_PRAZOS = [12,18,24,30,36,48];
 const PROJ_ANTECEDENCIA = 6;   // meses antes do fim do contrato
 const somaMeses = (ym,n) => { let [y,m]=ym.split('-').map(Number); m+=n; y+=Math.floor((m-1)/12); m=((m-1)%12+12)%12+1; return y+'-'+String(m).padStart(2,'0'); };
@@ -1149,6 +1151,20 @@ async function gerarProjetos(M){
   return res;
 }
 // à entrada: Master/Coordenador/BO geram o mês corrente (se faltar) e, a partir do dia 28, o mês seguinte; o comercial fica a saber quantos tem para tratar
+// pendentes de um vendedor (ou de todos, para a chefia): «Por tratar» e «Adiado» — duas consultas simples, sem índice composto
+async function projPendentes(){
+  const col=collection(db,'projetos'), meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)];
+  const sn=await Promise.all(PROJ_PEND.map(e=>getDocs(query(col, ...meu, where('estado','==',e)))));
+  return sn.flatMap(x=>x.docs.map(d=>({id:d.id, ...d.data()})));
+}
+const projAtrasado = p => PROJ_PEND.includes(p.estado) && (p.alertaEm||'').slice(0,7) < mesLocal();           // alerta de um mês anterior, ainda sem decisão
+const projParaHoje = p => PROJ_PEND.includes(p.estado) && (p.alertaEm||'') <= hojeLocal();
+const diasAtraso = d => d ? Math.max(0, Math.round((new Date(hojeLocal()+'T12:00:00') - new Date(d+'T12:00:00'))/864e5)) : 0;
+const mesTxt = ym => { const [y,m]=ym.split('-'); return ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'][+m-1]+' de '+y; };
+const navProj = () => (S.projAtr?` <b id="pj-a" title="Em atraso: de meses anteriores, ainda sem decisão" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px">${S.projAtr} em atraso</b>`:'')
+  + (S.projN?` <b id="pj-n" title="Para tratar este mês" style="background:#e5e7eb;color:#111;border-radius:10px;padding:1px 7px;font-size:11px">${S.projN}</b>`:'');
+function contarProj(L){ const h=L.filter(projParaHoje), a=h.filter(projAtrasado).length, n=h.length-a; const mudou=a!==(S.projAtr||0)||n!==(S.projN||0); S.projAtr=a; S.projN=n; return mudou; }
+// à entrada: Master/Coordenador/BO geram o mês corrente (se faltar) e, a partir do dia 28, o mês seguinte; o comercial fica a saber o que tem para tratar e o que está em atraso
 async function projetosAoEntrar(){
   try {
     if (isStaff()) {
@@ -1156,58 +1172,79 @@ async function projetosAoEntrar(){
       const g=(await getDoc(doc(db,'config','projetos'))).data()?.gerados||{};
       for (const M of alvo) if (!g[M]) { const x=await gerarProjetos(M); if (x.criados) toast(`Projetos de ${M.split('-').reverse().join('/')}: ${x.criados} criados para a equipa.`); }
     } else {
-      const sn=await getDocs(query(collection(db,'projetos'), where('vendedorUid','==',S.me.uid), where('estado','==','Por tratar')));
-      const h=hojeLocal(), n=sn.docs.filter(d=>(d.data().alertaEm||'')<=h).length;
-      if (n!==(S.projN||0)) { S.projN=n; if (!S.dirty && !location.hash.startsWith('#/rpn/') && !location.hash.startsWith('#/novo')) render(); }
+      const L=await projPendentes(), mudou=contarProj(L), livre=!S.dirty && !location.hash.startsWith('#/rpn/') && !location.hash.startsWith('#/novo');
+      if (mudou && livre) render();
+      const atr=L.filter(p=>projParaHoje(p)&&projAtrasado(p)).sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||''));
+      if (atr.length && livre) modal(`<h2 style="color:var(--red-d)">Tem ${atr.length} Projeto(s) em atraso</h2>
+        <p class="muted" style="margin-top:0">São de meses anteriores e ainda não têm decisão. Cada um tem de ficar com proposta criada, adiado (com nova data) ou perdido (com motivo).</p>
+        <div class="scroll" style="max-height:300px"><table id="pj-av-t"><thead><tr><th>Alerta</th><th>Cliente</th><th class="num">Linhas</th><th class="num">Há</th></tr></thead><tbody>${atr.map(p=>`<tr><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b></td><td class="num">${p.nLinhas||0}</td><td class="num">${diasAtraso(p.alertaEm)} dias</td></tr>`).join('')}</tbody></table></div>
+        <div class="row" style="margin-top:14px"><span class="sp"></span><button class="btn" id="c">Fechar</button><button class="btn pri" id="ok">Ver os Projetos</button></div>`, (m,close)=>{
+          m.querySelector('#c').onclick=close; m.querySelector('#ok').onclick=()=>{ close(); PJ.tab='tratar'; location.hash='#/projetos'; }; });
     }
   } catch(e){ console.warn('Projetos:', e); }
 }
 // quem pode ter Projetos: comerciais e qualquer conta com carteira (nº de vendedor PHC), mais quem já tem algum atribuído
 const vendedoresProj = (extra=[]) => Object.entries(S.users).filter(([uid,u])=>(u.ativo!==false && (u.perfil==='comercial' || u.vendedorPHC)) || extra.includes(uid)).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
-const PJ = {tab:'tratar', mes:null, vend:'', lista:[]};
+const PJ = {tab:'tratar', mes:null, vend:'', lista:[], cfg:{}};
 async function viewProjetos(){
   const m=$('#main'); PJ.mes=PJ.mes||mesLocal();
   m.innerHTML=`<div class="card muted">A carregar…</div>`;
   try {
-    const col=collection(db,'projetos'), meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)];
-    const sn=await getDocs(query(col, ...meu, PJ.tab==='tratar'?where('estado','==','Por tratar'):where('mes','==',PJ.mes)));
-    PJ.lista=sn.docs.map(d=>({id:d.id, ...d.data()}));
+    if (PJ.tab==='tratar') PJ.lista=await projPendentes();
+    else { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)]; PJ.lista=(await getDocs(query(collection(db,'projetos'), ...meu, where('mes','==',PJ.mes)))).docs.map(d=>({id:d.id, ...d.data()})); }
+    if (isMaster()) PJ.cfg=(await getDoc(doc(db,'config','projetos'))).data()||{};
   } catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
   desenharProjetos();
 }
 function desenharProjetos(){
-  const m=$('#main'), h=hojeLocal(), stf=isStaff();
-  let L=PJ.lista.filter(p=>PJ.tab!=='tratar' || (p.alertaEm||'')<=h);
+  const m=$('#main'), h=hojeLocal(), stf=isStaff(), tratar=PJ.tab==='tratar';
+  let L=PJ.lista.filter(p=>!tratar || projParaHoje(p));
+  if (!stf && tratar && contarProj(PJ.lista)) { const a=document.querySelector('header nav a[href="#/projetos"]'); if(a) a.innerHTML='Projetos'+navProj(); }
   if (stf && PJ.vend) L=L.filter(p=>PJ.vend==='__sem' ? !p.vendedorUid : p.vendedorUid===PJ.vend);
   L.sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||'')||(a.clienteNome||'').localeCompare(b.clienteNome||''));
-  if (!stf && PJ.tab==='tratar' && L.length!==(S.projN||0)) { S.projN=L.length; const b=$('#pj-n'); if(b) b.textContent=L.length||''; }
-  const tot=k=>L.reduce((a,p)=>a+(+p[k]||0),0), cnt=e=>L.filter(p=>p.estado===e).length;
+  const tot=k=>L.reduce((a,p)=>a+(+p[k]||0),0), cnt=e=>L.filter(p=>p.estado===e).length, nAtr=L.filter(projAtrasado).length;
   const vends=vendedoresProj(PJ.lista.map(p=>p.vendedorUid));
-  const porV={}; if (stf && PJ.tab==='mapa') PJ.lista.forEach(p=>{ const k=p.vendedorUid||'__sem', o=porV[k]=porV[k]||{nome:p.vendedorNome||'Por atribuir',n:0,rl:0,sc:0,tr:0,ga:0}; o.n++; o.rl+=+p.totRLMC||0; o.sc+=+p.totScore||0; if(p.estado!=='Por tratar') o.tr++; if(p.estado==='Ganho') o.ga++; });
+  const porV={};
+  if (stf) PJ.lista.forEach(p=>{ if (tratar && !projParaHoje(p)) return; const k=p.vendedorUid||'__sem', o=porV[k]=porV[k]||{nome:p.vendedorNome||'Por atribuir',n:0,rl:0,sc:0,tr:0,ga:0,at:0,dias:0,mes:0};
+    o.n++; o.rl+=+p.totRLMC||0; o.sc+=+p.totScore||0; if(p.estado!=='Por tratar') o.tr++; if(p.estado==='Ganho') o.ga++;
+    if (projAtrasado(p)) { o.at++; o.dias=Math.max(o.dias, diasAtraso(p.alertaEm)); } else o.mes++; });
+  const linha = p => `<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}${(p.alertaEm||'')>h?' <span class="muted" style="font-size:11px">· ainda não</span>':''}${tratar&&projAtrasado(p)?` <span style="font-size:11px;color:var(--red-d);font-weight:600">· há ${diasAtraso(p.alertaEm)} dias</span>`:''}</td><td><b>${esc(p.clienteNome)}</b></td><td>${esc(p.nif)}</td>${stf?`<td>${p.vendedorUid?esc(p.vendedorNome):'<span style="color:var(--red-d)">por atribuir</span>'}</td>`:''}<td class="num">${p.nLinhas||0}${(p.linhas||[]).some(l=>l.confirmar)?' <span title="Há linhas sem MSISDN: confirmar se ainda estão ativas" style="color:#b45309">⚠</span>':''}</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${(p.adiamentos||[]).length?` <span class="muted" style="font-size:11px">adiado ${p.adiamentos.length}×</span>`:''}${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}</td></tr>`;
+  const cols = stf?9:8, sep = (t,cor) => `<tr class="pj-sep"><td colspan="${cols}" style="background:${cor};font-weight:700;font-size:12px">${t}</td></tr>`;
+  let corpo='';
+  if (tratar) {   // em atraso (por mês, do mais antigo para o mais recente) e depois o mês corrente
+    const meses=[...new Set(L.filter(projAtrasado).map(p=>p.alertaEm.slice(0,7)))].sort();
+    meses.forEach(M=>{ const g=L.filter(p=>projAtrasado(p)&&p.alertaEm.slice(0,7)===M); corpo+=sep(`EM ATRASO · ${mesTxt(M)} · ${g.length} Projeto(s) por fechar`,'#fde8e8')+g.map(linha).join(''); });
+    const g=L.filter(p=>!projAtrasado(p)); if (g.length) corpo+=sep(`ESTE MÊS · ${mesTxt(mesLocal())} · ${g.length} Projeto(s)`,'#f3f4f6')+g.map(linha).join('');
+  } else corpo=L.map(linha).join('');
   m.innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
-      <div class="tabs" style="margin:0;border:0"><a data-pt="tratar" class="${PJ.tab==='tratar'?'on':''}">Para tratar</a><a data-pt="mapa" class="${PJ.tab==='mapa'?'on':''}">Mapa do mês</a></div>
-      ${PJ.tab==='mapa'?`<input type="month" id="pj-m" value="${PJ.mes}" style="max-width:170px">`:''}
+      <div class="tabs" style="margin:0;border:0"><a data-pt="tratar" class="${tratar?'on':''}">Para tratar</a><a data-pt="mapa" class="${!tratar?'on':''}">Mapa do mês</a></div>
+      ${!tratar?`<input type="month" id="pj-m" value="${PJ.mes}" style="max-width:170px">`:''}
       ${stf?`<select id="pj-v" style="max-width:220px"><option value="">Todos os vendedores</option><option value="__sem" ${PJ.vend==='__sem'?'selected':''}>Por atribuir</option>${vends.map(v=>`<option value="${v.uid}" ${PJ.vend===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select>`:''}
       <span class="sp"></span>
-      ${stf&&PJ.tab==='mapa'?`<button class="btn" id="pj-g" title="Procura os PN que chegam aos 6 meses do fim do contrato neste mês. Não duplica os que já existem.">Gerar Projetos de ${PJ.mes.split('-').reverse().join('/')}</button>`:''}
+      ${stf&&!tratar?`<button class="btn" id="pj-g" title="Procura os PN que chegam aos 6 meses do fim do contrato neste mês. Não duplica os que já existem.">Gerar Projetos de ${PJ.mes.split('-').reverse().join('/')}</button>`:''}
     </div>
-    <p class="muted" style="margin:0 0 12px;font-size:12px">${PJ.tab==='tratar'?'Projetos cuja data de alerta já chegou e que ainda não têm proposta. Cada Projeto nasce 6 meses antes do fim da fidelização, no dia do PN de origem.':'Todos os Projetos do mês, incluindo os que ainda não chegaram à data de alerta. O Score potencial assume renovação com a mesma RLMC e o mesmo prazo.'}</p>
+    <p class="muted" style="margin:0 0 12px;font-size:12px">${tratar?'Projetos cuja data de alerta já chegou e que ainda não têm decisão: proposta criada, adiado (com nova data) ou perdido (com motivo). Os de meses anteriores estão em atraso e têm de ser fechados.':'Todos os Projetos do mês, incluindo os que ainda não chegaram à data de alerta. O Score potencial assume renovação com a mesma RLMC e o mesmo prazo.'}</p>
     <div class="chips" id="pj-k" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <div class="chip" style="cursor:default"><span class="muted">Projetos</span><b>${L.length}</b></div>
+      ${tratar?`<div class="chip" id="pj-ka" style="cursor:default;${nAtr?'border-color:var(--red);background:#fde8e8':''}"><span class="muted">Em atraso</span><b style="${nAtr?'color:var(--red-d)':''}">${nAtr}</b></div><div class="chip" style="cursor:default"><span class="muted">Este mês</span><b>${L.length-nAtr}</b></div>`:`<div class="chip" style="cursor:default"><span class="muted">Projetos</span><b>${L.length}</b></div>`}
       <div class="chip" style="cursor:default"><span class="muted">Linhas</span><b>${tot('nLinhas')}</b></div>
       <div class="chip" style="cursor:default"><span class="muted">RLMC potencial</span><b>${eur(tot('totRLMC'))} €</b></div>
       <div class="chip" style="cursor:default"><span class="muted">Score potencial</span><b>${n3(tot('totScore'))}</b></div>
-      ${PJ.tab==='mapa'?PROJ_ESTADOS.map(e=>`<div class="chip" style="cursor:default"><span class="muted">${e}</span><b>${cnt(e)}</b></div>`).join(''):''}
+      ${!tratar?PROJ_ESTADOS.map(e=>`<div class="chip" style="cursor:default"><span class="muted">${e}</span><b>${cnt(e)}</b></div>`).join(''):''}
     </div>
-    ${Object.keys(porV).length?`<div class="scroll" style="margin-bottom:14px"><table id="pj-vt"><thead><tr><th>Vendedor</th><th class="num">Projetos</th><th class="num">RLMC potencial</th><th class="num">Score potencial</th><th class="num">Já tratados</th><th class="num">Ganhos</th></tr></thead><tbody>${Object.values(porV).sort((a,b)=>b.sc-a.sc).map(o=>`<tr><td>${esc(o.nome)}</td><td class="num">${o.n}</td><td class="num">${eur(o.rl)}</td><td class="num">${n3(o.sc)}</td><td class="num">${o.tr} (${Math.round(o.tr/o.n*100)}%)</td><td class="num">${o.ga}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${Object.keys(porV).length?(tratar
+      ?`<div class="scroll" style="margin-bottom:14px"><table id="pj-vt"><thead><tr><th>Vendedor</th><th class="num">Em atraso</th><th class="num">Mais antigo</th><th class="num">Este mês</th></tr></thead><tbody>${Object.values(porV).sort((a,b)=>b.at-a.at||b.dias-a.dias||a.nome.localeCompare(b.nome)).map(o=>`<tr><td>${esc(o.nome)}</td><td class="num" style="${o.at?'color:var(--red-d);font-weight:700':''}">${o.at}</td><td class="num">${o.at?`há ${o.dias} dias`:'—'}</td><td class="num">${o.mes}</td></tr>`).join('')}</tbody></table></div>`
+      :`<div class="scroll" style="margin-bottom:14px"><table id="pj-vt"><thead><tr><th>Vendedor</th><th class="num">Projetos</th><th class="num">RLMC potencial</th><th class="num">Score potencial</th><th class="num">Já tratados</th><th class="num">Ganhos</th></tr></thead><tbody>${Object.values(porV).sort((a,b)=>b.sc-a.sc).map(o=>`<tr><td>${esc(o.nome)}</td><td class="num">${o.n}</td><td class="num">${eur(o.rl)}</td><td class="num">${n3(o.sc)}</td><td class="num">${o.tr} (${Math.round(o.tr/o.n*100)}%)</td><td class="num">${o.ga}</td></tr>`).join('')}</tbody></table></div>`):''}
     <div class="scroll"><table id="pj-t"><thead><tr><th>Alerta</th><th>Cliente</th><th>NIF</th>${stf?'<th>Vendedor</th>':''}<th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>Estado</th></tr></thead>
-      <tbody>${L.map(p=>`<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}${(p.alertaEm||'')>h?' <span class="muted" style="font-size:11px">· ainda não</span>':''}</td><td><b>${esc(p.clienteNome)}</b></td><td>${esc(p.nif)}</td>${stf?`<td>${p.vendedorUid?esc(p.vendedorNome):'<span style="color:var(--red-d)">por atribuir</span>'}</td>`:''}<td class="num">${p.nLinhas||0}${(p.linhas||[]).some(l=>l.confirmar)?' <span title="Há linhas sem MSISDN: confirmar se ainda estão ativas" style="color:#b45309">⚠</span>':''}</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}</td></tr>`).join('')||`<tr><td colspan="9" class="muted">${PJ.tab==='tratar'?'Nada para tratar neste momento.':'Sem Projetos neste mês.'}</td></tr>`}</tbody></table></div></div>`;
+      <tbody>${corpo||`<tr><td colspan="${cols}" class="muted">${tratar?'Nada para tratar neste momento.':'Sem Projetos neste mês.'}</td></tr>`}</tbody></table></div>
+    ${isMaster()?`<div id="pj-blq" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="pj-bq" ${PJ.cfg.bloqueio?'checked':''}> Bloquear propostas novas ao vendedor que tenha Projetos em atraso, a partir do dia <input type="number" id="pj-bd" min="1" max="28" value="${PJ.cfg.bloqueioDia||10}" style="width:64px"> de cada mês <button class="btn sm" id="pj-bs">Guardar</button></label><div class="muted" style="font-size:12px;margin-top:4px">Desligado por omissão. Quando ligado, as propostas criadas a partir de um Projeto continuam a ser permitidas.</div></div>`:''}</div>`;
   m.querySelectorAll('[data-pt]').forEach(a=>a.onclick=()=>{ PJ.tab=a.dataset.pt; viewProjetos(); });
   const pm=$('#pj-m'); if(pm) pm.onchange=()=>{ if(pm.value){ PJ.mes=pm.value; viewProjetos(); } };
   const pv=$('#pj-v'); if(pv) pv.onchange=()=>{ PJ.vend=pv.value; desenharProjetos(); };
   const pg=$('#pj-g'); if(pg) pg.onclick=async()=>{ if(!confirm(`Gerar os Projetos de ${PJ.mes.split('-').reverse().join('/')}?\n\nProcura os PN que chegam aos 6 meses do fim do contrato nesse mês. Os Projetos que já existem não são alterados.`)) return; pg.disabled=true; pg.textContent='A gerar…';
     try{ const x=await gerarProjetos(PJ.mes); toast(`${x.criados} Projeto(s) criados (${x.linhas} linhas) · ${x.jaHavia} já existiam · ${x.tiradas} linha(s) já renegociadas ou em curso · ${x.semVendedor} por atribuir.`); viewProjetos(); }catch(e){ toast(errTxt(e),true); pg.disabled=false; } };
+  const bs=$('#pj-bs'); if(bs) bs.onclick=async e=>{ e.preventDefault(); const on=$('#pj-bq').checked, dia=Math.min(28,Math.max(1,parseInt($('#pj-bd').value)||10));
+    try{ await setDoc(doc(db,'config','projetos'),{bloqueio:on, bloqueioDia:dia},{merge:true}); PJ.cfg.bloqueio=on; PJ.cfg.bloqueioDia=dia; toast(on?`Bloqueio ligado: a partir do dia ${dia}.`:'Bloqueio desligado.'); }catch(err){ toast(errTxt(err),true); } };
   m.querySelectorAll('[data-pj]').forEach(tr=>tr.onclick=()=>abrirProjeto(PJ.lista.find(p=>p.id===tr.dataset.pj)));
 }
 function projParaProposta(p){
@@ -1220,10 +1257,12 @@ function projParaProposta(p){
   return btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 function abrirProjeto(p){
-  if(!p) return; const stf=isStaff(), aberto=['Por tratar','Em negociação'].includes(p.estado), meu=p.vendedorUid===S.me.uid;
+  if(!p) return; const stf=isStaff(), aberto=['Por tratar','Em negociação','Adiado'].includes(p.estado), meu=p.vendedorUid===S.me.uid;
+  const orig=p.alertaOriginal||p.alertaEm, dMax=(()=>{ const d=new Date(orig+'T12:00:00'); d.setDate(d.getDate()+PROJ_ADIA_MAX); return d.toISOString().slice(0,10); })(), dMin=(()=>{ const d=new Date(hojeLocal()+'T12:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
   const vends=vendedoresProj([p.vendedorUid]);
   modal(`<h2>${esc(p.clienteNome)} <span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span></h2>
     <p class="muted" style="margin-top:0">NIF ${esc(p.nif)} · vendedor: <b>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</b> · alerta ${fmtD(p.alertaEm)} · primeiro fim de contrato ${fmtD(p.fimEm)}${p.propostaId?` · proposta <b>${esc(p.propostaId)}</b>`:''}${p.motivoPerda?`<br>Motivo: ${esc(p.motivoPerda)}`:''}</p>
+    ${(p.adiamentos||[]).length?`<div class="warnbox" id="pj-ad-h" style="background:#f5f3ff;border-color:#ddd6fe"><b>Adiado ${p.adiamentos.length}×</b> (alerta original ${fmtD(orig)})${p.adiamentos.map(a=>`<br>${fmtD(String(a.em).slice(0,10))} · ${esc(a.porNome)}: ${fmtD(a.de)} → <b>${fmtD(a.para)}</b> — ${esc(a.motivo)}`).join('')}</div>`:''}
     <div class="scroll" style="max-height:320px"><table id="pj-l"><thead><tr><th>Referência</th><th>Designação</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>PN de origem</th></tr></thead>
       <tbody>${(p.linhas||[]).map(l=>`<tr><td><b>${esc(l.ref)}</b></td><td>${esc(l.designacao)}</td><td>${l.confirmar?'<span style="color:#b45309">sem MSISDN · confirmar</span>':esc(l.msisdn)}</td><td class="num">${l.prazo}</td><td class="num">${eur(l.rlmc)}</td><td class="num">${n3(l.score)}</td><td>${fmtD(l.fim)}</td><td>${stf||meu?`<a href="#/rpn/${esc(l.pnId)}" data-pn>PN ${esc(l.pnNumero)}</a>`:`PN ${esc(l.pnNumero)}`} <span class="muted" style="font-size:11px">${fmtD(l.pnData)}</span></td></tr>`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">${p.nLinhas} linha(s)</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td colspan="2"></td></tr></tfoot></table></div>
@@ -1231,6 +1270,7 @@ function abrirProjeto(p){
     <div class="row" style="margin-top:14px"><span class="sp"></span><button class="btn" id="c">Fechar</button>
       ${p.estado==='Perdido'&&!p.propostaId?`<button class="btn" id="pj-re">Reabrir</button>`:''}
       ${aberto&&!p.propostaId?`<button class="btn" id="pj-pd" style="color:var(--red-d)">Perdido sem proposta</button>`:''}
+      ${aberto&&!p.propostaId&&dMin<=dMax?`<button class="btn" id="pj-ad">Adiar</button>`:''}
       ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}</div>`, (m,close)=>{
     m.style.width='min(980px,94vw)';
     const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); viewProjetos(); }catch(e){ toast(errTxt(e),true); } };
@@ -1239,6 +1279,15 @@ function abrirProjeto(p){
     m.querySelector('#pj-cp')?.addEventListener('click',()=>{ window.open(PROPOSTAS_URL+'?proj='+projParaProposta(p),'_blank'); close(); toast('Proposta aberta noutro separador. O Projeto passa a “Em negociação” quando a gravar.'); });
     m.querySelector('#pj-pd')?.addEventListener('click',()=>{ close(); pedirRazao('Perdido sem proposta','', 'Marcar como perdido', rz=>grava({estado:'Perdido', motivoPerda:rz, perdidoEm:new Date().toISOString()},'Projeto marcado como perdido.')); });
     m.querySelector('#pj-re')?.addEventListener('click',()=>grava({estado:'Por tratar', motivoPerda:''},'Projeto reaberto.'));
+    m.querySelector('#pj-ad')?.addEventListener('click',()=>{ close();
+      modal(`<h2>Adiar o Projeto</h2><p class="muted" style="margin-top:0">${esc(p.clienteNome)} — o cliente não quer renegociar já. O Projeto sai da lista e volta na nova data. Pode adiar até ${fmtD(dMax)} (${PROJ_ADIA_MAX} dias depois do alerta original, ${fmtD(orig)}).</p>
+        <div class="grid"><div><label>Nova data de alerta</label><input type="date" id="ad-d" min="${dMin}" max="${dMax}" value="${dMin}"></div><div><label>Motivo (obrigatório)</label><textarea id="ad-m" rows="3"></textarea></div>
+        <div class="row"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Adiar</button></div></div>`, (m2,close2)=>{
+        m2.querySelector('#c').onclick=close2;
+        m2.querySelector('#ok').onclick=async()=>{ const d=m2.querySelector('#ad-d').value, mo=m2.querySelector('#ad-m').value.trim();
+          if(!d || d<dMin) return toast('A nova data tem de ser depois de hoje.',true); if(d>dMax) return toast(`Não pode adiar para depois de ${fmtD(dMax)}.`,true); if(mo.length<3) return toast('Indique o motivo.',true);
+          try{ await updateDoc(doc(db,'projetos',p.id),{estado:'Adiado', alertaEm:d, alertaOriginal:orig, adiamentos:[...(p.adiamentos||[]),{em:new Date().toISOString(), porUid:S.me.uid, porNome:S.me.nome, de:p.alertaEm, para:d, motivo:mo}], atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
+            close2(); toast(`Projeto adiado para ${fmtD(d)}.`); viewProjetos(); }catch(e){ toast(errTxt(e),true); } }; }); });
     m.querySelector('#pj-as')?.addEventListener('click',()=>{ const uid=m.querySelector('#pj-av').value; grava({vendedorUid:uid||null, vendedorNome:uid?S.users[uid].nome:'', vendedorPHC:uid?String(S.users[uid].vendedorPHC||''):''}, uid?`Atribuído a ${S.users[uid].nome}.`:'Ficou por atribuir.'); });
   });
 }
