@@ -1237,6 +1237,8 @@ async function confirmSave(){
   const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,nif};
   entry.comercialUid=(CM.find(c=>c.nome===cNm)||CU).uid;entry.ord=Date.now();
   entry.projetoId=window._projetoId||((LD.find(x=>x.id===window._editingOriginalId)||{}).projetoId)||'';
+  if(CU.funcao==='comercial'&&!entry.projetoId){let nAtr=0;try{nAtr=await FB.projetosEmAtraso();}catch(e){console.warn(e);}
+    if(nAtr){window._currentPropRef=id;toast('⛔','Tem '+nAtr+' Projeto(s) em atraso. Trate-os primeiro (RPN › Projetos): proposta, adiar ou perdido. Só depois pode criar propostas novas.');return;}}
   try{await FB.saveProposta(entry);window._projetoId=null;}
   catch(e){console.error(e);window._currentPropRef=id;toast('⚠','ERRO: a proposta NÃO foi gravada — '+fbErr(e));return;}
   LD.push(entry);SAVED=true;PREVIEWED=false;
@@ -2691,6 +2693,14 @@ window.FB = {
     const s = await getDocs(q); const out = [];
     s.docs.forEach(d => (d.data().lista || []).forEach(c => out.push({ nome: c.nome||'', ncont: String(c.ncont||''), codpost: c.codpost||'', area: c.area||'', local: c.local||'', vendedor: String(d.data().vendedor||''), vendnm: c.vendnm||'', _blk: d.id })));
     return out;
+  },
+  // bloqueio (interruptor do Master, em RPN › Projetos): nº de Projetos em atraso do utilizador, ou 0 se o bloqueio não se aplica
+  async projetosEmAtraso() {
+    const cs = await getDoc(doc(db, 'config', 'projetos')), c = cs.exists() ? cs.data() : {}, d = new Date();
+    if (!c.bloqueio || d.getDate() < (c.bloqueioDia || 10)) return 0;
+    const mes = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), uid = auth.currentUser.uid;
+    const sn = await Promise.all(['Por tratar', 'Adiado'].map(e => getDocs(query(collection(db, 'projetos'), where('vendedorUid', '==', uid), where('estado', '==', e)))));
+    return sn.flatMap(x => x.docs).filter(x => String(x.data().alertaEm || '').slice(0, 7) < mes).length;
   },
   async saveProposta(p) {
     const b = writeBatch(db);
