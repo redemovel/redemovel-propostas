@@ -487,13 +487,32 @@ function tabPrincipal(tc, dis, p){
   $('#l-bulk')?.addEventListener('click',()=>bulkMsisdn(dis));
 }
 
+// ---- produtos do catálogo nas linhas ----
+function aplicarProduto(l, pr){
+  Object.assign(l,{ref:pr.ref,designacao:pr.designacao,tier:pr.tier,pricingPlan:pr.pricingPlan,descontinuado:pr.descontinuado});
+  if (pr.categoria==='Fixo' && /Móvel/.test(l.natureza)) l.natureza=l.natureza.replace('Móvel','Fixo');
+  if (pr.categoria==='Móvel' && /Fixo/.test(l.natureza)) l.natureza=l.natureza.replace('Fixo','Móvel');
+}
+let PROD_DROP = null;
+function prodDrop(){
+  if (!PROD_DROP) { PROD_DROP=document.createElement('div'); PROD_DROP.className='cli-res'; PROD_DROP.id='prod-res'; PROD_DROP.style.position='fixed'; document.body.appendChild(PROD_DROP);
+    window.addEventListener('scroll', ()=>PROD_DROP.classList.remove('on'), true); }
+  return PROD_DROP;
+}
+function procurarProdutos(q){
+  const t=semAcento(q).trim(); if (t.length<2) return [];
+  const pal=t.split(/\s+/), a=[], b=[], c=[];
+  for (const p of S.prodList) { const r=semAcento(p.ref), d=semAcento(p.designacao);
+    if (r.startsWith(t)) a.push(p); else if (d.startsWith(t)) b.push(p); else if (pal.every(w=>r.includes(w)||d.includes(w))) c.push(p); }
+  return [...a,...b,...c].slice(0,12);
+}
 function drawLines(dis){
   const r = S.cur, L = r.linhas;
   $('#lines').innerHTML = `<table class="lines"><thead><tr><th>#</th><th>Referência</th><th>Designação</th><th>Natureza</th><th>MSISDN</th><th>Nº Conta</th><th class="num">RLMC €</th><th title="Prazo de permanência (meses)">Prazo perm.</th><th>Tier</th><th>PricingPlan</th><th>Desc.</th><th>Upgr.</th><th>Contrato VDF</th><th class="num">Score</th><th></th></tr></thead>
   <tbody>${L.map((l,i)=>`<tr data-i="${i}">
     <td class="muted">${i+1}</td>
-    <td><input list="dl-prod" data-l="ref" value="${esc(l.ref)}" ${dis} style="width:170px"></td>
-    <td><input data-l="designacao" value="${esc(l.designacao)}" ${dis} style="width:240px"></td>
+    <td><input data-l="ref" value="${esc(l.ref)}" ${dis} autocomplete="off" placeholder="referência ou nome…" style="width:170px"></td>
+    <td><input data-l="designacao" value="${esc(l.designacao)}" ${dis} autocomplete="off" style="width:240px"></td>
     <td><select data-l="natureza" ${dis} style="width:112px">${NATUREZAS.map(n=>`<option ${l.natureza===n?'selected':''}>${n}</option>`).join('')}</select></td>
     <td><input data-l="msisdn" value="${esc(l.msisdn)}" ${dis} style="width:110px"></td>
     <td><input data-l="nConta" value="${esc(l.nConta)}" ${dis} style="width:100px"></td>
@@ -514,9 +533,27 @@ function drawLines(dis){
       const i=+el.closest('tr').dataset.i, k=el.dataset.l, l=L[i];
       l[k] = el.type==='checkbox'?el.checked : k==='rlmc'?(parseFloat(el.value)||0) : k==='prazo'?+el.value : el.value;
       S.dirty = true;
-      if (k==='ref') { const pr=S.prodMap[el.value.trim().toUpperCase()]; if (pr) { Object.assign(l,{ref:pr.ref,designacao:pr.designacao,tier:pr.tier,pricingPlan:pr.pricingPlan,descontinuado:pr.descontinuado}); if(pr.categoria==='Fixo' && /Móvel/.test(l.natureza)) l.natureza=l.natureza.replace('Móvel','Fixo'); if(pr.categoria==='Móvel' && /Fixo/.test(l.natureza)) l.natureza=l.natureza.replace('Fixo','Móvel'); drawLines(dis); return; } }
+      // referência escrita por inteiro e sem ambiguidade (nenhuma outra começa da mesma forma): aplica logo
+      if (k==='ref') { const v=el.value.trim().toUpperCase(), pr=S.prodMap[v]; if (pr && S.prodList.filter(x=>String(x.ref).toUpperCase().startsWith(v)).length===1) { aplicarProduto(l,pr); prodDrop().classList.remove('on'); drawLines(dis); return; } }
       updTotals();
     });
+    if (el.dataset.l==='ref') el.addEventListener('change',()=>{ const l=L[+el.closest('tr').dataset.i], pr=S.prodMap[el.value.trim().toUpperCase()]; if (pr && l.designacao!==pr.designacao) { aplicarProduto(l,pr); drawLines(dis); } });
+  });
+  // pesquisa de produtos: escrever na Referência ou na Designação procura nas duas, em qualquer parte do texto
+  if (!dis) $('#lines').querySelectorAll('[data-l="ref"],[data-l="designacao"]').forEach(inp=>{
+    let res=[], sel=-1; const box=prodDrop();
+    const fecha = () => { box.classList.remove('on'); box._dono=null; };
+    const aplica = pr => { if(!pr) return; fecha(); const i=+inp.closest('tr').dataset.i; aplicarProduto(L[i],pr); S.dirty=true; drawLines(dis); $('#lines').querySelector(`tr[data-i="${i}"] [data-l="msisdn"]`)?.focus(); };
+    const mostra = () => { if(!inp.isConnected) return; res=procurarProdutos(inp.value); if(!res.length) return fecha();
+      const rc=inp.getBoundingClientRect(); Object.assign(box.style,{left:Math.max(8,Math.min(rc.left, innerWidth-560))+'px', top:(rc.bottom+2)+'px', width:'540px', right:'auto'});
+      box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(p.ref)}</b> — ${esc(p.designacao)}<br><small>${esc([p.categoria,p.tier,p.descontinuado?'descontinuado':''].filter(Boolean).join(' · '))}</small></div>`).join('');
+      box.classList.add('on'); box._dono=inp; box.onmousedown=e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); aplica(res[+d.dataset.i]); } }; };
+    inp.addEventListener('input', ()=>{ sel=-1; mostra(); });
+    inp.addEventListener('keydown', e=>{ if(box._dono!==inp || !box.classList.contains('on')) return;
+      if (e.key==='ArrowDown'||e.key==='ArrowUp') { e.preventDefault(); sel=Math.max(0,Math.min(res.length-1, sel+(e.key==='ArrowDown'?1:-1))); mostra(); }
+      else if (e.key==='Enter') { e.preventDefault(); aplica(res[sel>=0?sel:0]); }
+      else if (e.key==='Escape') fecha(); });
+    inp.addEventListener('blur', ()=>setTimeout(()=>{ if(box._dono===inp) fecha(); },150));
   });
   $('#lines').querySelectorAll('[data-dup]').forEach(b=>b.onclick=()=>{ const i=+b.closest('tr').dataset.i; L.splice(i+1,0,linhaVazia(L[i])); S.dirty=true; drawLines(dis); });
   $('#lines').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const i=+b.closest('tr').dataset.i; L.splice(i,1); S.dirty=true; drawLines(dis); });
