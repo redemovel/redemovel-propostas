@@ -101,10 +101,15 @@ const EMAIL_DOMAIN = 'redemovel.pt';   // "pmota" → pmota@redemovel.pt
 import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword,
          sendPasswordResetEmail, updatePassword, connectAuthEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, collection, query, where, orderBy,
-         limit, runTransaction, serverTimestamp, writeBatch, onSnapshot, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { getFirestore, doc, getDoc, getDocs, setDoc as _setDoc, updateDoc as _updateDoc, addDoc as _addDoc, deleteDoc as _deleteDoc, collection, query, where, orderBy,
+         limit, runTransaction as _runTransaction, serverTimestamp, writeBatch as _writeBatch, onSnapshot, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject, connectStorageEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 
+// economia de leituras: a lista de RPN fica em memória 1 minuto; qualquer escrita feita nesta sessão obriga a reler
+let LISTA_EM = 0;
+const suja = f => (...a) => { LISTA_EM = 0; return f(...a); };
+const setDoc = suja(_setDoc), updateDoc = suja(_updateDoc), addDoc = suja(_addDoc), deleteDoc = suja(_deleteDoc), runTransaction = suja(_runTransaction), writeBatch = suja(_writeBatch);
+const LISTA_TTL = 60000;
 const EMU = new URLSearchParams(location.search).has('emu') && ['localhost','127.0.0.1'].includes(location.hostname);
 const cfg = EMU ? {apiKey:'demo-key',authDomain:'demo-rpn.firebaseapp.com',projectId:'demo-rpn',storageBucket:'demo-rpn.appspot.com',appId:'demo'} : FIREBASE_CONFIG;
 const app = initializeApp(cfg);
@@ -182,7 +187,7 @@ function clearSubs(){ S.unsub.forEach(u=>u()); S.unsub=[]; }
 
 // ---------- 4. ARRANQUE / AUTENTICAÇÃO ----------
 onAuthStateChanged(auth, async user => {
-  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; S.cli = null; S.avisoPend = null; clearSubs();
+  S.user = user; S.me = null; S.dirty = false; S.list = null; LISTA_EM = 0; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; S.cli = null; S.avisoPend = null; clearSubs();
   if (!user) return renderLogin();
   try {
     const snap = await getDoc(doc(db,'users',user.uid));
@@ -199,7 +204,24 @@ window.addEventListener('hashchange', () => { if (S.me) render(); });
 window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue=''; } });
 
 async function loadUsers(){ const s=await getDocs(collection(db,'users')); S.users={}; s.forEach(d=>S.users[d.id]=d.data()); }
-async function loadProdutos(){ const s=await getDocs(collection(db,'produtos')); S.prodMap={}; S.prodList=[]; s.forEach(d=>{ const p=d.data(); S.prodMap[p.ref.toUpperCase()]=p; S.prodList.push(p); }); S.prodList.sort((a,b)=>a.ref.localeCompare(b.ref)); }
+function usarProdutos(l){ S.prodMap={}; S.prodList=[]; l.forEach(p=>{ if(!p||!p.ref) return; S.prodMap[p.ref.toUpperCase()]=p; S.prodList.push(p); }); S.prodList.sort((a,b)=>a.ref.localeCompare(b.ref)); }
+const CAT_KEY = 'rdm-catalogo';   // partilhado com a app Propostas (mesmo site)
+function guardarCatalogo(v){ try{ localStorage.setItem(CAT_KEY, JSON.stringify({v:String(v), l:S.prodList})); }catch(e){ try{ localStorage.removeItem(CAT_KEY); }catch(_){} } }
+// economia de leituras: o catálogo fica guardado no browser; à entrada lê-se só a versão (config/catalogo) e relê-se tudo apenas quando mudou
+async function loadProdutos(forcar){
+  let v=''; try{ v=String((await getDoc(doc(db,'config','catalogo'))).data()?.v||''); }catch(e){}
+  if (!forcar && v) { try{ const c=JSON.parse(localStorage.getItem(CAT_KEY)||'null'); if (c && c.v===v && Array.isArray(c.l) && c.l.length) { usarProdutos(c.l); return; } }catch(e){} }
+  const s=await getDocs(collection(db,'produtos')); usarProdutos(s.docs.map(d=>d.data()));
+  if (!v && isStaff()) { v=String(Date.now()); try{ await _setDoc(doc(db,'config','catalogo'),{v},{merge:true}); }catch(e){ v=''; } }   // primeira vez: cria a versão
+  if (v) guardarCatalogo(v);
+}
+// depois de alterar o catálogo: nova versão (os outros utilizadores releem na próxima entrada) e cache local atualizada
+async function catalogoMudou(){
+  const v=String(Date.now());
+  try{ await _setDoc(doc(db,'config','catalogo'),{v, por:S.me.nome},{merge:true}); guardarCatalogo(v); }
+  catch(e){ try{ localStorage.removeItem(CAT_KEY); }catch(_){} toast('Catálogo gravado, mas a versão não foi atualizada (regras por publicar?). Os colegas podem continuar a ver o catálogo antigo.', true); }
+}
+function produtoLocal(ref, d){ const l=S.prodList.filter(p=>p.ref.toUpperCase()!==String(ref).toUpperCase()); if (d) l.push(d); usarProdutos(l); }
 
 function renderLogin(){
   $('#app').innerHTML = `<div class="login card">
@@ -255,17 +277,18 @@ function mudarPassword(){
 }
 
 // ---------- 6. LISTA ----------
-async function viewLista(){
+async function viewLista(forcar){
   const m = $('#main');
-  m.innerHTML = `<div class="card muted">A carregar RPNs…</div>`;
   if (!S.filtros.mes) S.filtros.mes = mesLocal();
+  if (!forcar && S.list && S.listMes===S.filtros.mes && Date.now()-LISTA_EM < LISTA_TTL) return drawLista();   // lida há menos de 1 minuto e sem escritas desde então
+  m.innerHTML = `<div class="card muted">A carregar RPNs…</div>`;
   try {
     // economia de leituras: os processos em curso + os fechados do mês escolhido (o histórico procura-se à parte)
     const col = collection(db,'rpn'), meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
     const [a, f] = await Promise.all([getDocs(query(col, ...meu, where('estado','in',EM_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',S.filtros.mes)))]);
     const m2 = {}; [...a.docs, ...f.docs, ...(S.extra||[])].forEach(d=>{ const r = typeof d.data==='function' ? {id:d.id,...d.data()} : d; m2[r.id]=r; });
     Object.values(m2).forEach(normEspera);
-    S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0));
+    S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0)); S.listMes = S.filtros.mes; LISTA_EM = Date.now();
   } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
   if (S.filtros.meus===null) S.filtros.meus = perfil()==='backoffice';
   drawLista();
@@ -304,6 +327,7 @@ function drawLista(){
     <div class="card">
       <div class="row" style="margin-bottom:12px">
         <input id="ft" type="search" autocomplete="off" name="pesquisa-rpn" placeholder="Procurar nº, cliente, NIF, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
+        <button class="btn" id="fr" title="Volta a ler a lista agora. A lista atualiza-se sozinha ao fim de 1 minuto ou quando grava alguma coisa.">⟳ Atualizar</button>
         <button class="btn" id="fh" title="Procura em todos os processos, incluindo os antigos, por nº, NIF, contrato VDF ou MSISDN exatos">Procurar no histórico</button>
         <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)">Fechados em <input id="fm" type="month" value="${esc(f.mes)}" style="width:160px"></label>
         ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
@@ -322,6 +346,7 @@ function drawLista(){
   document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ f.estado=c.dataset.e; drawLista(); });
   document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
   $('#nv').onclick=()=>go('#/novo');
+  $('#fr').onclick=()=>viewLista(true);
   if ($('#aus')) $('#aus').onclick=()=>ausencias().catch(e=>toast(errTxt(e),true));
   const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
   $('#fm').onchange=e=>{ if(e.target.value){ f.mes=e.target.value; viewLista(); } };
@@ -822,7 +847,9 @@ async function ausencias(){
       pedirRazao(`Ausência de ${esc(userNome(uid))}`, '', 'Marcar ausente e redistribuir', async rz=>{
         try {
           await setDoc(doc(db,'config','cargaBO'),{ausentes:{[uid]:true}},{merge:true});
-          const [a,b2] = await Promise.all([getDocs(query(collection(db,'rpn'),where('boUid','==',uid))), getDocs(query(collection(db,'rpn'),where('confUid','==',uid)))]);
+          const col=collection(db,'rpn'); let a, b2;   // economia de leituras: só os processos em curso (se faltar índice, lê todos como antes)
+          try { [a,b2] = await Promise.all([getDocs(query(col,where('boUid','==',uid),where('estado','in',ABERTOS))), getDocs(query(col,where('confUid','==',uid),where('estado','==','Em Conferência')))]); }
+          catch(e){ if (e?.code!=='failed-precondition') throw e; [a,b2] = await Promise.all([getDocs(query(col,where('boUid','==',uid))), getDocs(query(col,where('confUid','==',uid)))]); }
           const impl=a.docs.filter(d=>ABERTOS.includes(d.data().estado)), cf=b2.docs.filter(d=>d.data().estado==='Em Conferência');
           let ok=0; const falhas=[];
           const gB={}, gC={};   // RPN do mesmo grupo vão todos para a mesma BO
@@ -1544,7 +1571,7 @@ function viewCatalogo(){
     const pais=S.prodList.filter(x=>(x.composicao||[]).some(c=>String(c.ref).toUpperCase()===ref.toUpperCase())).map(x=>x.ref);
     if(pais.length) return toast(`Não pode apagar: ${ref} faz parte do(s) bundle(s) ${pais.join(', ')}.`,true);
     if(!confirm(`Apagar a referência ${ref}?\n\nOs processos que já a usam não são alterados, mas deixa de aparecer na pesquisa das linhas.`)) return;
-    try{ await deleteDoc(doc(db,'produtos',prodId(ref))); await loadProdutos(); toast('Referência apagada.'); viewCatalogo(); }catch(e){ toast(errTxt(e),true); } });
+    try{ await deleteDoc(doc(db,'produtos',prodId(ref))); produtoLocal(ref,null); await catalogoMudou(); toast('Referência apagada.'); viewCatalogo(); }catch(e){ toast(errTxt(e),true); } });
 }
 function editarRef(p){
   const nova=!p; p=p||{ref:'',designacao:'',subfamilia:'GSM',tier:'Gold',pricingPlan:'',descontinuado:false};
@@ -1580,7 +1607,7 @@ function editarRef(p){
       if(nova && S.prodMap[ref]) return toast('Já existe uma referência '+ref+'.',true);
       const pp=m.querySelector('#e-pp').value.replace(/\D/g,'');
       const d={ref, designacao:des, subfamilia:sub, tier:m.querySelector('#e-tier').value, pricingPlan:pp, descontinuado:m.querySelector('#e-dsc').checked, inativo:m.querySelector('#e-ina').checked, composicao:comp.map(c=>({ref:S.prodMap[c.ref].ref,pct:Math.round(c.pct*10)/1000})), categoria:/^fixo/i.test(sub)?'Fixo':'Móvel', atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome};
-      try{ await setDoc(doc(db,'produtos',prodId(ref)), d, {merge:true}); await loadProdutos(); close(); toast(nova?'Referência criada.':'Referência guardada.'); if(location.hash.startsWith('#/catalogo')) viewCatalogo(); }catch(e){ toast(errTxt(e),true); } };
+      try{ await setDoc(doc(db,'produtos',prodId(ref)), d, {merge:true}); produtoLocal(ref,{...(S.prodMap[ref.toUpperCase()]||{}), ...d}); await catalogoMudou(); close(); toast(nova?'Referência criada.':'Referência guardada.'); if(location.hash.startsWith('#/catalogo')) viewCatalogo(); }catch(e){ toast(errTxt(e),true); } };
   });
 }
 
@@ -1838,11 +1865,11 @@ function admCat(el){
   $('#bi').onclick=async()=>{ $('#bi').disabled=true;
     try { const ops=[...cz.novas.map(n=>[n.ref,{...n,atualizadoEm:serverTimestamp()}]), ...cz.ok.map(b=>[b.ref,{composicao:b.composicao,atualizadoEm:serverTimestamp()}])];
       for (let i=0;i<ops.length;i+=400){ const b=writeBatch(db); ops.slice(i,i+400).forEach(([ref,d])=>b.set(doc(db,'produtos',prodId(ref)),d,{merge:true})); await b.commit(); }
-      toast(`${cz.ok.length} bundle(s) importados · ${cz.novas.length} filha(s) criadas.`); await loadProdutos(); admCat(el);
+      toast(`${cz.ok.length} bundle(s) importados · ${cz.novas.length} filha(s) criadas.`); await loadProdutos(true); await catalogoMudou(); admCat(el);
     } catch(e){ toast(errTxt(e),true); $('#bi').disabled=false; } };
   $('#ci').onclick=async()=>{ $('#ci').disabled=true;
     try { for (let i=0;i<parsed.length;i+=400){ const b=writeBatch(db); parsed.slice(i,i+400).forEach(p=>b.set(doc(db,'produtos',prodId(p.ref)),{...p,atualizadoEm:serverTimestamp()},{merge:true})); await b.commit(); }
-      toast(`${parsed.length} referências importadas.`); await loadProdutos(); admCat(el);
+      toast(`${parsed.length} referências importadas.`); await loadProdutos(true); await catalogoMudou(); admCat(el);
     } catch(e){ toast(errTxt(e),true); $('#ci').disabled=false; } };
 }
 async function admCarga(el){
@@ -1854,12 +1881,12 @@ async function admCarga(el){
     <div class="card"><h2>Numeração</h2><div class="row"><div style="width:200px"><label>Próximo nº de RPN</label><input type="number" id="nx" value="${cn.data()?.next||1}"></div><button class="btn" id="nxs" style="align-self:end">Guardar</button></div>
     <p class="muted" style="font-size:12px">Sugestão: começar acima da numeração do sistema atual para evitar confusões (ex.: 60001).</p></div>`;
   $('#nxs').onclick=async()=>{ const v=parseInt($('#nx').value); if(!(v>0)) return; try{ await setDoc(doc(db,'counters','rpn'),{next:v}); toast('Numeração atualizada.'); }catch(e){ toast(errTxt(e),true); } };
-  $('#rc').onclick=async()=>{ try{ const s=await getDocs(collection(db,'rpn')); const c={}, cf={}; const b=writeBatch(db); let n=0;
+  $('#rc').onclick=async()=>{ try{ const s=await getDocs(query(collection(db,'rpn'), where('estado','in',EM_CURSO))); const c={}, cf={}; const b=writeBatch(db); let n=0;   // economia de leituras: só os processos em curso
       Object.keys(S.users).forEach(u=>{ c[u]=0; cf[u]=0; });
       s.forEach(d=>{ const r=d.data(); const cnt=(ABERTOS.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt;
         const cc=(r.estado==='Em Conferência'&&r.confUid)?(r.nLinhas||0):0; if(cc) cf[r.confUid]=(cf[r.confUid]||0)+cc;
         if(((r.cargaContada||0)!==cnt || (r.confContada||0)!==cc) && n<450){ b.update(d.ref,{cargaContada:cnt,confContada:cc}); n++; }
-        if (FECHADOS.includes(r.estado) && !r.mesRef && n<450){ b.update(d.ref,{mesRef: r.fechadoMes || String(r.fechadoEm||r.data||'').slice(0,7)}); n++; } });
+      });
       b.set(doc(db,'config','cargaBO'),{carga:c,conf:cf,atualizadoEm:serverTimestamp()},{merge:true}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
 }
 </script>

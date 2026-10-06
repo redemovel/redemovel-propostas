@@ -703,7 +703,7 @@ async function enterApp(user){
   loadEl.style.display='flex';
   try{
     let users;
-    try{users=await FB.users();}catch(e){users=null;}
+    try{users=await FB.users(true);}catch(e){users=null;}   // à entrada lê sempre de novo
     const me=users&&users.find(u=>u.uid===user.uid);
     if(!me||me.ativo!==true){
       await FB.logout();
@@ -2635,19 +2635,28 @@ async function doisFiltros(uid, campo, valor) {
   catch (e) { if (e.code !== 'failed-precondition') throw e; console.warn('Índice em falta, a filtrar no browser:', e.message); return (await getDocs(query(col, where('comercialUid', '==', uid)))).docs.filter(d => d.data()[campo] === valor); }
 }
 
+let _users = null, _usersEm = 0;
 window.FB = {
   onAuth: cb => onAuthStateChanged(auth, cb),
   login: (email, pass) => signInWithEmailAndPassword(auth, email, pass),
   logout: () => signOut(auth),
-  async users() { const s = await getDocs(collection(db, 'users')); return s.docs.map(d => ({ uid: d.id, ...d.data() })); },
-  updateUser: (uid, data) => updateDoc(doc(db, 'users', uid), data),
+  // economia de leituras: a lista de utilizadores fica em memória 1 minuto
+  async users(forcar) { if (!forcar && _users && Date.now() - _usersEm < 60000) return _users.map(u => ({ ...u })); const s = await getDocs(collection(db, 'users')); _users = s.docs.map(d => ({ uid: d.id, ...d.data() })); _usersEm = Date.now(); return _users.map(u => ({ ...u })); },
+  updateUser: (uid, data) => { _users = null; return updateDoc(doc(db, 'users', uid), data); },
   async changePass(atual, nova, hoje) {
     const u = auth.currentUser;
     await reauthenticateWithCredential(u, EmailAuthProvider.credential(u.email, atual));
     await updatePassword(u, nova);
-    await updateDoc(doc(db, 'users', u.uid), { passAlteradaEm: hoje });
+    await updateDoc(doc(db, 'users', u.uid), { passAlteradaEm: hoje }); _users = null;
   },
-  async produtos() { const s = await getDocs(collection(db, 'produtos')); return s.docs.map(d => d.data()); },
+  // economia de leituras: usa o catálogo guardado no browser pela app RPN se a versão (config/catalogo) for a mesma
+  async produtos() {
+    let v = ''; try { v = String((await getDoc(doc(db, 'config', 'catalogo'))).data()?.v || ''); } catch (e) {}
+    if (v) { try { const c = JSON.parse(localStorage.getItem('rdm-catalogo') || 'null'); if (c && c.v === v && Array.isArray(c.l) && c.l.length) return c.l; } catch (e) {} }
+    const l = (await getDocs(collection(db, 'produtos'))).docs.map(d => d.data());
+    if (v) { try { localStorage.setItem('rdm-catalogo', JSON.stringify({ v, l })); } catch (e) {} }
+    return l;
+  },
   async tarifarios() { const s = await getDoc(doc(db, 'config', 'tarifarios')); return s.exists() ? s.data() : null; },
   saveTarifarios: obj => setDoc(doc(db, 'config', 'tarifarios'), { lista: obj.lista, headers: obj.headers || null, atualizadoEm: serverTimestamp() }),
   // uid = null → todas (Master / Coordenador / BackOffice); caso contrário só as do próprio
