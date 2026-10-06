@@ -182,13 +182,13 @@ function clearSubs(){ S.unsub.forEach(u=>u()); S.unsub=[]; }
 
 // ---------- 4. ARRANQUE / AUTENTICAÇÃO ----------
 onAuthStateChanged(auth, async user => {
-  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; S.cli = null; clearSubs();
+  S.user = user; S.me = null; S.dirty = false; S.list = null; S.cur = null; S.tab = 'principal'; S.filtros = {estado:'',txt:'',vend:'',bo:'',mes:'',meus:null}; S.extra = []; S.cli = null; S.avisoPend = null; clearSubs();
   if (!user) return renderLogin();
   try {
     const snap = await getDoc(doc(db,'users',user.uid));
     if (!snap.exists() || !snap.data().ativo) { $('#app').innerHTML = `<div class="login card"><h2>Conta sem acesso</h2><p class="muted">A conta ${esc(user.email)} não tem perfil ativo. Contacte o administrador.</p><button class="btn" id="out">Sair</button></div>`; $('#out').onclick=()=>signOut(auth); return; }
     S.me = {uid:user.uid, ...snap.data()};
-    S.projN = 0; S.projAtr = 0; Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[], cfg:{}});
+    S.projN = 0; S.projAtr = 0; Object.assign(CL,{q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}}); Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[], cfg:{}});
     await Promise.all([loadUsers(), loadProdutos()]);
     handlePropostaParam();
     render();
@@ -220,14 +220,15 @@ function renderLogin(){
 function render(){
   clearSubs();
   const h = location.hash || '#/lista';
-  const nav = [['#/lista','RPNs'],['#/novo','Novo RPN']];
+  if (S.avisoPend && !S.dirty && !h.startsWith('#/rpn/') && !h.startsWith('#/novo')) { const av=S.avisoPend; S.avisoPend=null; setTimeout(av,0); }
+  const nav = [['#/lista','RPNs'],[PROPOSTAS_URL,'Propostas ↗'],['#/clientes','Clientes']];   // «Novo RPN» é o botão dentro de RPNs
   nav.push(['#/projetos','Projetos'+navProj()]);
   if (isStaff()) nav.push(['#/catalogo','Catálogo']);
   if (isBO()) nav.push(['#/producao','Produção BO']);
   if (isMaster()) nav.push(['#/admin','Administração']);
   $('#app').innerHTML = `<header>
       <span class="brand">Redemóvel · RPN</span>
-      <nav>${nav.map(([u,t])=>`<a href="${u}" class="${h.startsWith(u)?'on':''}">${t}</a>`).join('')}</nav>
+      <nav>${nav.map(([u,t])=>u[0]!=='#'?`<a href="${u}" target="_blank" rel="noopener" id="lk-prop" title="Abre a plataforma de Propostas noutro separador">${t}</a>`:`<a href="${u}" class="${h.startsWith(u)||(u==='#/lista'&&(h.startsWith('#/novo')||h.startsWith('#/rpn/')))?'on':''}">${t}</a>`).join('')}</nav>
       <a id="lk-man" href="${MANUAL_URL}?para=${isBO()?'b':isStaff()?'':'v'}" target="_blank" rel="noopener" class="btn sm" style="text-decoration:none" title="Abre o manual noutro separador">Manual</a>
       <div class="who"><b>${esc(S.me.nome)}</b><br>${PERFIL_TXT[perfil()]||perfil()}</div>
       <button class="btn sm" id="pw">Password</button><button class="btn sm" id="out">Sair</button>
@@ -237,13 +238,14 @@ function render(){
   if (h.startsWith('#/rpn/')) return viewFicha(h.slice(6));
   if (h.startsWith('#/novo')) return viewFicha(null);
   if (h.startsWith('#/projetos')) return viewProjetos();
+  if (h.startsWith('#/clientes')) return viewClientes();
   if (h.startsWith('#/catalogo') && isStaff()) return viewCatalogo();
   if (h.startsWith('#/producao') && isBO()) return viewProducao();
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
   return viewLista();
 }
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
-document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty){ e.preventDefault(); go(a.getAttribute('href')); } });
+document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
 function mudarPassword(){
   modal(`<h2>Alterar password</h2><div class="grid"><div><label>Nova password (mín. 8)</label><input type="password" id="np1"></div><div><label>Repetir</label><input type="password" id="np2"></div><div class="row"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Guardar</button></div></div>`, (m,close)=>{
@@ -333,7 +335,7 @@ function drawLista(){
 // ---------- 7. FICHA RPN ----------
 function rpnVazio(){
   return { numero:null, data:hoje(), estado:'Em Elaboração', motivos:[], vendedorUid:S.me.uid, vendedorNome:S.me.nome, subSfid:S.me.sfid||'',
-    nOportunidade:'', boUid:null, boNome:'', rpnAgregado:false, atividade:'Elegível/Carteira', clienteParticular:false,
+    nOportunidade:'', simulador:'', boUid:null, boNome:'', rpnAgregado:false, atividade:'Elegível/Carteira', clienteParticular:false,
     cliente:{nome:'',nCliente:'',nif:'',email:'',interlocutor:'',telefone:'',morada1:'',morada2:'',localidade:'',codPostal:''},
     loja:'Externos', dtAtivacao:'', dtFimEquip:'', prazoPermanencia:24, classificacao:'',
     condicoes:{pnEspecial:false,aprovacaoGA:false,novoNif:false,desconto:0,subsidiacao:0,reuniao:'',infoRisco:'',resumo:''},
@@ -461,7 +463,7 @@ function tabPrincipal(tc, dis, p){
   tc.innerHTML = `
     <div class="card">${podeEscolher?`<div class="cli-box" style="margin-bottom:14px"><label>Escolher cliente</label><input id="cli-q" type="search" autocomplete="off" name="procura-cliente" placeholder="Escreva as primeiras letras do nome ou o início do NIF…"><div class="cli-res" id="cli-res"></div></div>`:''}<div class="grid g4">
       ${fld('Cliente','cliente.nome',dis)}${fld('NIF','cliente.nif',dis)}${fld('Nº Cliente (PHC)','cliente.nCliente',dis)}${fld('Data','data',dis,'date')}
-      ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}
+      ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}${fld('Simulador','simulador',dis,'text','title="Referência do simulador usado no negócio. Vem da proposta e fica no PN, para rastreabilidade."')}
       ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
       ${sel('Estado','estado',ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN],isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
       <div id="cx-esp" style="${r.estado==='A aguardar'?'':'display:none'};grid-column:span 2"><div class="grid g2" style="gap:10px">
@@ -521,7 +523,7 @@ function tabPrincipal(tc, dis, p){
   tc.querySelector('[data-f="cicloDia"]')?.addEventListener('change',()=>{ S.cicloMudou=true; });
   tc.querySelectorAll('.mot').forEach(c=>c.onchange=()=>{ S.cur.motivos=[...tc.querySelectorAll('.mot:checked')].map(x=>x.value); S.dirty=true; });
   tc.querySelector('[data-f="boUid"]')?.addEventListener('change',e=>{ S.cur.boNome = userNome(e.target.value); });
-  tc.querySelector('[data-f="vendedorUid"]')?.addEventListener('change',e=>{ const u=S.users[e.target.value]; S.cur.vendedorNome=u?.nome||''; });
+  tc.querySelector('[data-f="vendedorUid"]')?.addEventListener('change',e=>{ const u=S.users[e.target.value]; S.cur.vendedorNome=u?.nome||''; if(u?.sfid){ S.cur.subSfid=u.sfid; const i=tc.querySelector('[data-f="subSfid"]'); if(i) i.value=u.sfid; } });
   $('#l-add')?.addEventListener('click',()=>{ const ls=S.cur.linhas; ls.push(linhaVazia(ls.at(-1))); S.dirty=true; drawLines(dis); });
   $('#l-bulk')?.addEventListener('click',()=>bulkMsisdn(dis));
 }
@@ -722,7 +724,7 @@ function tabHist(tc){
 }
 function hist(acao, detalhe, id){ const rid=id||S.cur?.id; if(!rid) return Promise.resolve(); return addDoc(collection(db,'rpn',rid,'historico'),{acao,detalhe:detalhe||'',porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()}).catch(e=>console.warn('hist',e)); }
 
-const CAMPOS_HIST = [['estado','Estado'],['esperaMotivo','A aguardar'],['esperaData','Data da espera'],['boNome','BO'],['vendedorNome','Vendedor'],['cliente.nome','Cliente'],['cliente.nif','NIF'],['nOportunidade','Oportunidade'],['subSfid','Sub-SFID'],['atividade','Atividade'],['dtAtivacao','Dt. ativação'],['nLinhas','Nº linhas'],['totRLMC','RLMC total'],['totScore','Score']];
+const CAMPOS_HIST = [['estado','Estado'],['esperaMotivo','A aguardar'],['esperaData','Data da espera'],['boNome','BO'],['vendedorNome','Vendedor'],['cliente.nome','Cliente'],['cliente.nif','NIF'],['nOportunidade','Oportunidade'],['subSfid','Sub-SFID'],['simulador','Simulador'],['atividade','Atividade'],['dtAtivacao','Dt. ativação'],['nLinhas','Nº linhas'],['totRLMC','RLMC total'],['totScore','Score']];
 function diffTxt(a,b){
   const out=[]; CAMPOS_HIST.forEach(([k,t])=>{ const x=getPath(a,k), y=getPath(b,k); if(String(x??'')!==String(y??'')) out.push(`${t}: ${x??'—'} → ${y??'—'}`); });
   const ma=(a.motivos||[]).join(', '), mb=(b.motivos||[]).join(', '); if(ma!==mb) out.push(`Motivos: ${ma||'—'} → ${mb||'—'}`);
@@ -1087,7 +1089,7 @@ function handlePropostaParam(){
   const r = rpnVazio();
   const TIPO_TXT = {novo:'Novo Serviço', refid:'Refidelização', upgrade:'Upgrade'};
   const nova = p.tipo==='novo', upg = p.tipo==='upgrade';
-  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||'').trim(); r.cliente.email = p.email||''; r.notas = p.notas||'';
+  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||'').trim(); r.cliente.email = p.email||''; r.notas = p.notas||''; r.simulador = String(p.simulador||'');
   // BackOffice/Master a abrir a proposta de um comercial: o RPN fica em nome do comercial da proposta
   if (isBO() && p.comercial) { const v = Object.entries(S.users).find(([,u])=>(u.nome||'').trim().toLowerCase()===String(p.comercial).trim().toLowerCase()); if (v) { r.vendedorUid=v[0]; r.vendedorNome=v[1].nome; r.subSfid=v[1].sfid||''; } }
   // Formato da app de Propostas:  "912 345 678 TARIFÁRIO [24m] [REF_PHC]; 10× TARIFÁRIO [24m] [REF_PHC]"
@@ -1196,11 +1198,21 @@ async function projetosAoEntrar(){
       const L=await projPendentes(), mudou=contarProj(L), livre=!S.dirty && !location.hash.startsWith('#/rpn/') && !location.hash.startsWith('#/novo');
       if (mudou && livre) render();
       const atr=L.filter(p=>projParaHoje(p)&&projAtrasado(p)).sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||''));
-      if (atr.length && livre) modal(`<h2 style="color:var(--red-d)">Tem ${atr.length} Projeto(s) em atraso</h2>
-        <p class="muted" style="margin-top:0">São de meses anteriores e ainda não têm decisão. Cada um tem de ficar com proposta criada, adiado (com nova data) ou perdido (com motivo).</p>
-        <div class="scroll" style="max-height:300px"><table id="pj-av-t"><thead><tr><th>Alerta</th><th>Cliente</th><th class="num">Linhas</th><th class="num">Há</th></tr></thead><tbody>${atr.map(p=>`<tr><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b></td><td class="num">${p.nLinhas||0}</td><td class="num">${diasAtraso(p.alertaEm)} dias</td></tr>`).join('')}</tbody></table></div>
+      // aviso do dia: os Projetos que chegaram à data desde a última entrada (na primeira entrada de cada dia)
+      const hj=hojeLocal(), kd='rpn-pj-visto-'+S.me.uid; let ult=''; try{ ult=localStorage.getItem(kd)||''; }catch(e){}
+      const ontem=(()=>{ const d=new Date(hj+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
+      const desde=ult||ontem, soHoje=desde>=ontem;
+      const novos=ult===hj?[]:L.filter(p=>!projAtrasado(p) && (p.alertaEm||'')>desde && (p.alertaEm||'')<=hj).sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||''));
+      const tb=(id,ps,atraso)=>`<div class="scroll" style="max-height:${atraso&&novos.length?180:300}px"><table id="${id}"><thead><tr><th>Alerta</th><th>Cliente</th><th class="num">Linhas</th><th class="num">${atraso?'Há':'RLMC €'}</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b></td><td class="num">${p.nLinhas||0}</td><td class="num">${atraso?diasAtraso(p.alertaEm)+' dias':eur(p.totRLMC)}</td></tr>`).join('')}</tbody></table></div>`;
+      const mostrar=()=>{ modal(`${atr.length?`<h2 style="color:var(--red-d)">Tem ${atr.length} Projeto(s) em atraso</h2>
+        <p class="muted" style="margin-top:0">São de meses anteriores e ainda não têm decisão. Cada um tem de ficar com proposta criada, adiado (com nova data) ou perdido (com motivo).</p>${tb('pj-av-t',atr,true)}`:''}
+        ${novos.length?`<h2 id="pj-hj-h" style="${atr.length?'margin-top:16px':''}">${soHoje?`Hoje chegam à data ${novos.length} Projeto(s)`:`Chegaram à data ${novos.length} Projeto(s) desde ${fmtD(desde)}`}</h2>
+        <p class="muted" style="margin-top:0">Faltam 6 meses para o fim da fidelização destes clientes. Já estão na lista «Para tratar».</p>${tb('pj-hj-t',novos,false)}`:''}
         <div class="row" style="margin-top:14px"><span class="sp"></span><button class="btn" id="c">Fechar</button><button class="btn pri" id="ok">Ver os Projetos</button></div>`, (m,close)=>{
           m.querySelector('#c').onclick=close; m.querySelector('#ok').onclick=()=>{ close(); PJ.tab='tratar'; location.hash='#/projetos'; }; });
+        try{ localStorage.setItem(kd,hj); }catch(e){} };
+      if (!atr.length && !novos.length) { try{ localStorage.setItem(kd,hj); }catch(e){} }
+      else if (livre) mostrar(); else S.avisoPend=mostrar;   // a meio de um RPN: o aviso aparece quando sair dele
     }
   } catch(e){ console.warn('Projetos:', e); }
 }
@@ -1277,7 +1289,8 @@ function projParaProposta(p){
   const d={id:p.id, cliente:p.clienteNome, nif:p.nif, comercial:p.vendedorNome||'', linhas:ls};
   return btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
-function abrirProjeto(p){
+function abrirProjeto(p, apos){
+  apos=apos||viewProjetos;
   if(!p) return; const stf=isStaff(), aberto=['Por tratar','Em negociação','Adiado'].includes(p.estado), meu=p.vendedorUid===S.me.uid;
   const orig=p.alertaOriginal||p.alertaEm, dMax=(()=>{ const d=new Date(orig+'T12:00:00'); d.setDate(d.getDate()+PROJ_ADIA_MAX); return d.toISOString().slice(0,10); })(), dMin=(()=>{ const d=new Date(hojeLocal()+'T12:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
   const vends=vendedoresProj([p.vendedorUid]);
@@ -1294,7 +1307,7 @@ function abrirProjeto(p){
       ${aberto&&!p.propostaId&&dMin<=dMax?`<button class="btn" id="pj-ad">Adiar</button>`:''}
       ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}</div>`, (m,close)=>{
     m.style.width='min(980px,94vw)';
-    const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); viewProjetos(); }catch(e){ toast(errTxt(e),true); } };
+    const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); apos(); }catch(e){ toast(errTxt(e),true); } };
     m.querySelector('#c').onclick=close;
     m.querySelectorAll('[data-pn]').forEach(a=>a.onclick=()=>close());
     m.querySelector('#pj-cp')?.addEventListener('click',()=>{ window.open(PROPOSTAS_URL+'?proj='+projParaProposta(p),'_blank'); close(); toast('Proposta aberta noutro separador. O Projeto passa a “Em negociação” quando a gravar.'); });
@@ -1308,8 +1321,206 @@ function abrirProjeto(p){
         m2.querySelector('#ok').onclick=async()=>{ const d=m2.querySelector('#ad-d').value, mo=m2.querySelector('#ad-m').value.trim();
           if(!d || d<dMin) return toast('A nova data tem de ser depois de hoje.',true); if(d>dMax) return toast(`Não pode adiar para depois de ${fmtD(dMax)}.`,true); if(mo.length<3) return toast('Indique o motivo.',true);
           try{ await updateDoc(doc(db,'projetos',p.id),{estado:'Adiado', alertaEm:d, alertaOriginal:orig, adiamentos:[...(p.adiamentos||[]),{em:new Date().toISOString(), porUid:S.me.uid, porNome:S.me.nome, de:p.alertaEm, para:d, motivo:mo}], atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
-            close2(); toast(`Projeto adiado para ${fmtD(d)}.`); viewProjetos(); }catch(e){ toast(errTxt(e),true); } }; }); });
+            close2(); toast(`Projeto adiado para ${fmtD(d)}.`); apos(); }catch(e){ toast(errTxt(e),true); } }; }); });
     m.querySelector('#pj-as')?.addEventListener('click',()=>{ const uid=m.querySelector('#pj-av').value; grava({vendedorUid:uid||null, vendedorNome:uid?S.users[uid].nome:'', vendedorPHC:uid?String(S.users[uid].vendedorPHC||''):''}, uid?`Atribuído a ${S.users[uid].nome}.`:'Ficou por atribuir.'); });
+  });
+}
+
+// ---------- 9d. CLIENTES: ficha (consultar, editar, criar) e tudo o que existe do cliente — Fidelizações, RPN e PN, Projetos, Propostas ----------
+// As fichas são as mesmas da app Propostas (clientesFicha/{NIF} + índice de pesquisa em clientes/{vendedor}_…).
+// [campo, etiqueta, tipo]  tipo: '' texto · 'ta' área de texto · 'ro' só leitura · 'vend' vendedor
+const CLI_SEC = [
+  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Tipo'],['segmento','Segmento']]],
+  ['Morada',[['morada','Morada'],['local','Localidade'],['codpost','Código postal'],['zona','Zona'],['distrito','Distrito'],['area','Área']]],
+  ['Contactos',[['telefone','Telefone'],['tlmvl','Telemóvel'],['email','Email'],['url','Site'],
+    ['contacto','Contacto 1 — nome'],['c1func','Contacto 1 — função'],['c1tele','Contacto 1 — telefone'],['c1email','Contacto 1 — email'],
+    ['c2tacto','Contacto 2 — nome'],['c2func','Contacto 2 — função'],['c2tele','Contacto 2 — telefone'],['c2email','Contacto 2 — email'],
+    ['c3tacto','Contacto 3 — nome'],['c3func','Contacto 3 — função'],['c3tele','Contacto 3 — telefone'],['c3email','Contacto 3 — email']]],
+  ['Vodafone',[['contaA','Conta Vodafone 1'],['contaB','Conta Vodafone 2'],['contaC','Conta Vodafone 3'],['contaD','Conta Vodafone 4'],
+    ['clprazo','Prazo'],['clvfixa','Voz fixa'],['clintern','Internet'],['ciclofac','Ciclo de faturação'],
+    ['dtinicio','Data de início'],['cmalt','CM alt.'],['cmaltini','CM alt. — início'],['cmaltfim','CM alt. — fim'],['obsvodaf','Observações Vodafone','ta']]],
+  ['Comercial',[['vendedor','Vendedor','vend'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
+];
+const CLI_KEYS = CLI_SEC.flatMap(s=>s[1].map(c=>c[0]));
+const CL = {q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}};
+const CLI_TABS = [['ficha','Ficha'],['fid','Fidelizações'],['rpn','RPN e PN'],['proj','Projetos'],['prop','Propostas']];
+const nifValido = n => { if(!/^\d{9}$/.test(n)) return false; let t=0; for(let i=0;i<8;i++) t+=(+n[i])*(9-i); const r=t%11; return (r<2?0:11-r)===+n[8]; };
+const vendPHCNome = v => { v=String(v||''); if(!v) return ''; const us=Object.values(S.users).filter(u=>String(u.vendedorPHC||'')===v); return (us.find(u=>u.ativo!==false)||us[0])?.nome||''; };
+// quem altera fichas: BackOffice e Master, todas; o comercial, as da sua carteira; o Coordenador só consulta (igual à app Propostas)
+const cliPodeEditar = f => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC && String(f?.vendedor||'')===String(S.me.vendedorPHC));
+const cliPodeCriar = () => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC);
+const natGrupo = l => { const n=String(l.natureza||''); if(/m[óo]vel/i.test(n)) return 'Móvel'; if(/fix/i.test(n)) return 'Fixo';
+  const c=S.prodMap[String(l.ref||'').toUpperCase()]?.categoria; return c==='Móvel'||c==='Fixo' ? c : 'Outros'; };
+const idxCli = f => ({ nome:f.nome||'', ncont:String(f.ncont||''), codpost:f.codpost||'', area:f.area||'', local:f.local||'', vendnm:f.vendnm||'' });
+
+// grava a ficha e mantém o índice de pesquisa (a mesma transação da app Propostas)
+function gravarFicha(f, isNew){
+  const nif=String(f.ncont), ref=doc(db,'clientesFicha',nif), uid=S.me.uid;
+  return runTransaction(db, async tx => {
+    const s=await tx.get(ref);
+    if (isNew && s.exists()) { const e=new Error('NIF já existe'); e.code='ja-existe'; throw e; }
+    const old=s.exists()?s.data():null, v=String(f.vendedor||''), entry=idxCli(f);
+    let blk=(old&&old.blk)||'';
+    if (old && blk && v===String(old.vendedor||'')) {
+      const br=doc(db,'clientes',blk), bs=await tx.get(br), lista=bs.exists()?(bs.data().lista||[]):[];
+      const i=lista.findIndex(x=>String(x.ncont)===nif); if(i>=0) lista[i]=entry; else lista.push(entry);
+      tx.set(br,{vendedor:v, lista});
+    } else {
+      const nb=(v||'sem')+'_novos', nr=doc(db,'clientes',nb), ns=await tx.get(nr);
+      let or=null, os=null; if (old && blk && blk!==nb) { or=doc(db,'clientes',blk); os=await tx.get(or); }
+      const nl=ns.exists()?(ns.data().lista||[]).filter(x=>String(x.ncont)!==nif):[];
+      nl.push(entry); tx.set(nr,{vendedor:v, lista:nl});
+      if (os && os.exists()) tx.set(or,{vendedor:os.data().vendedor, lista:(os.data().lista||[]).filter(x=>String(x.ncont)!==nif)});
+      blk=nb;
+    }
+    const data={...f, blk, atualizadoEm:serverTimestamp(), atualizadoPorUid:uid};
+    if (!old) { data.criadoEm=serverTimestamp(); data.criadoPorUid=uid; data.origem='plataforma'; }
+    tx.set(ref, data, {merge:true});
+    return blk;
+  });
+}
+
+function viewClientes(){
+  const arg=decodeURIComponent((location.hash.split('/')[2]||'').trim());
+  if (arg==='novo') { if(!cliPodeCriar()) { location.hash='#/clientes'; return; } Object.assign(CL,{nif:null, tab:'ficha', f:{ncont:'', nome:'', vendedor:perfil()==='comercial'?String(S.me.vendedorPHC):''}, edit:true, novo:true, d:{}}); return desenharCliente(); }
+  if (arg) return cliAbrir(arg);
+  return cliLista();
+}
+async function cliLista(){
+  const m=$('#main'); m.innerHTML=`<div class="card muted">A carregar clientes…</div>`;
+  try { await carregarClientes(); } catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
+  m.innerHTML=`<div class="card">
+    <div class="row" style="margin-bottom:12px">
+      <input id="cl-q" type="search" autocomplete="off" name="procura-cli" placeholder="Nome, NIF ou localidade (pelo menos 2 letras)…" value="${esc(CL.q)}" style="max-width:420px">
+      <span class="muted" id="cl-n" style="font-size:12px"></span><span class="sp"></span>
+      ${cliPodeCriar()?`<button class="btn pri" id="cl-nv">+ Novo cliente</button>`:''}
+    </div>
+    <div class="scroll"><table id="cl-t"><thead><tr><th>Cliente</th><th>NIF</th><th>Localidade</th><th>Vendedor</th></tr></thead><tbody></tbody></table></div></div>`;
+  const tb=m.querySelector('#cl-t tbody'), n=$('#cl-n');
+  const desenha=()=>{
+    const t=semAcento(CL.q).trim(), pal=t.split(/\s+/).filter(Boolean);
+    if (t.length<2) { n.textContent=`${S.cli.length.toLocaleString('pt-PT')} cliente(s)${isStaff()?'':' na sua carteira'}`; tb.innerHTML=`<tr><td colspan="4" class="muted">${S.cli.length?'Escreva pelo menos 2 letras do nome, do NIF ou da localidade.':'Sem clientes na sua carteira.'}</td></tr>`; return; }
+    const L=S.cli.filter(c=>pal.every(p=>c._n.includes(p)||c.nif.includes(p)||semAcento(c.local).includes(p))).sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
+    n.textContent=`${L.length.toLocaleString('pt-PT')} encontrado(s)${L.length>100?' · a mostrar os primeiros 100, afine a pesquisa':''}`;
+    tb.innerHTML=L.slice(0,100).map(c=>`<tr class="click" data-nif="${esc(c.nif)}"><td><b>${esc(c.nome)}</b></td><td>${esc(c.nif)}</td><td>${esc(c.local)}</td><td class="muted">${esc(c.vend||'—')}</td></tr>`).join('')||`<tr><td colspan="4" class="muted">Nenhum cliente encontrado.</td></tr>`;
+    tb.querySelectorAll('[data-nif]').forEach(tr=>tr.onclick=()=>{ location.hash='#/clientes/'+encodeURIComponent(tr.dataset.nif); });
+  };
+  $('#cl-q').oninput=e=>{ CL.q=e.target.value; desenha(); };
+  const nv=$('#cl-nv'); if(nv) nv.onclick=()=>{ location.hash='#/clientes/novo'; };
+  desenha(); $('#cl-q').focus();
+}
+async function cliAbrir(nif){
+  const m=$('#main');
+  if (CL.nif!==nif || CL.novo) Object.assign(CL,{nif, tab:'ficha', f:null, edit:false, novo:false, d:{}});
+  if (!CL.f) {
+    m.innerHTML=`<div class="card muted">A carregar…</div>`; let erro='';
+    try { const s=await getDoc(doc(db,'clientesFicha',nif)); if (s.exists()) CL.f=s.data(); } catch(e){ erro=errTxt(e); }
+    if (CL.nif!==nif) return;
+    if (!CL.f) { m.innerHTML=`<div class="card"><p>${erro?'Este cliente não está na sua carteira.':'Este cliente ainda não tem ficha.'}</p><a href="#/clientes" class="btn" style="text-decoration:none">← Clientes</a></div>`; return; }
+  }
+  desenharCliente();
+}
+// processos do cliente: o comercial vê também os PN feitos por vendedores anteriores, desde que o cliente esteja hoje na sua carteira (só leitura)
+async function cliRpns(nif){
+  const col=collection(db,'rpn'), map=sn=>sn.docs.map(d=>({id:d.id, ...d.data()}));
+  try { return map(await getDocs(query(col, where('cliente.nif','==',nif)))); }
+  catch(e){ if (isStaff()) throw e; CL.d.soMeus=true; return map(await getDocs(query(col, where('vendedorUid','==',S.me.uid), where('cliente.nif','==',nif)))); }
+}
+async function cliDados(tab){
+  const nif=CL.nif, d=CL.d, k=tab==='fid'?'rpn':tab;
+  if (d[k]) return;
+  if (k==='rpn') d.rpn=(await cliRpns(nif)).sort((a,b)=>String(dataPN(b)).localeCompare(String(dataPN(a)))||(+b.numero||0)-(+a.numero||0));
+  if (k==='proj') { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)]; d.proj=(await getDocs(query(collection(db,'projetos'), ...meu, where('nif','==',nif)))).docs.map(x=>({id:x.id, ...x.data()})).sort((a,b)=>(b.alertaEm||'').localeCompare(a.alertaEm||'')); }
+  if (k==='prop') { const meu=isStaff()?[]:[where('comercialUid','==',S.me.uid)]; d.prop=(await getDocs(query(collection(db,'propostas'), ...meu, where('nif','==',nif)))).docs.map(x=>({id:x.id, ...x.data()})).sort((a,b)=>(+b.ord||0)-(+a.ord||0)); }
+}
+// linhas de PN ainda dentro do prazo de fidelização: por MSISDN conta o PN mais recente; ordenadas pela data de fim (a mais próxima primeiro)
+function fidelizacoes(rs){
+  const h=hojeLocal(), porMs={}, sem=[];
+  rs.filter(r=>['PN','Concluído'].includes(r.estado)).forEach(r=>{
+    const dPN=dataPN(r); if(!dPN) return; const dia=+dPN.slice(8,10)||1, mPN=r.mesRef||dPN.slice(0,7);
+    (r.linhas||[]).forEach(l=>{ const P=+l.prazo||0; if(!P) return;
+      const o={ref:l.ref||'', designacao:l.designacao||'', msisdn:l.msisdn||'', nat:natGrupo(l), natureza:l.natureza||'', prazo:P, rlmc:+l.rlmc||0, pnId:r.id, pnNumero:r.numero||'', pnData:dPN, vend:r.vendedorNome||'', fim:diaNoMes(somaMeses(mPN,P),dia)};
+      const ms=normMsisdn(l.msisdn);
+      if (ms.length<9) return sem.push(o);
+      const a=porMs[ms];
+      if (!a || dPN>a.pnData || (dPN===a.pnData && r.id!==a.pnId && (+r.numero||0)>(+a.num||0))) porMs[ms]={pnId:r.id, pnData:dPN, num:r.numero, ls:[o]};
+      else if (a.pnId===r.id) a.ls.push(o);
+    });
+  });
+  return [...Object.values(porMs).flatMap(x=>x.ls), ...sem].filter(o=>o.fim>=h).sort((a,b)=>a.fim.localeCompare(b.fim)||String(a.msisdn).localeCompare(String(b.msisdn)));
+}
+const faltaTxt = fim => { const d=Math.round((new Date(fim+'T12:00:00')-new Date(hojeLocal()+'T12:00:00'))/864e5); return d<60 ? `${d} dias` : `${Math.round(d/30.44)} meses`; };
+
+function desenharCliente(){
+  const m=$('#main'), f=CL.f, novo=CL.novo, pode=novo||cliPodeEditar(f), tab=novo?'ficha':CL.tab, d=CL.d;
+  const vn=vendPHCNome(f.vendedor);
+  let corpo='';
+  if (tab==='ficha') {
+    const campo=([k,l,t])=>{ const v=f[k]==null?'':String(f[k]), ro=!CL.edit||t==='ro'||(k==='ncont'&&!novo), dis=ro?'disabled':'';
+      if (t==='vend') { const us=Object.values(S.users).filter(u=>u.vendedorPHC && u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome)), tem=us.some(u=>String(u.vendedorPHC)===v);
+        return `<div><label>${l}</label><select data-k="${k}" ${CL.edit&&isBO()?'':'disabled'}><option value="">— Sem vendedor —</option>${us.map(u=>`<option value="${esc(u.vendedorPHC)}" ${String(u.vendedorPHC)===v?'selected':''}>${esc(u.nome)} (${esc(u.vendedorPHC)})</option>`).join('')}${v&&!tem?`<option value="${esc(v)}" selected>${esc(vn||'Vendedor '+v)}</option>`:''}</select></div>`; }
+      if (t==='ta') return `<div style="grid-column:1/-1"><label>${l}</label><textarea rows="3" data-k="${k}" ${dis}>${esc(v)}</textarea></div>`;
+      return `<div ${k==='nome'||k==='morada'?'style="grid-column:span 2"':''}><label>${l}</label><input data-k="${k}" value="${esc(v)}" ${dis}></div>`; };
+    corpo=`<div id="cl-form">${CLI_SEC.filter(s=>!novo||s[0]!=='Comercial'||isBO()).map(([t,cs])=>`<h3 style="margin:16px 0 8px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em">${t}</h3><div class="grid g4">${cs.filter(c=>!novo||c[2]!=='ro').map(campo).join('')}</div>`).join('')}</div>
+      <div class="row" style="margin-top:16px"><span class="sp"></span>
+        ${!CL.edit&&pode?`<button class="btn" id="cl-ed">Editar</button>`:''}
+        ${CL.edit?`<button class="btn" id="cl-cn">Cancelar</button><button class="btn pri" id="cl-sv">${novo?'Criar cliente':'Guardar'}</button>`:''}</div>`;
+  } else if (!d[tab==='fid'?'rpn':tab]) {
+    corpo=`<div class="muted">A carregar…</div>`;
+    cliDados(tab).then(()=>{ if (CL.f===f && CL.tab===tab) desenharCliente(); }).catch(e=>{ const c=$('#cl-corpo'); if(c) c.innerHTML=esc(errTxt(e)); });
+  } else if (tab==='fid') {
+    const L=fidelizacoes(d.rpn), soma=g=>L.filter(o=>!g||o.nat===g).reduce((a,o)=>a+o.rlmc,0), h6=diaNoMes(somaMeses(mesLocal(),6), new Date().getDate());
+    const chip=(t,v,x='')=>`<div class="chip" style="cursor:default"><span class="muted">${t}</span><b>${v}</b>${x}</div>`;
+    corpo=`<p class="muted" style="margin:0 0 12px;font-size:12px">Linhas de PN já fechados cuja fidelização ainda está a decorrer, da que termina mais cedo para a que termina mais tarde. Se o mesmo MSISDN aparece em vários PN, conta o mais recente.${d.soMeus?' <b style="color:var(--red-d)">Só estão incluídos os seus processos.</b>':''}</p>
+      <div class="chips" id="cl-fk" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${chip('Linhas em curso',L.length)}${['Móvel','Fixo','Outros'].map(g=>chip('RLMC '+g, eur(soma(g))+' €', `<span class="muted" style="font-size:11px">${L.filter(o=>o.nat===g).length} linha(s)</span>`)).join('')}${chip('RLMC total', eur(soma())+' €')}</div>
+      <div class="scroll"><table id="cl-ft"><thead><tr><th>Fim do contrato</th><th>Faltam</th><th>MSISDN</th><th>Referência</th><th>Designação</th><th>Natureza</th><th class="num">Prazo</th><th class="num">RLMC €</th><th>PN de origem</th></tr></thead>
+      <tbody>${L.map(o=>`<tr><td><b>${fmtD(o.fim)}</b></td><td ${o.fim<=h6?'style="color:#b45309;font-weight:600"':''}>${faltaTxt(o.fim)}</td><td>${o.msisdn?esc(o.msisdn):'<span class="muted">sem MSISDN</span>'}</td><td><b>${esc(o.ref)}</b></td><td>${esc(o.designacao)}</td><td>${esc(o.natureza||o.nat)}</td><td class="num">${o.prazo}</td><td class="num">${eur(o.rlmc)}</td><td><a href="#/rpn/${esc(o.pnId)}">PN ${esc(o.pnNumero)}</a> <span class="muted" style="font-size:11px">${fmtD(o.pnData)} · ${esc(o.vend)}</span></td></tr>`).join('')||`<tr><td colspan="9" class="muted">Sem fidelizações em curso.</td></tr>`}</tbody>
+      ${L.length?`<tfoot><tr class="tot"><td colspan="7">${L.length} linha(s)</td><td class="num">${eur(soma())}</td><td></td></tr></tfoot>`:''}</table></div>`;
+  } else if (tab==='rpn') {
+    corpo=`${d.soMeus?'<p class="muted" style="margin:0 0 12px;font-size:12px"><b style="color:var(--red-d)">Só estão incluídos os seus processos.</b></p>':''}<div class="scroll"><table id="cl-rt"><thead><tr><th>Nº</th><th>Data</th><th>Vendedor</th><th>BO</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th></tr></thead>
+      <tbody>${d.rpn.map(r=>`<tr class="click" data-id="${esc(r.id)}"><td><b>${esc(r.numero||'—')}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(dataPN(r))}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${esc((r.estado||'').replace(/ /g,'-'))}">${esc(r.estado)}</span></td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">Sem RPN nem PN para este cliente.</td></tr>`}</tbody></table></div>`;
+  } else if (tab==='proj') {
+    corpo=`<div class="scroll"><table id="cl-pt"><thead><tr><th>Alerta</th><th>Vendedor</th><th class="num">Linhas</th><th class="num">RLMC €</th><th>Fim do contrato</th><th>Estado</th></tr></thead>
+      <tbody>${d.proj.map(p=>`<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}</td><td>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</td><td class="num">${p.nLinhas||0}</td><td class="num">${eur(p.totRLMC)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}</td></tr>`).join('')||`<tr><td colspan="6" class="muted">Sem Projetos para este cliente.</td></tr>`}</tbody></table></div>`;
+  } else if (tab==='prop') {
+    const TP={novo:'Novo Serviço', refid:'Refidelização', upgrade:'Upgrade'};
+    corpo=`<p class="muted" style="margin:0 0 12px;font-size:12px">Propostas gravadas com o NIF deste cliente${isStaff()?'':' (as suas)'}. Para criar ou alterar, use o menu Propostas.</p><div class="scroll"><table id="cl-ot"><thead><tr><th>Data</th><th>Comercial</th><th>Tipo</th><th class="num">Mensalidade €</th><th class="num">Meses</th><th>Estado</th><th>RPN</th><th>Simulador</th></tr></thead>
+      <tbody>${d.prop.map(p=>`<tr><td>${esc(String(p.data||'').slice(0,10))}</td><td>${esc(p.comercial)}</td><td>${esc(TP[p.tipo]||p.tipo)}</td><td class="num">${p.mensalidade?eur(String(p.mensalidade).replace(',','.')):'—'}</td><td class="num">${esc(p.duracao)}</td><td>${esc(p.estado)}</td><td>${esc(p.rpnNumero||'—')}</td><td>${esc(p.simulador||'')}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">Sem propostas com este NIF.</td></tr>`}</tbody></table></div>`;
+  }
+  m.innerHTML=`<div class="card">
+    <div class="row" style="margin-bottom:6px"><a href="#/clientes" id="cl-bk" class="muted" style="font-size:12px">← Clientes</a></div>
+    <div class="row" style="margin-bottom:12px"><div><h2 id="cl-tit" style="margin:0">${novo?'Novo cliente':esc(f.nome||'—')}</h2>
+      <div class="muted" style="font-size:12px">${novo?'O NIF identifica o cliente e não pode repetir-se.':`NIF ${esc(f.ncont)}${f.no?' · Nº PHC '+esc(f.no):''} · ${vn?'vendedor: '+esc(vn):'sem vendedor'}`}</div></div>
+      <span class="sp"></span>${!novo&&!CL.edit?`<button class="btn pri" id="cl-rpn" title="Abre um RPN novo já com os dados deste cliente">+ Novo RPN</button>`:''}</div>
+    ${novo?'':`<div class="tabs">${CLI_TABS.map(([k,t])=>`<a data-ct="${k}" class="${tab===k?'on':''}">${t}</a>`).join('')}</div>`}
+    <div id="cl-corpo">${corpo}</div></div>`;
+  const sair=()=>!CL.edit || !S.dirty || confirm('Há alterações por guardar na ficha. Continuar sem guardar?');
+  m.querySelectorAll('[data-ct]').forEach(a=>a.onclick=()=>{ if(!sair()) return; if (CL.edit) { CL.edit=false; S.dirty=false; CL.f=null; CL.tab=a.dataset.ct; return cliAbrir(CL.nif); } CL.tab=a.dataset.ct; desenharCliente(); });
+  $('#cl-rpn')?.addEventListener('click',()=>{ const r=rpnVazio(); r.cliente.nif=String(f.ncont); r.cliente.nome=f.nome||''; preencherCliente(r).then(()=>{ S.pendingNovo=r; location.hash='#/novo'; }); });
+  m.querySelectorAll('#cl-rt [data-id]').forEach(tr=>tr.onclick=()=>{ location.hash='#/rpn/'+tr.dataset.id; });
+  m.querySelectorAll('#cl-pt [data-pj]').forEach(tr=>tr.onclick=()=>abrirProjeto(d.proj.find(p=>p.id===tr.dataset.pj), ()=>{ CL.d.proj=null; if (location.hash.startsWith('#/clientes/')) desenharCliente(); }));
+  if (tab!=='ficha') return;
+  if (CL.edit) m.querySelectorAll('#cl-form [data-k]').forEach(el=>el.addEventListener('input',()=>{ S.dirty=true; }));
+  $('#cl-ed')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
+  $('#cl-cn')?.addEventListener('click',()=>{ S.dirty=false; if (novo) { location.hash='#/clientes'; return; } CL.edit=false; CL.f=null; cliAbrir(CL.nif); });
+  $('#cl-sv')?.addEventListener('click', async()=>{
+    m.querySelectorAll('#cl-form [data-k]').forEach(el=>{ if(!el.disabled || el.dataset.k==='vendedor') f[el.dataset.k]=el.value.trim(); });
+    f.ncont=String(f.ncont||'').replace(/\s/g,'').toUpperCase();
+    if (!f.nome) return toast('Falta o nome do cliente.',true);
+    if (!f.ncont) return toast('O NIF é obrigatório.',true);
+    if (novo) {
+      if (/[\/.#$\[\]]/.test(f.ncont)) return toast('O NIF tem caracteres inválidos.',true);
+      if (/^\d+$/.test(f.ncont) && !nifValido(f.ncont) && !confirm(`"${f.ncont}" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?`)) return;
+    }
+    const data={}; CLI_KEYS.forEach(k=>{ if (f[k]!=null) data[k]=f[k]; });
+    data.vendedor=String(f.vendedor||''); data.vendnm=vendPHCNome(data.vendedor);
+    const bt=$('#cl-sv'); bt.disabled=true;
+    try { await gravarFicha(data, novo); S.cli=null; S.dirty=false; toast(novo?'Cliente criado.':'Ficha guardada.');
+      Object.assign(CL,{nif:data.ncont, f:null, edit:false, novo:false, tab:'ficha', d:{}});
+      if (location.hash==='#/clientes/'+encodeURIComponent(data.ncont)) cliAbrir(data.ncont); else location.hash='#/clientes/'+encodeURIComponent(data.ncont);
+    } catch(e){ bt.disabled=false; const c=e?.code||'';
+      if (c==='ja-existe' || (novo && c.includes('permission-denied'))) toast(`Já existe um cliente com o NIF ${f.ncont}${c==='ja-existe'?'':' (na carteira de outro vendedor)'}. Não é possível repetir NIFs.`,true);
+      else toast(errTxt(e),true); }
   });
 }
 

@@ -276,6 +276,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
             <div class="fg"><label class="flbl">Nome / Empresa</label><input class="finp" id="cn" placeholder="Empresa XYZ Lda" oninput="markU()" style="margin-bottom:0"></div>
             <div class="fg"><label class="flbl">Nº Contribuinte</label><input class="finp" id="cnif" placeholder="500000000" oninput="markU()" style="margin-bottom:0"></div>
           </div>
+          <div class="fg" style="margin-top:10px"><label class="flbl">Simulador <span style="font-weight:400;text-transform:none;letter-spacing:0">— referência interna, segue para o RPN e o PN; não aparece na proposta do cliente</span></label><input class="finp" id="csim" placeholder="ex.: nº ou nome da simulação" oninput="markU()" autocomplete="off" style="margin-bottom:0"></div>
           <div class="fr" style="margin-top:10px">
             <div class="fg"><label class="flbl">Mensalidade (€)</label><input class="finp" id="cm" type="number" placeholder="150" oninput="markU()" style="margin-bottom:0"></div>
             <div class="fg">
@@ -1235,7 +1236,7 @@ async function confirmSave(){
   const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
   const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
   const nif=document.getElementById('cnif')?.value?.trim()||'';
-  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,nif};
+  const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,nif,simulador:(document.getElementById('csim')?.value||'').trim()};
   entry.comercialUid=(CM.find(c=>c.nome===cNm)||CU).uid;entry.ord=Date.now();
   entry.projetoId=window._projetoId||((LD.find(x=>x.id===window._editingOriginalId)||{}).projetoId)||'';
   if(CU.funcao==='comercial'&&!entry.projetoId){let nAtr=0;try{nAtr=await FB.projetosEmAtraso();}catch(e){console.warn(e);}
@@ -1616,6 +1617,7 @@ function editL(id){
 
   // Fill mensalidade & duração
   document.getElementById('cm').value=p.mensalidade||'';
+  document.getElementById('csim').value=p.simulador||'';
   const selDur=document.getElementById('cd');
   for(let i=0;i<selDur.options.length;i++){
     if(selDur.options[i].value===String(p.duracao)){selDur.selectedIndex=i;break;}
@@ -1680,7 +1682,7 @@ function dupL(id){
   document.getElementById('cn').value=p.cliente||'';
   document.getElementById('cli-search').value=p.cliente||'';
   // Fill mensalidade (reset - duplicate starts fresh on price)
-  document.getElementById('cm').value='';
+  document.getElementById('cm').value='';document.getElementById('csim').value='';
   // Fill CTA
   selCTA(p.cta||'b');
   // Fill services
@@ -2006,7 +2008,7 @@ function renderDB(){
 function resetP(){
   if(SAVED&&!confirm('Tem a certeza? A proposta gravada mantém-se no registo.'))return;
   document.getElementById('cn').value='';document.getElementById('cnif').value='';
-  document.getElementById('cm').value='';document.getElementById('cd').value='24';
+  document.getElementById('cm').value='';document.getElementById('cd').value='24';document.getElementById('csim').value='';
   lastDuracao='24';
   const ccR=document.getElementById('ccoment');if(ccR)ccR.value='';
   const cvR=document.getElementById('cvalidade');if(cvR)cvR.value='';
@@ -2284,7 +2286,7 @@ function admCopiaSQL(){
 function toRPN(id){
   const p=LD.find(x=>x.id===id);
   if(!p){toast('⚠','Proposta não encontrada');return;}
-  const d={ref:p.id,cliente:p.cliente,nif:p.nif||'',comercial:p.comercial,tipo:p.tipo,tarif:p.tarif,mensalidade:p.mensalidade,duracao:p.duracao,notas:p.notas||''};
+  const d={ref:p.id,cliente:p.cliente,nif:p.nif||'',comercial:p.comercial,tipo:p.tipo,tarif:p.tarif,mensalidade:p.mensalidade,duracao:p.duracao,notas:p.notas||'',simulador:p.simulador||''};
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   window.open(RPN_URL+'?prop='+b64,'_blank');
 }
@@ -2305,7 +2307,7 @@ function abrirProjetoParam(){
   document.getElementById('cn').value=p.cliente||'';
   document.getElementById('cli-search').value=p.cliente||'';
   document.getElementById('cnif').value=p.nif||'';
-  document.getElementById('cm').value='';
+  document.getElementById('cm').value='';document.getElementById('csim').value='';
   SV=[];SID=0;
   (p.linhas||[]).forEach(l=>{
     const t=TF.find(x=>refKey(x.refPHC)&&refKey(x.refPHC)===refKey(l.ref));
@@ -2610,13 +2612,13 @@ import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, collection, quer
 const app = initializeApp(FIREBASE_CONFIG);
 const auth = getAuth(app), db = getFirestore(app);
 
-const CAMPOS = ['data','comercial','cliente','tipo','tarif','mensalidade','duracao','estado','notas','cta','validade','validadeDias','nif'];
+const CAMPOS = ['data','comercial','cliente','tipo','tarif','mensalidade','duracao','estado','notas','cta','validade','validadeDias','nif','simulador'];
 const diaDe = d => { const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/.exec(String(d||'').trim()); return m ? m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0') : ''; };
 const anoDe = d => { const m = /(\d{4})\s*$/.exec(String(d||'')); return m ? m[1] : '0000'; };
 const resumoDe = p => ({ c: p.comercial||'', e: p.estado||'pendente', t: p.tipo||'', m: String(p.mensalidade||''), d: p.data||'' });
 const toLocal = (id, x) => ({ id, data: x.data||'', comercial: x.comercial||'', cliente: x.cliente||'', tipo: x.tipo||'', tarif: x.tarif||'',
   mensalidade: String(x.mensalidade ?? ''), duracao: String(x.duracao ?? ''), estado: x.estado||'pendente', notas: x.notas||'', cta: x.cta||'b',
-  validade: x.validade||'', validadeDias: String(x.validadeDias ?? '15'), refPHC: x.refPHC||'', nif: String(x.nif||''),
+  validade: x.validade||'', validadeDias: String(x.validadeDias ?? '15'), refPHC: x.refPHC||'', nif: String(x.nif||''), simulador: x.simulador||'',
   comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', projetoId: x.projetoId||'', ord: x.ord||0, dia: x.dia||'' });
 const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); o.dia = diaDe(p.data); if (p.projetoId) o.projetoId = p.projetoId; return o; };
 async function commitEmBlocos(ops, n = 400, prog) {
@@ -2791,7 +2793,8 @@ window.FB = {
       const existe = ex.has(p.id);
       if (existe && !atualizar) { ignoradas++; return; }
       existe ? atualizadas++ : novas++;
-      const data = toDoc(p); if (!existe) { data.criadoEm = serverTimestamp(); data.importada = true; }
+      const data = toDoc(p); if (p.simulador == null) delete data.simulador;   // o Sheets não tem este campo: não apagar o que já cá está
+      if (!existe) { data.criadoEm = serverTimestamp(); data.importada = true; }
       ops.push(b => b.set(doc(db, 'propostas', p.id), data, { merge: true }));
     });
     await commitEmBlocos(ops);

@@ -96,8 +96,9 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   </div>
   <ul>
     <li><b>Propostas</b>: clientes, criação e acompanhamento de propostas, dashboard e ranking.</li>
-    <li><b>RPN</b>: Projetos, RPN, conferência, PN, catálogo de referências e produção da BackOffice.</li>
+    <li><b>RPN</b>: RPN, clientes (com tudo o que existe de cada um), Projetos, conferência, PN, catálogo de referências e produção da BackOffice.</li>
   </ul>
+  <p>No RPN, o menu <span class="bt">Propostas ↗</span> abre a aplicação das Propostas noutro separador. As fichas de cliente são as mesmas nas duas aplicações.</p>
   <p>As duas aplicações estão ligadas: de uma proposta ganha cria-se o RPN com um clique, e de um Projeto cria-se a proposta já preenchida.</p>
 </section>
 
@@ -158,7 +159,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
 
 <section data-p="v" id="v-clientes">
   <h2>2.1 Clientes <span class="tag v">Vendedores</span></h2>
-  <p>Nas Propostas, abra <span class="bt">👤 Clientes</span>.</p>
+  <p>Nas Propostas, abra <span class="bt">👤 Clientes</span>. No RPN, abra <span class="bt">Clientes</span>. É a mesma lista e a mesma ficha: o que alterar num lado fica alterado no outro.</p>
   <h3>Procurar um cliente</h3>
   <ol>
     <li>A lista abre vazia. Escreva <b>pelo menos 2 letras</b> do nome, ou o início do NIF.</li>
@@ -181,7 +182,21 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <li>Preencha pelo menos o nome e o NIF e grave.</li>
   </ol>
   <div class="aviso">Não pode haver dois clientes com o mesmo NIF. Se o NIF já existir, a plataforma recusa e avisa. Nesse caso o cliente já está registado, possivelmente na carteira de outro vendedor: fale com a chefia.</div>
-  <div class="dica">Dentro da ficha, o botão <span class="bt">📝 Nova proposta</span> abre uma proposta já com o cliente e o NIF preenchidos.</div>
+  <div class="dica">Dentro da ficha, o botão <span class="bt">📝 Nova proposta</span> (Propostas) abre uma proposta já com o cliente e o NIF preenchidos. No RPN, o botão <span class="bt r">+ Novo RPN</span> da ficha abre um RPN já com os dados do cliente.</div>
+  <h3>Tudo sobre o cliente (no RPN)</h3>
+  <p>No RPN, a ficha do cliente tem cinco separadores:</p>
+  <ul>
+    <li><b>Ficha</b>: os dados do cliente. <span class="bt">Editar</span> para alterar.</li>
+    <li><b>Fidelizações</b>: as linhas de PN já feitos cuja fidelização ainda está a decorrer, ordenadas pela data de fim (a que acaba primeiro em cima). Em cima vê a RLMC somada e separada em <b>Móvel</b>, <b>Fixo</b> e <b>Outros</b>. As que acabam nos próximos 6 meses estão a laranja.</li>
+    <li><b>RPN e PN</b>: todos os processos do cliente. Carregue numa linha para abrir.</li>
+    <li><b>Projetos</b>: os alertas de renegociação do cliente.</li>
+    <li><b>Propostas</b>: as propostas gravadas com o NIF do cliente.</li>
+  </ul>
+  <ul>
+    <li>Se o mesmo número (MSISDN) foi renegociado, nas Fidelizações conta o PN mais recente.</li>
+    <li>Vê também os PN feitos por vendedores anteriores, desde que o cliente esteja hoje na sua carteira. Esses PN são só para consulta.</li>
+    <li>Linhas «sem MSISDN» (por exemplo serviços fixos) aparecem sempre: confirme com o cliente se ainda estão ativas.</li>
+  </ul>
 </section>
 
 <section data-p="v" id="v-proposta">
@@ -190,6 +205,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ol>
     <li><b>Tipo</b>: escolha <i>Novo Serviço</i>, <i>Refidelização</i> ou <i>Upgrade</i>.</li>
     <li><b>Cliente</b>: escreva em <i>Pesquisar Cliente</i> e escolha da lista. O nome e o NIF ficam preenchidos. Se o cliente ainda não existir, crie-o primeiro em Clientes.</li>
+    <li><b>Simulador</b>: opcional. A referência da simulação usada no negócio. Não aparece no documento do cliente; segue para o RPN e fica no PN, para se saber de onde vieram os valores.</li>
     <li><b>Mensalidade (€)</b>: o valor mensal total da proposta.</li>
     <li><b>Duração padrão</b>: o prazo em meses (24 por omissão).</li>
     <li><b>Serviços Propostos</b>: em cada serviço escolha o tarifário e indique o número (se for um número concreto) ou a quantidade. Use <span class="bt">＋ Adicionar serviço</span> para mais linhas. Cada serviço pode ter a sua duração.</li>
@@ -240,13 +256,13 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ol>
     <li>Em Minhas Propostas, ponha a proposta em <b>Ganho</b>.</li>
     <li>Carregue no botão verde <span class="bt">RPN</span>. O RPN abre noutro separador.</li>
-    <li>Vêm preenchidos: cliente, NIF, as linhas com a referência e o prazo, e o MSISDN quando a proposta o tinha.</li>
+    <li>Vêm preenchidos: cliente, NIF, as linhas com a referência e o prazo, o MSISDN quando a proposta o tinha, o <b>Simulador</b> e o seu <b>Sub-SFID</b>.</li>
     <li>Complete o que falta (ver secção seguinte) e carregue em <span class="bt">Guardar</span> ou <span class="bt r">Submeter à BackOffice</span>.</li>
   </ol>
   <div class="aviso">Abrir o RPN a partir da proposta <b>não grava nada</b>. Se fechar o separador sem guardar, o RPN não fica criado e a proposta continua livre.</div>
   <h3>Diretamente no RPN</h3>
   <ol>
-    <li>No RPN, abra <span class="bt">Novo RPN</span>.</li>
+    <li>No RPN, abra <span class="bt">RPNs</span> e carregue no botão <span class="bt r">+ Novo RPN</span>, à direita. Em alternativa, abra a ficha do cliente em <span class="bt">Clientes</span> e carregue em <span class="bt r">+ Novo RPN</span>: o cliente já vem preenchido.</li>
     <li>Na caixa de pesquisa de cliente, escreva as primeiras letras do nome ou o início do NIF e escolha o cliente. Só aparecem os da sua carteira.</li>
     <li>Preencha as linhas e o resto do processo.</li>
   </ol>
@@ -353,6 +369,9 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <li>Número a cinzento: Projetos deste mês cuja data de alerta já chegou.</li>
   </ul>
   <p>Se tiver Projetos em atraso, aparece um aviso com a lista quando entra.</p>
+  <h3>O aviso do dia</h3>
+  <p>Na primeira vez que entra em cada dia, a plataforma mostra <b>«Hoje chegam à data N Projetos»</b>, com a lista dos clientes. Se não entrou nos dias anteriores (fim de semana, férias), a lista inclui os que chegaram à data desde a sua última entrada. Se estiver a meio de um RPN, o aviso aparece quando sair dele.</p>
+  <div class="dica">O aviso é guardado no computador onde entra. Se entrar noutro computador no mesmo dia, volta a aparecer.</div>
   <h3>Os dois separadores</h3>
   <ul>
     <li><b>Para tratar</b>: os Projetos à espera de decisão, com os <i>Em atraso</i> primeiro, agrupados por mês e com os dias de atraso.</li>
@@ -406,6 +425,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
 
 <section data-p="b" id="b-lista">
   <h2>3.1 A lista de RPN <span class="tag b">BackOffice</span></h2>
+  <div class="dica">O menu <span class="bt">Clientes</span> do RPN dá a ficha de qualquer cliente e, nos separadores, as Fidelizações em curso, os RPN e PN, os Projetos e as Propostas. A BackOffice e o Master alteram qualquer ficha e podem mudar o vendedor do cliente. O campo <b>Simulador</b> do RPN vem da proposta e fica no PN; pode ser corrigido enquanto o RPN estiver aberto.</div>
   <p>O RPN abre na lista. Para poupar consultas, carrega os processos <b>em curso</b> e os fechados do mês escolhido.</p>
   <ul>
     <li><b>Caixas de estado</b> no topo: mostram quantos processos há em cada estado. Carregar numa filtra a lista.</li>
