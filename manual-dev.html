@@ -297,8 +297,8 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   </ul>
   <h3>Notas e resumo</h3>
   <ul>
-    <li><b>Notas para a BackOffice</b>: instruções para quem implementa (documentos a aguardar, cuidados, pedidos especiais).</li>
-    <li><b>Resumo do negócio</b>: o que foi vendido, em poucas linhas.</li>
+    <li><b>Resumo do Negócio</b> (à esquerda): escrito pelo vendedor. O que foi vendido e o que a BackOffice precisa de saber para implementar (documentos a aguardar, cuidados, pedidos especiais).</li>
+    <li><b>Relatório BackOffice</b> (à direita): escrito pela BackOffice. O vendedor só lê.</li>
   </ul>
   <h3>Anexos</h3>
   <p>No separador <b>Anexos</b>, carregue os documentos do processo (contrato, identificação, CRC…). É preciso guardar o RPN primeiro.</p>
@@ -338,8 +338,8 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <tr><td><span class="est">Pendente Comercial</span></td><td>Falta alguma coisa do lado do vendedor.</td><td><b>Resolver e devolver à BO.</b></td></tr>
     <tr><td><span class="est">Pendente Documentos</span></td><td>Faltam documentos.</td><td><b>Anexar e devolver à BO.</b></td></tr>
     <tr><td><span class="est">A aguardar</span></td><td>Implementado, à espera de um prazo (ciclo de faturação, instalação, portabilidade…).</td><td>Aguardar.</td></tr>
-    <tr><td><span class="est">Em Conferência</span></td><td>Uma segunda BackOffice está a confirmar a implementação.</td><td>Aguardar.</td></tr>
-    <tr><td><span class="est">PN</span></td><td>Conferido e fechado.</td><td>Nada. Negócio concluído.</td></tr>
+    <tr><td><span class="est">Concluído</span></td><td>A BackOffice terminou a implementação. É o último estado enquanto RPN; segue para conferência interna.</td><td>Nada. O seu trabalho neste processo terminou.</td></tr>
+    <tr><td><span class="est">PN</span></td><td>Conferido por uma segunda BackOffice e fechado como Processo de Negócio.</td><td>Nada.</td></tr>
     <tr><td><span class="est">Cancelado</span> / <span class="est">Reprovado</span></td><td>O processo não avançou.</td><td>Ver o motivo no Histórico ou nas Mensagens.</td></tr>
   </table></div>
   <h3>Quando o RPN fica pendente</h3>
@@ -352,6 +352,8 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ul>
     <li><b>Mensagens</b>: escreva no separador Mensagens. Fica tudo registado no processo. A outra pessoa vê um 💬 nesse RPN na lista e um contador no menu, até abrir as Mensagens.</li>
     <li><b>Mensagens por ler</b>: quando o menu <i>RPNs</i> mostrar 💬 com um número, há mensagens para si. Na lista, marque <b>💬 Mensagens por ler</b> para ver só esses processos. Não há aviso por email: convém olhar para o contador sempre que entra.</li>
+    <li><b>Avisos automáticos</b>: sempre que a BackOffice muda o estado do RPN, recebe uma mensagem <i>Novo estado: "…"</i>, com o motivo quando existe (por exemplo os documentos em falta). O último aviso é o de <i>Concluído</i>.</li>
+    <li><b>Concluídos</b>: 8 dias depois de concluído, o processo sai da sua lista. Continua na ficha do cliente (separador RPN e PN) e em <span class="bt">Procurar no histórico</span>. Pode sempre abri-lo para acompanhar a conferência e a passagem a PN.</li>
     <li><span class="bt">Email</span>: abre o seu programa de email com uma mensagem para a BackOffice do processo, já com o número e a ligação do RPN.</li>
     <li><b>Histórico</b>: mostra quem fez o quê e quando.</li>
   </ul>
@@ -405,8 +407,46 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <div class="aviso">A chefia pode ligar um bloqueio: a partir de um certo dia do mês, quem tiver Projetos em atraso deixa de conseguir gravar propostas novas. As propostas criadas a partir de um Projeto continuam a ser permitidas. Para não ser apanhado, feche os atrasados com uma das três decisões.</div>
 </section>
 
+<section data-p="v" id="v-atividades">
+  <h2>2.9 Atividades <span class="tag v">Vendedores</span></h2>
+  <p>Uma <b>Atividade</b> é um pedido à BackOffice que <b>não é um negócio</b>: desativar um serviço, pedir uma 2.ª via de fatura, alterar um contacto ou a designação do cliente, pedir um crédito, encomendar um equipamento, corrigir uma implementação. Funciona como o RPN, mas sem linhas nem Score.</p>
+  <p>No RPN, abra <span class="bt">Atividades</span> e carregue em <span class="bt r">+ Nova Atividade</span>. Também pode criá-la na ficha do cliente, separador <b>Atividades</b>: o cliente e a conta já vêm preenchidos.</p>
+  <h3>Preencher o pedido</h3>
+  <ol>
+    <li><b>Cliente</b>: escolha na caixa de pesquisa.</li>
+    <li><b>Assunto</b>: <i>Aprovação</i> (pedido que a BackOffice submete à Vodafone para aprovar), <i>Implementação</i> (pedido para executar) ou <i>Correcção Implementação</i> (corrigir algo de um PN já feito).</li>
+    <li><b>Sub-assunto</b>: Alteração, Desativação, Desconto, Tarifário, Créditos, Faturação, Equipamentos ou Outros. Ao escolher, a descrição mostra o que a BackOffice precisa de saber.</li>
+    <li><b>Conta Vodafone</b> e <b>Número(s) afetado(s)</b>: preencha sempre que o pedido for sobre uma conta ou números concretos (vários números separados por vírgula). É por aqui que depois se encontra o pedido.</li>
+    <li><b>Data efetiva pretendida</b>: quando o pedido tem data (por exemplo uma desativação).</li>
+    <li><b>Descrição do pedido</b>: o que é preciso fazer, com todos os dados.</li>
+    <li>Junte documentos no separador <b>Anexos</b> (pedido do cliente, certidão permanente, comprovativo de IBAN). Para anexar, guarde primeiro.</li>
+    <li>Carregue em <span class="bt r">Submeter à BackOffice</span>. A Atividade recebe um número (A1, A2…) e é atribuída a uma BackOffice.</li>
+  </ol>
+  <ul>
+    <li>Em <i>Correcção Implementação</i> é obrigatório indicar o <b>PN relacionado</b>.</li>
+    <li>Em <i>Créditos</i> é obrigatório indicar o <b>valor</b> (sem IVA).</li>
+  </ul>
+  <div class="aviso">Dados bancários (IBAN/NIB): junte o comprovativo como anexo em vez de os escrever na descrição.</div>
+  <h3>Estados</h3>
+  <div class="scroll"><table>
+    <tr><th>Estado</th><th>O que significa</th><th>O que tem de fazer</th></tr>
+    <tr><td><span class="est">Em Elaboração</span></td><td>Rascunho, ainda não entregue.</td><td>Completar e submeter.</td></tr>
+    <tr><td><span class="est">Submetido</span></td><td>Entregue à BackOffice.</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">Em tratamento</span></td><td>A BackOffice está a tratar.</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">Pendente Comercial</span></td><td>Falta alguma coisa do seu lado; o motivo aparece no topo.</td><td><b>Corrigir e carregar em "Resolvido · devolver à BO".</b></td></tr>
+    <tr><td><span class="est">A aguardar</span></td><td>À espera de terceiros (Vodafone, data efetiva, cliente).</td><td>Aguardar.</td></tr>
+    <tr><td><span class="est">Concluído</span></td><td>Feito. O que foi feito está no <b>Relatório BackOffice</b>.</td><td>Nada.</td></tr>
+    <tr><td><span class="est">Recusado</span> / <span class="est">Cancelado</span></td><td>O pedido não pôde ser feito ou foi anulado; o motivo aparece no topo.</td><td>Ver o motivo.</td></tr>
+  </table></div>
+  <ul>
+    <li>Em cada mudança de estado recebe um <b>aviso automático</b> nas Mensagens da Atividade, com o motivo ou com o relatório final. A lista mostra 💬 quando há mensagens por ler.</li>
+    <li>A coluna <b>Dias em aberto</b> mostra há quanto tempo o pedido foi submetido.</li>
+    <li>As Atividades fechadas saem da sua lista ao fim de 8 dias. Continuam na ficha do cliente e em <span class="bt">Procurar no histórico</span> (por número, NIF ou número de telefone).</li>
+  </ul>
+</section>
+
 <section data-p="v" id="v-faq">
-  <h2>2.9 Perguntas frequentes <span class="tag v">Vendedores</span></h2>
+  <h2>2.10 Perguntas frequentes <span class="tag v">Vendedores</span></h2>
   <h3>Não encontro um cliente.</h3>
   <p>Só vê os clientes da sua carteira. Se o cliente existe mas está com outro vendedor, ou sem vendedor, peça à chefia para o atribuir.</p>
   <h3>Não encontro uma referência nas linhas do RPN.</h3>
@@ -463,7 +503,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
 <section data-p="b" id="b-implementar">
   <h2>3.3 Implementar um RPN <span class="tag b">BackOffice</span></h2>
   <ol>
-    <li>Abra o RPN e leia as <b>Notas para a BackOffice</b>, o resumo do negócio e os anexos.</li>
+    <li>Abra o RPN e leia o <b>Resumo do Negócio</b> (escrito pelo vendedor) e os anexos. O que tiver a registar sobre a implementação escreve-se no <b>Relatório BackOffice</b>.</li>
     <li>Mude o <b>Estado</b> para <i>Em Implementação</i> e guarde.</li>
     <li>Implemente na Vodafone.</li>
     <li>Em cada linha, preencha o <b>Contrato VDF</b> e confirme MSISDN, conta, RLMC e prazo. Pode corrigir o que estiver errado.</li>
@@ -503,7 +543,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ol>
     <li>Carregue em <span class="bt r">Implementação terminada · enviar para conferência</span>.</li>
     <li>Se houver linhas sem contrato VDF, a plataforma avisa e pergunta se quer enviar na mesma.</li>
-    <li>O RPN passa a <i>Em Conferência</i> e é atribuído automaticamente a outra BackOffice. Se não houver ninguém disponível, fica em fila.</li>
+    <li>O RPN passa a <i>Concluído</i> e é atribuído automaticamente a outra BackOffice para conferir. Se não houver ninguém disponível, fica em fila. O vendedor recebe aqui o último aviso automático; a devolução pela conferência e a passagem a PN já não o avisam.</li>
   </ol>
   <h3>Quem confere</h3>
   <ol>
@@ -569,13 +609,35 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <tr><td>Conferir</td><td>1</td><td>Quando o RPN passa a PN.</td></tr>
     <tr><td>RPN cancelado ou reprovado</td><td>2</td><td>Para a BackOffice que o tinha atribuído.</td></tr>
     <tr><td>Devolução pela conferência</td><td>−3 (150% do que receberia)</td><td>Para quem implementou, no mês da devolução.</td></tr>
+    <tr><td>Atividade concluída ou recusada</td><td>2 por Atividade</td><td>Para a BackOffice que a tratou, no mês em que fecha. As canceladas não contam.</td></tr>
   </table></div>
   <p>O valor mensal definido pela administração é repartido pelas BackOffices na proporção dos pontos de cada uma. Os pesos podem ser alterados pelo Master.</p>
   <p>Uma penalização por devolução pode ser anulada pelo Master, se a devolução não se justificar.</p>
 </section>
 
+<section data-p="b" id="b-atividades">
+  <h2>3.10 Atividades <span class="tag b">BackOffice</span></h2>
+  <p>As <b>Atividades</b> são os pedidos dos vendedores que não são negócio (desativações, 2.ªs vias, créditos, alterações de dados, equipamentos, correções). São atribuídas automaticamente à BackOffice com menos carga, como os RPN. <b>Quem trata, fecha: não há conferência.</b></p>
+  <ol>
+    <li>Abra <span class="bt">Atividades</span>. Com <b>Só as minhas</b> marcado vê as que lhe estão atribuídas. A coluna <b>Dias em aberto</b> fica a vermelho a partir de 5 dias.</li>
+    <li>Abra a Atividade e leia a descrição e os anexos. Se quiser, marque <span class="bt">Em tratamento</span>.</li>
+    <li>Se faltar informação: <span class="bt">Pendente Comercial</span> e escreva o que falta. O vendedor é avisado, corrige e devolve.</li>
+    <li>Se depender de terceiros (Vodafone, data efetiva): <span class="bt">A aguardar</span> e escreva o que se aguarda.</li>
+    <li>Preencha a <b>Ref.ª do pedido na Vodafone</b> quando existir, para se poder seguir o pedido mais tarde.</li>
+    <li>Quando estiver feito, escreva o <b>Relatório BackOffice</b> (obrigatório) e carregue em <span class="bt r">Concluir</span>. O vendedor recebe o aviso com o relatório.</li>
+    <li>Se o pedido não puder ser feito (por exemplo, recusado pela Vodafone): <span class="bt">Recusado</span>, com o motivo. Se o pedido deixou de fazer sentido: <span class="bt">Cancelar</span>.</li>
+  </ol>
+  <ul>
+    <li><b>Carga</b>: cada Atividade em aberto conta 1 para a carga da BackOffice (um RPN conta as suas linhas).</li>
+    <li><b>Produção BO</b>: cada Atividade concluída ou recusada vale 2 pontos (peso alterável pelo Master). As canceladas não pontuam.</li>
+    <li><b>Mudar de BackOffice</b>: no campo <i>BackOffice</i> da Atividade, escolha a colega e guarde. Nas <b>Ausências</b>, as Atividades em aberto da colega ausente são redistribuídas com os RPN.</li>
+    <li><b>Correcção Implementação</b>: traz sempre o PN relacionado. Serve para saber que PN geraram correções.</li>
+    <li>Só o Master reabre uma Atividade fechada.</li>
+  </ul>
+</section>
+
 <section data-p="b" id="b-faq">
-  <h2>3.10 Perguntas frequentes <span class="tag b">BackOffice</span></h2>
+  <h2>3.11 Perguntas frequentes <span class="tag b">BackOffice</span></h2>
   <h3>Não tenho o botão de conferir.</h3>
   <p>Ou a conferência está atribuída a outra colega, ou foi a própria a implementar. Quem implementou nunca confere.</p>
   <h3>O RPN está em conferência "em fila".</h3>

@@ -48,7 +48,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .b-Concluído,.b-PN{background:#e6f4ea;color:var(--ok)}
 .b-Em-Conferência{background:#e0f4f7;color:#0b6b7a}
 .b-A-aguardar,.b-A-aguardar-ciclo{background:#eef0f4;color:#4a5568}.venc{background:#fde8e8!important;color:var(--red-d)!important}
-.b-Cancelado,.b-Reprovado{background:#fde8e8;color:var(--red-d)}
+.b-Cancelado,.b-Reprovado,.b-Recusado{background:#fde8e8;color:var(--red-d)}
+.b-Em-tratamento{background:#e8e4fb;color:#4b2fb0}
 .pj-0{background:#fff4d6;color:#8a5a00}.pj-1{background:#e0ecff;color:#1d4ed8}.pj-2{background:#dcfce7;color:#166534}.pj-3{background:#fde8e8;color:var(--red-d)}.pj-4{background:#ede9fe;color:#5b21b6}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .chip{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;min-width:110px}
@@ -68,6 +69,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .msgs{max-height:380px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
 .msg{background:#f3f3f5;border-radius:8px;padding:8px 10px;max-width:80%}
 .msg.mine{background:#fde8e8;align-self:flex-end}
+.msg.auto{background:#eef2ff;border:1px solid #c7d2fe;align-self:center;text-align:center;font-weight:600}
 .msg small{display:block;color:var(--mut);font-size:11px}
 .hist td{font-size:13px}
 .motivos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 12px}
@@ -106,8 +108,8 @@ import { getFirestore, doc, getDoc, getDocs, setDoc as _setDoc, updateDoc as _up
 import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject, connectStorageEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 
 // economia de leituras: a lista de RPN fica em memória 1 minuto; qualquer escrita feita nesta sessão obriga a reler
-let LISTA_EM = 0;
-const suja = f => (...a) => { LISTA_EM = 0; return f(...a); };
+let LISTA_EM = 0, AT_EM = 0;
+const suja = f => (...a) => { LISTA_EM = 0; AT_EM = 0; return f(...a); };
 const setDoc = suja(_setDoc), updateDoc = suja(_updateDoc), addDoc = suja(_addDoc), deleteDoc = suja(_deleteDoc), runTransaction = suja(_runTransaction), writeBatch = suja(_writeBatch);
 const LISTA_TTL = 60000;
 const EMU = new URLSearchParams(location.search).has('emu') && ['localhost','127.0.0.1'].includes(location.hostname);
@@ -139,6 +141,8 @@ const diasDesde = iso => iso ? Math.max(0, Math.floor((new Date(hoje()) - new Da
 const esperaVencida = r => r.estado==='A aguardar' && r.esperaData && r.esperaData < hoje();
 const esperaTxt = r => { const m = ESPERA_TXT[r.esperaMotivo]||'A aguardar'; return r.esperaData ? `${m} · ${esperaVencida(r)?'verificar, passou ':'até '}${fmtD(r.esperaData)}` : `${m} · há ${diasDesde(r.esperaDesde)} dia(s)`; };
 const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar','A aguardar ciclo'];   // contam para a carga da BO
+const estTxt = e => e==='Em Conferência' ? 'Concluído' : (e||'');   // na base de dados continua «Em Conferência»
+const DIAS_CONCLUIDO = 8;   // dias em que um processo concluído ainda aparece na lista do comercial
 const EDIT_COM = ['Em Elaboração','Pendente Comercial','Pendente Documentos'];                // comercial pode editar
 const MOTIVOS  = ['Doc. Identificação','Contrato','CRC','Morada','Condições Comerciais','Dívida'];
 const NATUREZAS= ['Ref Móvel','Nova Móvel','Ref Fixo','Nova Fixo','Nova SS'];
@@ -193,7 +197,7 @@ onAuthStateChanged(auth, async user => {
     const snap = await getDoc(doc(db,'users',user.uid));
     if (!snap.exists() || !snap.data().ativo) { $('#app').innerHTML = `<div class="login card"><h2>Conta sem acesso</h2><p class="muted">A conta ${esc(user.email)} não tem perfil ativo. Contacte o administrador.</p><button class="btn" id="out">Sair</button></div>`; $('#out').onclick=()=>signOut(auth); return; }
     S.me = {uid:user.uid, ...snap.data()};
-    S.projN = 0; S.projAtr = 0; Object.assign(CL,{q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}}); Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[], cfg:{}});
+    S.projN = 0; S.projAtr = 0; Object.assign(AT,{lista:null, mes:null, listaMes:null, extra:[], f:{estado:'',txt:'',meus:null}, cur:null, tab:'pedido', pend:null}); AT_EM = 0; Object.assign(CL,{q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}}); Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[], cfg:{}});
     await Promise.all([loadUsers(), loadProdutos()]);
     handlePropostaParam();
     render();
@@ -243,7 +247,7 @@ function render(){
   clearSubs();
   const h = location.hash || '#/lista';
   if (S.avisoPend && !S.dirty && !h.startsWith('#/rpn/') && !h.startsWith('#/novo')) { const av=S.avisoPend; S.avisoPend=null; setTimeout(av,0); }
-  const nav = [['#/lista','RPNs'],[PROPOSTAS_URL,'Propostas ↗'],['#/clientes','Clientes']];   // «Novo RPN» é o botão dentro de RPNs
+  const nav = [['#/lista','RPNs'],['#/atividades','Atividades'],[PROPOSTAS_URL,'Propostas ↗'],['#/clientes','Clientes']];   // «Novo RPN» é o botão dentro de RPNs
   nav.push(['#/projetos','Projetos'+navProj()]);
   if (isStaff()) nav.push(['#/catalogo','Catálogo']);
   if (isBO()) nav.push(['#/producao','Produção BO']);
@@ -261,6 +265,7 @@ function render(){
   if (h.startsWith('#/novo')) return viewFicha(null);
   if (h.startsWith('#/projetos')) return viewProjetos();
   if (h.startsWith('#/clientes')) return viewClientes();
+  if (h.startsWith('#/atividades')) return viewAtividades();
   if (h.startsWith('#/catalogo') && isStaff()) return viewCatalogo();
   if (h.startsWith('#/producao') && isBO()) return viewProducao();
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
@@ -308,10 +313,13 @@ async function procurarHistorico(){
   S.filtros.estado=''; toast(docs.length+' processo(s) encontrado(s) no histórico.'); drawLista();
 }
 function drawLista(){
+  if (!S.me || !S.list || !$('#main')) return;   // chamada atrasada (pesquisa a escrever) depois de sair
   const f = S.filtros, all = S.list;
   const nMsg = all.filter(msgPorLer).length;
   { const a=document.querySelector('header nav a[href="#/lista"]'); if(a) a.innerHTML='RPNs'+(nMsg?` <b id="rp-msg" title="RPN com mensagens por ler" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px">💬 ${nMsg}</b>`:''); }
-  const base = all.filter(r => (!f.msg || msgPorLer(r)) && (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
+  const lim = (()=>{ const d=new Date(); d.setDate(d.getDate()-DIAS_CONCLUIDO); return d.toISOString(); })(), extra = new Set((S.extra||[]).map(x=>x.id));
+  const velho = r => !isStaff() && f.mes===mesLocal() && ['Em Conferência','PN','Concluído'].includes(r.estado) && !extra.has(r.id) && !msgPorLer(r) && String(r.implementadoEm||r.fechadoEm||r.data||'') < lim;
+  const base = all.filter(r => !velho(r) && (!f.msg || msgPorLer(r)) && (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
     && (!f.ciclo || esperaVencida(r))
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
@@ -322,7 +330,7 @@ function drawLista(){
   $('#main').innerHTML = `
     <div class="chips">
       <div class="chip ${!f.estado?'on':''}" data-e=""><span class="muted">Todos</span><b>${base.length}</b></div>
-      ${[...ESTADOS,...(cnt['Concluído']?['Concluído']:[])].map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}
+      ${[...ESTADOS,...(cnt['Concluído']?['Concluído']:[])].map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(estTxt(e))}</span><b>${cnt[e]||0}</b></div>`).join('')}
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
@@ -339,7 +347,7 @@ function drawLista(){
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>':''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(r.estado)}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>':''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -348,7 +356,7 @@ function drawLista(){
   $('#nv').onclick=()=>go('#/novo');
   $('#fr').onclick=()=>viewLista(true);
   if ($('#aus')) $('#aus').onclick=()=>ausencias().catch(e=>toast(errTxt(e),true));
-  const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
+  const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
   $('#fm').onchange=e=>{ if(e.target.value){ f.mes=e.target.value; viewLista(); } };
   $('#fh').onclick=procurarHistorico;
   if ($('#fv')) { $('#fv').onchange=e=>{ f.vend=e.target.value; drawLista(); }; $('#fb').onchange=e=>{ f.bo=e.target.value; drawLista(); }; }
@@ -436,7 +444,7 @@ function drawFicha(){
     <div class="row" style="margin-bottom:12px">
       <button class="btn ghost" id="back">← Lista</button>
       <h1>${r.numero?`${r.estado==='PN'?'PN':'RPN'} ${r.numero}`:'Novo RPN'}</h1>
-      <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(r.estado)}</span>
+      <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(estTxt(r.estado))}</span>
       ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
       ${r.estado==='Em Conferência'?`<span class="muted">Conferência: <b>${esc(r.confNome||'em fila (sem BO disponível)')}</b></span>`:''}
       ${r.origem==='PHC'?`<span class="badge">histórico PHC</span>`:(r.estado==='PN'?`<span class="muted">Conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:'')}
@@ -490,7 +498,7 @@ function tabPrincipal(tc, dis, p){
       ${fld('Cliente','cliente.nome',dis)}${fld('NIF','cliente.nif',dis)}${fld('Nº Cliente (PHC)','cliente.nCliente',dis)}${fld('Data','data',dis,'date')}
       ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}${fld('Simulador','simulador',dis,'text','title="Referência do simulador usado no negócio. Vem da proposta e fica no PN, para rastreabilidade."')}
       ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
-      ${sel('Estado','estado',ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN],isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
+      ${sel('Estado','estado',(ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN]).map(e=>[e,estTxt(e)]),isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
       <div id="cx-esp" style="${r.estado==='A aguardar'?'':'display:none'};grid-column:span 2"><div class="grid g2" style="gap:10px">
         <div><label>A aguardar o quê</label><select data-f="esperaMotivo" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${ESPERAS.map(([v,t])=>`<option value="${v}" ${r.esperaMotivo===v?'selected':''}>${t}</option>`).join('')}</select></div>
         <div id="cx-ciclo" style="${r.esperaMotivo==='ciclo'?'':'display:none'}"><label>Ciclo${r.esperaMotivo==='ciclo'&&r.esperaData?` · fecha a ${fmtD(r.esperaData)}`:''}</label><select data-f="cicloDia" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${CICLOS.map(([v,t])=>`<option value="${v}" ${r.cicloDia===v?'selected':''}>${t}</option>`).join('')}</select></div>
@@ -514,8 +522,8 @@ function tabPrincipal(tc, dis, p){
     <div class="card"><div class="grid g2">
       ${(()=>{ // PN do histórico PHC só com um texto: é o resumo do negócio, mesmo que esteja guardado como nota
         const soNota = r.origem==='PHC' && !r.condicoes?.resumo && r.notas;
-        return `<div><label>Notas para a BackOffice</label><textarea data-f="notas" ${dis} rows="5">${esc(soNota?'':r.notas)}</textarea></div>
-      <div><label>Resumo do negócio</label><textarea data-f="condicoes.resumo" ${dis} rows="5">${esc(soNota?r.notas:r.condicoes?.resumo)}</textarea></div>`; })()}
+        return `<div><label>Resumo do Negócio</label><textarea data-f="condicoes.resumo" ${dis} rows="5">${esc(soNota?r.notas:r.condicoes?.resumo)}</textarea></div>
+      <div><label>Relatório BackOffice</label><textarea data-f="notas" ${isBO()&&p.edit?'':'disabled'} rows="5" title="Escrito pela BackOffice. O vendedor só lê.">${esc(soNota?'':r.notas)}</textarea></div>`; })()}
     </div></div>
     <div id="t-out"></div><div id="t-cond"></div>
     <datalist id="dl-prod">${S.prodList.map(x=>`<option value="${esc(x.ref)}">${esc(x.designacao)} · ${esc(x.tier)}</option>`).join('')}</datalist>`;
@@ -715,10 +723,10 @@ function tabMsg(tc){
   if (!r.id) { tc.innerHTML=`<div class="card muted">Guarde o RPN primeiro.</div>`; return; }
   tc.innerHTML = `<div class="card"><div class="msgs" id="ml"><span class="muted">A carregar…</span></div>
     <textarea id="mt" rows="3" placeholder="Escrever mensagem para ${esc(r.vendedorUid===S.me.uid ? (r.boNome||'a BackOffice') : r.vendedorNome)}…"></textarea>
-    <div class="row" style="margin-top:8px"><label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" id="me" checked> Abrir também email no Outlook</label><span class="sp"></span><button class="btn pri" id="ms">Enviar</button></div></div>`;
+    <div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn pri" id="ms">Enviar</button></div></div>`;
   const un = onSnapshot(query(collection(db,'rpn',r.id,'mensagens'),orderBy('em')), s=>{
     const el=$('#ml'); if(!el) return;
-    el.innerHTML = s.docs.map(d=>{ const x=d.data(); return `<div class="msg ${x.porUid===S.me.uid?'mine':''}"><small>${esc(x.porNome)} · ${tsTxt(x.em)}</small>${esc(x.texto).replace(/\n/g,'<br>')}</div>`; }).join('') || `<span class="muted">Sem mensagens.</span>`;
+    el.innerHTML = s.docs.map(d=>{ const x=d.data(); return `<div class="msg ${x.auto?'auto':x.porUid===S.me.uid?'mine':''}"><small>${x.auto?'Aviso automático · ':''}${esc(x.porNome)} · ${tsTxt(x.em)}</small>${esc(x.texto).replace(/\n/g,'<br>')}</div>`; }).join('') || `<span class="muted">Sem mensagens.</span>`;
     el.scrollTop = el.scrollHeight;
     const u=s.docs.at(-1)?.data(); marcarMsgLidas(S.cur, u ? {porUid:u.porUid, _n:s.docs.length} : null);
   }, e=>toast(errTxt(e),true));
@@ -726,12 +734,12 @@ function tabMsg(tc){
   $('#ms').onclick = async ()=>{ const t=$('#mt').value.trim(); if(!t) return; try{ await addDoc(collection(db,'rpn',r.id,'mensagens'),{texto:t,porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()});
       const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome};   // assinala «por ler» à outra parte, na lista
       await setDoc(doc(db,'rpn',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e));
-      if($('#me').checked) enviarEmail(t); $('#mt').value=''; }catch(e){ toast(errTxt(e),true); } };
+      $('#mt').value=''; }catch(e){ toast(errTxt(e),true); } };
 }
 function enviarEmail(texto){
   const r=S.cur; const para = r.vendedorUid===S.me.uid ? S.users[r.boUid]?.email : S.users[r.vendedorUid]?.email;
   const url = location.href.split('#')[0].split('?')[0] + '#/rpn/' + r.id;
-  const body = `${texto ? texto+'\n\n' : ''}RPN ${r.numero} · ${r.cliente?.nome||''} (NIF ${r.cliente?.nif||''})\nEstado: ${r.estado}${(r.motivos||[]).length?' — '+r.motivos.join(', '):''}\n${url}`;
+  const body = `${texto ? texto+'\n\n' : ''}RPN ${r.numero} · ${r.cliente?.nome||''} (NIF ${r.cliente?.nif||''})\nEstado: ${estTxt(r.estado)}${(r.motivos||[]).length?' — '+r.motivos.join(', '):''}\n${url}`;
   location.href = `mailto:${encodeURIComponent(para||'')}?subject=${encodeURIComponent(`RPN ${r.numero} – ${r.cliente?.nome||''}`)}&body=${encodeURIComponent(body)}`;
 }
 
@@ -749,9 +757,24 @@ function tabHist(tc){
 }
 function hist(acao, detalhe, id){ const rid=id||S.cur?.id; if(!rid) return Promise.resolve(); return addDoc(collection(db,'rpn',rid,'historico'),{acao,detalhe:detalhe||'',porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()}).catch(e=>console.warn('hist',e)); }
 
+// Mensagem automática no separador Mensagens: «Novo estado: "…"» + motivo. Só quando não é o próprio vendedor a mudar,
+// e até «Concluído» (envio para conferência): a devolução pela conferência e a passagem a PN já não geram aviso.
+async function msgEstado(id, r, antigo, novo){
+  if (!id || !novo || antigo===novo || S.me.uid===r.vendedorUid || !r.vendedorUid) return;
+  if (antigo==='Em Conferência' || novo==='PN' || novo==='Em Elaboração') return;
+  let extra='';
+  if (['Pendente Comercial','Pendente Documentos'].includes(novo) && (r.motivos||[]).length) extra='Motivo: '+r.motivos.join(', ');
+  else if (novo==='A aguardar') extra=[ESPERA_TXT[r.esperaMotivo]||'', r.esperaData?'até '+fmtD(r.esperaData):''].filter(Boolean).join(' · ');
+  else if (novo==='Em Conferência') extra='O processo está implementado. Segue para conferência interna e passa depois a PN.';
+  const agora=new Date().toISOString(), texto=`Novo estado: "${estTxt(novo)}"`+(extra?'\n'+extra:'');
+  try { await addDoc(collection(db,'rpn',id,'mensagens'),{texto, auto:true, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
+    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome}; await setDoc(doc(db,'rpn',id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
+    if (S.cur?.id===id) { S.cur.msgUlt=u; S.cur.msgLido={...(S.cur.msgLido||{}),[S.me.uid]:agora}; }
+  } catch(e){ console.warn('msgEstado',e); }
+}
 const CAMPOS_HIST = [['estado','Estado'],['esperaMotivo','A aguardar'],['esperaData','Data da espera'],['boNome','BO'],['vendedorNome','Vendedor'],['cliente.nome','Cliente'],['cliente.nif','NIF'],['nOportunidade','Oportunidade'],['subSfid','Sub-SFID'],['simulador','Simulador'],['atividade','Atividade'],['dtAtivacao','Dt. ativação'],['nLinhas','Nº linhas'],['totRLMC','RLMC total'],['totScore','Score']];
 function diffTxt(a,b){
-  const out=[]; CAMPOS_HIST.forEach(([k,t])=>{ const x=getPath(a,k), y=getPath(b,k); if(String(x??'')!==String(y??'')) out.push(`${t}: ${x??'—'} → ${y??'—'}`); });
+  const out=[]; CAMPOS_HIST.forEach(([k,t])=>{ const x=getPath(a,k), y=getPath(b,k); if(String(x??'')!==String(y??'')) out.push(k==='estado' ? `${t}: ${estTxt(x)||'—'} → ${estTxt(y)||'—'}` : `${t}: ${x??'—'} → ${y??'—'}`); });
   const ma=(a.motivos||[]).join(', '), mb=(b.motivos||[]).join(', '); if(ma!==mb) out.push(`Motivos: ${ma||'—'} → ${mb||'—'}`);
   const ca=(a.linhas||[]).map(l=>l.contratoVDF).join(), cb=(b.linhas||[]).map(l=>l.contratoVDF).join(); if(ca!==cb) out.push('Contratos VDF atualizados');
   return out.join('; ');
@@ -855,7 +878,10 @@ async function ausencias(){
           const gB={}, gC={};   // RPN do mesmo grupo vão todos para a mesma BO
           for (const d of impl) { const g=d.data().grupoId; try{ await realocarTx(d.id,'bo',(g&&gB[g])||null,rz); if(g) gB[g]=realocarTx.uid; ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
           for (const d of cf)   { const g=d.data().grupoId; try{ await realocarTx(d.id,'conf',(g&&gC[g])||null,rz); if(g) gC[g]=realocarTx.uid; ok++; }catch(e){ falhas.push(`${d.data().numero}: ${errTxt(e)}`); } }
-          toast(`${userNome(uid)} marcada como ausente. ${ok} RPN realocado(s).`+(falhas.length?` Não foi possível: ${falhas.join('; ')}`:''), !!falhas.length);
+          let okA=0;
+          try { const at=await getDocs(query(collection(db,'atividades'),where('boUid','==',uid),where('estado','in',AT_ABERTAS)));
+            for (const d of at.docs) { try{ await atRealocarTx(d.id, rz); okA++; }catch(e){ falhas.push(`A${d.data().numero}: ${errTxt(e)}`); } } } catch(e){ falhas.push('Atividades: '+errTxt(e)); }
+          toast(`${userNome(uid)} marcada como ausente. ${ok} RPN realocado(s)${okA?` e ${okA} Atividade(s)`:''}.`+(falhas.length?` Não foi possível: ${falhas.join('; ')}`:''), !!falhas.length);
           if (location.hash.startsWith('#/lista')||!location.hash) viewLista(); 
         } catch(e){ toast(errTxt(e),true); }
       }); });
@@ -938,11 +964,12 @@ async function guardar(opts={}){
     if (isNew && r.propostaRef) updateDoc(doc(db,'propostas',r.propostaRef),{rpnId:rpnRef.id,rpnNumero:data.numero}).catch(()=>{});
     if (opts.submeter) await hist('Submetido', `Atribuído a ${data.boNome} (distribuição automática, ${data.nLinhas} linha(s))`);
     else if (opts.devolver) await hist('Devolvido à BO', 'Pendência resolvida pelo comercial');
-    else if (opts.conferencia) await hist('Enviado para conferência', data.confUid?`Implementado por ${data.boNome}. Conferência atribuída a ${data.confNome} (distribuição automática, ${data.nLinhas} linha(s))`:`Implementado por ${data.boNome}. Sem BackOffice disponível para conferir — fica em fila`);
+    else if (opts.conferencia) await hist('Concluído · enviado para conferência', data.confUid?`Implementado por ${data.boNome}. Conferência atribuída a ${data.confNome} (distribuição automática, ${data.nLinhas} linha(s))`:`Implementado por ${data.boNome}. Sem BackOffice disponível para conferir — fica em fila`);
     else if (opts.conferido) await hist('Conferido → PN', `Conferido por ${S.me.nome}. O RPN passa a Processo de Negócio.`);
     else if (opts.devolverImpl) await hist('Devolvido à implementação', `Pela conferência (${S.me.nome}): ${opts.devolverImpl}`);
-    else if (opts.reabrir) await hist('Reaberto', `De ${old?.estado} para Em Implementação`);
+    else if (opts.reabrir) await hist('Reaberto', `De ${estTxt(old?.estado)} para Em Implementação`);
     else if (old) { const d=diffTxt(old,data); if(d) await hist(old.estado!==data.estado?'Mudança de estado':'Alterado', d); }
+    if (old) await msgEstado(rpnRef.id, data, old.estado, data.estado);
     if (!opts.silencioso) toast(opts.submeter?`Submetido. BackOffice: ${data.boNome}` : opts.conferencia?(data.confUid?`Enviado para conferência: ${data.confNome}`:'Enviado para conferência, mas não há BackOffice disponível — fica em fila.') : opts.conferido?`Conferido. O RPN ${data.numero} é agora um PN.` : opts.devolverImpl?`Devolvido a ${data.boNome}.` : 'Guardado.', !!(opts.conferencia&&!data.confUid));
     if (isNew) history.replaceState(null,'','#/rpn/'+rpnRef.id);
     if (!opts.silencioso) drawFicha();
@@ -967,11 +994,11 @@ async function desenharGrupo(){
   const el=$('#grp'), r=S.cur; if(!el || !r?.grupoId || !r.id) return;
   if (S.grupo?.de!==r.id) { try { S.grupo={de:r.id, lista:await irmaos(r)}; } catch(e){ return; } }
   const el2=$('#grp'); if(!el2 || S.cur?.id!==r.id || !S.grupo.lista.length) return;
-  el2.innerHTML=`<div class="warnbox" style="background:#eef2ff;border-color:#c7d2fe">⛓ <b>Grupo de ${S.grupo.lista.length+1} RPN do mesmo negócio</b> — implementados pela mesma BackOffice e conferidos em conjunto: ${S.grupo.lista.map(x=>`<a href="#/rpn/${x.id}"><b>${x.estado==='PN'?'PN':'RPN'} ${x.numero}</b></a> <span class="muted">(${esc(x.estado)} · ${x.nLinhas||0} linha(s))</span>`).join(' · ')}</div>`;
+  el2.innerHTML=`<div class="warnbox" style="background:#eef2ff;border-color:#c7d2fe">⛓ <b>Grupo de ${S.grupo.lista.length+1} RPN do mesmo negócio</b> — implementados pela mesma BackOffice e conferidos em conjunto: ${S.grupo.lista.map(x=>`<a href="#/rpn/${x.id}"><b>${x.estado==='PN'?'PN':'RPN'} ${x.numero}</b></a> <span class="muted">(${esc(estTxt(x.estado))} · ${x.nLinhas||0} linha(s))</span>`).join(' · ')}</div>`;
 }
 // aplica aos outros RPN do grupo a mesma passagem de estado que acabou de ser feita no RPN aberto (L)
 async function aplicarNoIrmao(id, tipo, L, nota){
-  let feito=null;
+  let feito=null, antes=null;
   await runTransaction(db, async tx => {
     const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO');
     const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(), cd=cs.exists()?cs.data():{};
@@ -993,10 +1020,11 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     if (o.confUid && o.confContada) conf[o.confUid]=Math.max(0,(conf[o.confUid]||0)-o.confContada);
     if (cf && ncf) conf[cf]=(conf[cf]||0)+ncf;
     u.cargaContada=nc; u.confContada=ncf;
-    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,u); feito=o.numero;
+    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,u); feito=o.numero; antes={...o, ...u, _de:o.estado};
   });
-  if (feito!=null) await hist({submeter:'Submetido',conferencia:'Enviado para conferência',conferido:'Conferido → PN',devolverImpl:'Devolvido à implementação'}[tipo],
+  if (feito!=null) await hist({submeter:'Submetido',conferencia:'Concluído · enviado para conferência',conferido:'Conferido → PN',devolverImpl:'Devolvido à implementação'}[tipo],
     `Em conjunto com o RPN ${L.numero} (mesmo grupo)`+(tipo==='submeter'?`. BackOffice: ${L.boNome}`:tipo==='conferencia'?`. Conferência: ${L.confNome||'em fila'}`:tipo==='devolverImpl'?`: ${nota}`:`, por ${S.me.nome}`), id);
+  if (feito!=null && antes) await msgEstado(id, antes, antes._de, antes.estado);
   return feito;
 }
 async function acaoGrupo(tipo, opts){
@@ -1005,7 +1033,7 @@ async function acaoGrupo(tipo, opts){
     try { irm=await irmaos(r); } catch(e){ return toast(errTxt(e),true); }
     if (tipo==='submeter') for (const x of irm.filter(x=>x.estado==='Em Elaboração')) { const e=validarSubmissao(x); if(e.length) return toast(`O RPN ${x.numero} do mesmo grupo não está pronto — falta: ${e.join(', ')}`,true); }
     if (tipo==='conferencia') { const mal=irm.filter(x=>!IMPL.includes(x.estado) && !FECHADOS.includes(x.estado) && x.estado!=='Em Conferência');
-      if (mal.length) return toast(`Os RPN do grupo vão juntos para conferência. Ainda não pode: ${mal.map(x=>`o ${x.numero} está em «${x.estado}»`).join('; ')}.`,true); }
+      if (mal.length) return toast(`Os RPN do grupo vão juntos para conferência. Ainda não pode: ${mal.map(x=>`o ${x.numero} está em «${estTxt(x.estado)}»`).join('; ')}.`,true); }
   }
   const ok=await guardar(opts); if(ok!==true || !irm.length) return;
   const feitos=[];
@@ -1052,7 +1080,7 @@ function dividir(){
 async function eliminar(){
   const r=S.cur;
   if (r.estado==='Em Elaboração') { if(!confirm(`Eliminar definitivamente o RPN ${r.numero}?`)) return; }
-  else { const t=prompt(`O ${r.estado==='PN'?'PN':'RPN'} ${r.numero} está em «${r.estado}». Vai ser apagado com anexos, mensagens e histórico, e não pode ser recuperado.\n\nPara confirmar, escreva o número ${r.numero}:`); if(t===null) return; if(String(t).trim()!==String(r.numero)) return toast('Número errado. Nada foi apagado.',true); }
+  else { const t=prompt(`O ${r.estado==='PN'?'PN':'RPN'} ${r.numero} está em «${estTxt(r.estado)}». Vai ser apagado com anexos, mensagens e histórico, e não pode ser recuperado.\n\nPara confirmar, escreva o número ${r.numero}:`); if(t===null) return; if(String(t).trim()!==String(r.numero)) return toast('Número errado. Nada foi apagado.',true); }
   try {
     // anexos (ficheiros + registos), mensagens e histórico: apaga o que as permissões deixarem, antes do próprio RPN
     for (const sub of ['anexos','mensagens','historico']) { try { const sn=await getDocs(collection(db,'rpn',r.id,sub));
@@ -1116,7 +1144,7 @@ function handlePropostaParam(){
   const r = rpnVazio();
   const TIPO_TXT = {novo:'Novo Serviço', refid:'Refidelização', upgrade:'Upgrade'};
   const nova = p.tipo==='novo', upg = p.tipo==='upgrade';
-  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||'').trim(); r.cliente.email = p.email||''; r.notas = p.notas||''; r.simulador = String(p.simulador||'');
+  r.propostaRef = p.ref||''; r.cliente.nome = p.cliente||''; r.cliente.nif = String(p.nif||'').trim(); r.cliente.email = p.email||''; r.condicoes.resumo = p.notas||''; r.simulador = String(p.simulador||'');
   // BackOffice/Master a abrir a proposta de um comercial: o RPN fica em nome do comercial da proposta
   if (isBO() && p.comercial) { const v = Object.entries(S.users).find(([,u])=>(u.nome||'').trim().toLowerCase()===String(p.comercial).trim().toLowerCase()); if (v) { r.vendedorUid=v[0]; r.vendedorNome=v[1].nome; r.subSfid=v[1].sfid||''; } }
   // Formato da app de Propostas:  "912 345 678 TARIFÁRIO [24m] [REF_PHC]; 10× TARIFÁRIO [24m] [REF_PHC]"
@@ -1370,7 +1398,7 @@ const CLI_SEC = [
 ];
 const CLI_KEYS = CLI_SEC.flatMap(s=>s[1].map(c=>c[0]));
 const CL = {q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}};
-const CLI_TABS = [['ficha','Ficha'],['fid','Fidelizações'],['rpn','RPN e PN'],['proj','Projetos'],['prop','Propostas']];
+const CLI_TABS = [['ficha','Ficha'],['fid','Fidelizações'],['rpn','RPN e PN'],['ativ','Atividades'],['proj','Projetos'],['prop','Propostas']];
 const nifValido = n => { if(!/^\d{9}$/.test(n)) return false; let t=0; for(let i=0;i<8;i++) t+=(+n[i])*(9-i); const r=t%11; return (r<2?0:11-r)===+n[8]; };
 const vendPHCNome = v => { v=String(v||''); if(!v) return ''; const us=Object.values(S.users).filter(u=>String(u.vendedorPHC||'')===v); return (us.find(u=>u.ativo!==false)||us[0])?.nome||''; };
 // quem altera fichas: BackOffice e Master, todas; o comercial, as da sua carteira; o Coordenador só consulta (igual à app Propostas)
@@ -1458,6 +1486,7 @@ async function cliDados(tab){
   if (d[k]) return;
   if (k==='rpn') d.rpn=(await cliRpns(nif)).sort((a,b)=>String(dataPN(b)).localeCompare(String(dataPN(a)))||(+b.numero||0)-(+a.numero||0));
   if (k==='proj') { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)]; d.proj=(await getDocs(query(collection(db,'projetos'), ...meu, where('nif','==',nif)))).docs.map(x=>({id:x.id, ...x.data()})).sort((a,b)=>(b.alertaEm||'').localeCompare(a.alertaEm||'')); }
+  if (k==='ativ') { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)]; d.ativ=(await getDocs(query(collection(db,'atividades'), ...meu, where('cliente.nif','==',nif)))).docs.map(x=>({id:x.id, ...x.data()})).sort((a,b)=>(b.numero||0)-(a.numero||0)); }
   if (k==='prop') { const meu=isStaff()?[]:[where('comercialUid','==',S.me.uid)]; d.prop=(await getDocs(query(collection(db,'propostas'), ...meu, where('nif','==',nif)))).docs.map(x=>({id:x.id, ...x.data()})).sort((a,b)=>(+b.ord||0)-(+a.ord||0)); }
 }
 // linhas de PN ainda dentro do prazo de fidelização: por MSISDN conta o PN mais recente; ordenadas pela data de fim (a mais próxima primeiro)
@@ -1505,7 +1534,10 @@ function desenharCliente(){
       ${L.length?`<tfoot><tr class="tot"><td colspan="7">${L.length} linha(s)</td><td class="num">${eur(soma())}</td><td></td></tr></tfoot>`:''}</table></div>`;
   } else if (tab==='rpn') {
     corpo=`${d.soMeus?'<p class="muted" style="margin:0 0 12px;font-size:12px"><b style="color:var(--red-d)">Só estão incluídos os seus processos.</b></p>':''}<div class="scroll"><table id="cl-rt"><thead><tr><th>Nº</th><th>Data</th><th>Vendedor</th><th>BO</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th></tr></thead>
-      <tbody>${d.rpn.map(r=>`<tr class="click" data-id="${esc(r.id)}"><td><b>${esc(r.numero||'—')}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(dataPN(r))}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${esc((r.estado||'').replace(/ /g,'-'))}">${esc(r.estado)}</span></td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">Sem RPN nem PN para este cliente.</td></tr>`}</tbody></table></div>`;
+      <tbody>${d.rpn.map(r=>`<tr class="click" data-id="${esc(r.id)}"><td><b>${esc(r.numero||'—')}</b>${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}</td><td>${fmtD(dataPN(r))}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${esc((r.estado||'').replace(/ /g,'-'))}">${esc(estTxt(r.estado))}</span></td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td></tr>`).join('')||`<tr><td colspan="8" class="muted">Sem RPN nem PN para este cliente.</td></tr>`}</tbody></table></div>`;
+  } else if (tab==='ativ') {
+    corpo=`<p class="muted" style="margin:0 0 12px;font-size:12px">Pedidos à BackOffice feitos para este cliente${isStaff()?'':' (os seus)'}.</p><div class="row" style="margin-bottom:10px"><span class="sp"></span><button class="btn" id="cl-atn">+ Nova Atividade</button></div><div class="scroll"><table id="cl-at"><thead><tr><th>Nº</th><th>Data</th><th>Assunto</th><th>Conta / números</th><th>Vendedor</th><th>BO</th><th>Estado</th></tr></thead>
+      <tbody>${d.ativ.map(a=>`<tr class="click" data-id="${esc(a.id)}"><td><b>${atNum(a)}</b></td><td>${fmtD(a.data)}</td><td>${esc(a.assunto)}<div class="muted" style="font-size:11px">${esc(a.subAssunto)}</div></td><td>${esc([a.conta,a.msisdns].filter(Boolean).join(' · '))}</td><td>${esc(a.vendedorNome)}</td><td>${esc(a.boNome||'—')}</td><td><span class="badge b-${esc((a.estado||'').replace(/ /g,'-'))}">${esc(a.estado)}</span></td></tr>`).join('')||`<tr><td colspan="7" class="muted">Sem Atividades para este cliente.</td></tr>`}</tbody></table></div>`;
   } else if (tab==='proj') {
     corpo=`<div class="scroll"><table id="cl-pt"><thead><tr><th>Alerta</th><th>Vendedor</th><th class="num">Linhas</th><th class="num">RLMC €</th><th>Fim do contrato</th><th>Estado</th></tr></thead>
       <tbody>${d.proj.map(p=>`<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}</td><td>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</td><td class="num">${p.nLinhas||0}</td><td class="num">${eur(p.totRLMC)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}</td></tr>`).join('')||`<tr><td colspan="6" class="muted">Sem Projetos para este cliente.</td></tr>`}</tbody></table></div>`;
@@ -1525,6 +1557,8 @@ function desenharCliente(){
   m.querySelectorAll('[data-ct]').forEach(a=>a.onclick=()=>{ if(!sair()) return; if (CL.edit) { CL.edit=false; S.dirty=false; CL.f=null; CL.tab=a.dataset.ct; return cliAbrir(CL.nif); } CL.tab=a.dataset.ct; desenharCliente(); });
   $('#cl-rpn')?.addEventListener('click',()=>{ const r=rpnVazio(); r.cliente.nif=String(f.ncont); r.cliente.nome=f.nome||''; preencherCliente(r).then(()=>{ S.pendingNovo=r; location.hash='#/novo'; }); });
   m.querySelectorAll('#cl-rt [data-id]').forEach(tr=>tr.onclick=()=>{ location.hash='#/rpn/'+tr.dataset.id; });
+  m.querySelectorAll('#cl-at [data-id]').forEach(tr=>tr.onclick=()=>{ location.hash='#/atividades/'+tr.dataset.id; });
+  $('#cl-atn')?.addEventListener('click',()=>{ const a=atVazia(); a.cliente={nif:String(f.ncont), nome:f.nome||''}; a.conta=f.contaA||''; AT.pend=a; location.hash='#/atividades/novo'; });
   m.querySelectorAll('#cl-pt [data-pj]').forEach(tr=>tr.onclick=()=>abrirProjeto(d.proj.find(p=>p.id===tr.dataset.pj), ()=>{ CL.d.proj=null; if (location.hash.startsWith('#/clientes/')) desenharCliente(); }));
   if (tab!=='ficha') return;
   if (CL.edit) m.querySelectorAll('#cl-form [data-k]').forEach(el=>el.addEventListener('input',()=>{ S.dirty=true; }));
@@ -1551,6 +1585,315 @@ function desenharCliente(){
   });
 }
 
+// ---------- 9e. ATIVIDADES: pedidos dos vendedores à BackOffice sem negócio associado (desativações, 2.ªs vias, créditos, alterações…) ----------
+// Coleção atividades/{id} (+ anexos, mensagens, historico). Mesma filosofia do RPN, sem linhas nem Score: a BO trata e fecha (não há conferência).
+const AT_ESTADOS = ['Em Elaboração','Submetido','Em tratamento','Pendente Comercial','A aguardar','Concluído','Cancelado','Recusado'];
+const AT_CURSO   = ['Em Elaboração','Submetido','Em tratamento','Pendente Comercial','A aguardar'];
+const AT_ABERTAS = ['Submetido','Em tratamento','Pendente Comercial','A aguardar'];   // contam 1 para a carga da BO
+const AT_FECHADAS = ['Concluído','Cancelado','Recusado'];
+const AT_PONTUAM = ['Concluído','Recusado'];   // contam para a Produção BO (a BO tratou o pedido)
+const AT_EDIT_COM = ['Em Elaboração','Pendente Comercial'];
+const AT_ASSUNTOS = ['Aprovação','Implementação','Correcção Implementação'];
+const AT_SUBS = ['Alteração','Desativação','Desconto','Tarifário','Créditos','Faturação','Equipamentos','Outros'];
+const AT_GUIA = {   // texto-guia: entra na descrição quando ela está vazia, para o pedido chegar completo à BO
+  'Alteração':'O que deve ser alterado:\nComo está hoje → como deve ficar:',
+  'Desativação':'Serviço(s) a desativar:\nData efetiva:\nRecolha de equipamentos (sim/não) e morada:',
+  'Desconto':'Desconto pedido:\nJustificação:',
+  'Tarifário':'Número(s):\nTarifário atual → tarifário pretendido:',
+  'Créditos':'Motivo do crédito:\nFatura / mês a que respeita:',
+  'Faturação':'Pedido (2.ª via, dados de faturação, forma de pagamento…):\nMês / fatura:',
+  'Equipamentos':'Equipamento e referência:\nQuantidade:\nCondições (venda standard, plafond…):\nMorada de entrega e pessoa de contacto:' };
+const AT_DIAS_ALERTA = 5;   // dias em aberto a partir dos quais a lista destaca o pedido
+const AT = {lista:null, mes:null, listaMes:null, extra:[], f:{estado:'',txt:'',meus:null}, cur:null, tab:'pedido'};
+const atNum = r => r?.numero ? 'A'+r.numero : '—';
+const atVazia = () => ({ numero:null, data:hoje(), estado:'Em Elaboração', vendedorUid:S.me.uid, vendedorNome:S.me.nome, boUid:null, boNome:'', cliente:{nif:'',nome:''},
+  assunto:'', subAssunto:'', descricao:'', resposta:'', conta:'', msisdns:'', dataEfetiva:'', refVDF:'', pnNumero:'', valor:'', motivo:'', cargaContada:0 });
+const atDias = r => { const d0=String(r.submetidoEm||'').slice(0,10); if(!d0) return 0; const d1=AT_FECHADAS.includes(r.estado)?String(r.fechadoEm||'').slice(0,10)||hojeLocal():hojeLocal(); return Math.max(0, Math.round((new Date(d1+'T12:00:00')-new Date(d0+'T12:00:00'))/864e5)); };
+const atHist = (id, acao, detalhe) => addDoc(collection(db,'atividades',id,'historico'),{acao, detalhe:detalhe||'', porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()}).catch(e=>console.warn('atHist',e));
+const atMsisdns = t => [...new Set(String(t||'').split(/[,;\n\/]+/).map(normMsisdn).filter(x=>x.length>=9))];
+// aviso automático ao vendedor quando a BO muda o estado
+async function atAviso(id, r, antigo, novo){
+  if (!id || antigo===novo || !r.vendedorUid || S.me.uid===r.vendedorUid || novo==='Em Elaboração') return;
+  const extra = novo==='Concluído' ? (r.resposta?'Relatório BackOffice: '+r.resposta:'') : (['Pendente Comercial','A aguardar','Cancelado','Recusado'].includes(novo) && r.motivo ? 'Motivo: '+r.motivo : '');
+  const agora=new Date().toISOString(), texto=`Novo estado: "${novo}"`+(extra?'\n'+extra:'');
+  try { await addDoc(collection(db,'atividades',id,'mensagens'),{texto, auto:true, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
+    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome}; await setDoc(doc(db,'atividades',id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
+    if (AT.cur?.id===id) { AT.cur.msgUlt=u; AT.cur.msgLido={...(AT.cur.msgLido||{}),[S.me.uid]:agora}; }
+  } catch(e){ console.warn('atAviso',e); }
+}
+
+function viewAtividades(){
+  const arg=decodeURIComponent((location.hash.split('/')[2]||'').trim());
+  if (arg==='novo') { AT.cur=AT.pend||atVazia(); AT.pend=null; AT.cur.id=null; AT.tab='pedido'; return atFicha(); }
+  if (arg) return atAbrir(arg);
+  return atLista();
+}
+async function atLista(forcar){
+  const m=$('#main'); AT.mes=AT.mes||mesLocal();
+  if (!forcar && AT.lista && AT.listaMes===AT.mes && Date.now()-AT_EM < LISTA_TTL) return atDesenhaLista();
+  m.innerHTML=`<div class="card muted">A carregar Atividades…</div>`;
+  try {
+    const col=collection(db,'atividades'), meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)];
+    const [a,f]=await Promise.all([getDocs(query(col, ...meu, where('estado','in',AT_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',AT.mes)))]);
+    const mp={}; [...a.docs, ...f.docs].forEach(d=>mp[d.id]={id:d.id, ...d.data()}); (AT.extra||[]).forEach(x=>{ if(!mp[x.id]) mp[x.id]=x; });
+    AT.lista=Object.values(mp).sort((x,y)=>(y.numero||0)-(x.numero||0)); AT.listaMes=AT.mes; AT_EM=Date.now();
+  } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
+  if (AT.f.meus===null) AT.f.meus = perfil()==='backoffice';
+  atDesenhaLista();
+}
+function atDesenhaLista(){
+  if (!S.me || !AT.lista || !location.hash.startsWith('#/atividades')) return;
+  const f=AT.f, all=AT.lista, stf=isStaff();
+  const lim=(()=>{ const d=new Date(); d.setDate(d.getDate()-DIAS_CONCLUIDO); return d.toISOString(); })(), extra=new Set((AT.extra||[]).map(x=>x.id));
+  const velho = r => !stf && AT.mes===mesLocal() && AT_FECHADAS.includes(r.estado) && !extra.has(r.id) && !msgPorLer(r) && String(r.fechadoEm||'') < lim;
+  const t=semAcento(f.txt).trim();
+  const base=all.filter(r=>!velho(r) && (!f.meus || r.boUid===S.me.uid) && (!f.msg || msgPorLer(r))
+    && (!t || semAcento([atNum(r), r.numero, r.cliente?.nome, r.cliente?.nif, r.assunto, r.subAssunto, r.conta, r.msisdns, r.vendedorNome, r.descricao].join(' ')).includes(t)));
+  const cnt={}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
+  const rows=base.filter(r=>!f.estado || r.estado===f.estado), nMsg=all.filter(msgPorLer).length;
+  $('#main').innerHTML=`
+    <div class="chips"><div class="chip ${!f.estado?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
+      ${AT_ESTADOS.map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <input id="at-q" type="search" autocomplete="off" name="pesquisa-at" placeholder="Procurar nº, cliente, NIF, conta, número, assunto…" value="${esc(f.txt)}" style="max-width:340px">
+        <button class="btn" id="at-r" title="Volta a ler a lista agora.">⟳ Atualizar</button>
+        <button class="btn" id="at-h" title="Procura em todas as Atividades, incluindo as antigas, por nº, NIF ou número (MSISDN) exatos">Procurar no histórico</button>
+        <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)">Fechadas em <input id="at-m" type="month" value="${esc(AT.mes)}" style="width:160px"></label>
+        <label style="display:flex;gap:6px;align-items:center;margin:0;color:${nMsg?'var(--red-d)':'var(--ink)'};font-weight:${nMsg?700:400}"><input type="checkbox" id="at-fm" ${f.msg?'checked':''}> 💬 Mensagens por ler (${nMsg})</label>
+        ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="at-me" ${f.meus?'checked':''}> Só as minhas</label>`:''}
+        <span class="sp"></span><button class="btn pri" id="at-nv">+ Nova Atividade</button>
+      </div>
+      <div class="scroll"><table id="at-t"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Assunto</th><th>Vendedor</th><th>BO</th><th>Estado</th><th class="num">Dias em aberto</th></tr></thead>
+        <tbody>${rows.map(r=>{ const dd=atDias(r), ab=AT_ABERTAS.includes(r.estado); return `<tr class="click" data-id="${esc(r.id)}"><td><b>${atNum(r)}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}<div class="muted" style="font-size:11px">${esc(r.cliente?.nif)}</div></td><td>${esc(r.assunto)}<div class="muted" style="font-size:11px">${esc(r.subAssunto)}</div></td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${esc((r.estado||'').replace(/ /g,'-'))}">${esc(r.estado)}</span>${r.motivo&&!['Concluído'].includes(r.estado)?` <span class="muted" style="font-size:11px">${esc(String(r.motivo).slice(0,60))}</span>`:''}</td><td class="num" ${ab&&dd>=AT_DIAS_ALERTA?'style="color:var(--red-d);font-weight:700"':''}>${r.submetidoEm?dd:'—'}</td></tr>`; }).join('')||`<tr><td colspan="8" class="muted">Sem Atividades.</td></tr>`}</tbody></table></div></div>`;
+  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ f.estado=c.dataset.e; atDesenhaLista(); });
+  const q=$('#at-q'); q.oninput=()=>{ f.txt=q.value; clearTimeout(q._h); q._h=setTimeout(()=>{ atDesenhaLista(); const n=$('#at-q'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
+  $('#at-r').onclick=()=>atLista(true);
+  $('#at-m').onchange=e=>{ if(e.target.value){ AT.mes=e.target.value; atLista(); } };
+  $('#at-fm').onchange=e=>{ f.msg=e.target.checked; atDesenhaLista(); };
+  const me=$('#at-me'); if(me) me.onchange=()=>{ f.meus=me.checked; atDesenhaLista(); };
+  $('#at-nv').onclick=()=>go('#/atividades/novo');
+  $('#at-h').onclick=async()=>{ const x=(f.txt||'').trim(); if(x.length<1) return toast('Escreva na caixa de pesquisa o nº da Atividade, o NIF ou o número (MSISDN) completos.',true);
+    const col=collection(db,'atividades'), meu=stf?[]:[where('vendedorUid','==',S.me.uid)], qs=[query(col, ...meu, where('cliente.nif','==',x))];
+    const n=x.replace(/^a/i,''); if (/^\d+$/.test(n)) qs.push(query(col, ...meu, where('numero','==',+n)));
+    if (normMsisdn(x).length>=9 && /^[\d\s+]+$/.test(x)) qs.push(query(col, ...meu, where('msisdnsL','array-contains',normMsisdn(x))));
+    const rs=await Promise.allSettled(qs.map(q=>getDocs(q))), docs=rs.filter(y=>y.status==='fulfilled').flatMap(y=>y.value.docs).map(d=>({id:d.id, ...d.data()}));
+    if (!docs.length) return toast('Nada encontrado no histórico com “'+x+'”.',true);
+    AT.extra=[...(AT.extra||[]).filter(y=>!docs.some(d=>d.id===y.id)), ...docs]; const mp={}; [...AT.lista, ...docs].forEach(y=>mp[y.id]=y); AT.lista=Object.values(mp).sort((a,b)=>(b.numero||0)-(a.numero||0));
+    f.txt=''; f.estado=''; toast(docs.length+' Atividade(s) encontrada(s) no histórico.'); atDesenhaLista(); };
+  document.querySelectorAll('#at-t tr[data-id]').forEach(tr=>tr.onclick=()=>go('#/atividades/'+tr.dataset.id));
+}
+async function atAbrir(id){
+  const m=$('#main');
+  if (AT.cur?.id!==id) AT.tab='pedido';
+  m.innerHTML=`<div class="card muted">A carregar…</div>`;
+  try { const s=await getDoc(doc(db,'atividades',id)); if(!s.exists()) { m.innerHTML='<div class="card">Atividade não encontrada.</div>'; return; } AT.cur={id, ...s.data()}; }
+  catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
+  S.dirty=false; atFicha();
+}
+function atPerms(){
+  const r=AT.cur, own=r.vendedorUid===S.me.uid, nov=!r.id, fechada=AT_FECHADAS.includes(r.estado);
+  return { own, nov, fechada, edV:(own||nov)&&AT_EDIT_COM.includes(r.estado), edBO:isBO()&&(!fechada||isMaster()) };
+}
+function atFicha(){
+  const r=AT.cur, p=atPerms(), m=$('#main'), ed=p.edV||p.edBO, dV=ed?'':'disabled', dB=p.edBO?'':'disabled';
+  const tabs=[['pedido','Pedido'],['anexos','Anexos'],['msg','Mensagens'+(msgPorLer(r)?' ● nova':'')],['hist','Histórico']];
+  const acts=[];
+  if (ed) acts.push(`<button class="btn" id="t-save">Guardar</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="t-sub">Submeter à BackOffice</button>`);
+  if (p.own && r.estado==='Pendente Comercial') acts.push(`<button class="btn pri" id="t-res">Resolvido · devolver à BO</button>`);
+  if (isBO() && r.id && AT_ABERTAS.includes(r.estado)) {
+    if (r.estado!=='Em tratamento') acts.push(`<button class="btn" id="t-tra">Em tratamento</button>`);
+    acts.push(`<button class="btn" id="t-pen">Pendente Comercial</button><button class="btn" id="t-agu">A aguardar</button><button class="btn" id="t-rec" style="color:var(--red-d)">Recusado</button><button class="btn" id="t-can" style="color:var(--red-d)">Cancelar</button><button class="btn pri" id="t-ok">Concluir</button>`);
+  }
+  if (isMaster() && r.id && p.fechada) acts.push(`<button class="btn" id="t-rea">Reabrir</button>`);
+  if (r.id && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="t-del" style="color:var(--red-d)">Eliminar</button>`);
+  const fa=(lab,k,dis,type='text',extra='')=>`<div><label>${lab}</label><input type="${type}" data-a="${k}" value="${esc(getPath(r,k))}" ${dis} ${extra}></div>`;
+  const sa=(lab,k,opts,dis)=>`<div><label>${lab}</label><select data-a="${k}" ${dis}><option value="">— escolher —</option>${opts.map(o=>{ const [v,t]=Array.isArray(o)?o:[o,o]; return `<option value="${esc(v)}" ${String(getPath(r,k)||'')===String(v)?'selected':''}>${esc(t)}</option>`; }).join('')}</select></div>`;
+  const vendOpts=Object.entries(S.users).filter(([,u])=>u.ativo&&['comercial','coordenador','master'].includes(u.perfil)).map(([uid,u])=>[uid,u.nome]);
+  const podeCli=ed && (r.estado==='Em Elaboração' || isBO());
+  m.innerHTML=`<div class="card">
+      <div class="row"><a href="#/atividades" id="t-back" class="muted" style="font-size:12px">← Atividades</a></div>
+      <div class="row" style="margin-top:6px"><h2 style="margin:0">${r.id?'Atividade '+atNum(r):'Nova Atividade'}</h2><span class="badge b-${esc(r.estado.replace(/ /g,'-'))}">${esc(r.estado)}</span>
+        ${r.submetidoEm?`<span class="muted" style="font-size:12px">${AT_FECHADAS.includes(r.estado)?'tratada em':'em aberto há'} ${atDias(r)} dia(s)</span>`:''}<span class="sp"></span>${acts.join('')}</div>
+      ${r.motivo&&r.estado!=='Concluído'&&r.estado!=='Em Elaboração'?`<div class="warnbox" id="t-mot" style="margin:12px 0 0"><b>${esc(r.estado)}:</b> ${esc(r.motivo)}</div>`:''}
+    </div>
+    <div class="tabs">${tabs.map(([k,t])=>`<a data-tt="${k}" class="${AT.tab===k?'on':''}">${t}</a>`).join('')}</div><div id="t-c"></div>`;
+  const tc=$('#t-c');
+  if (AT.tab==='pedido') {
+    const cred=r.subAssunto==='Créditos', corr=r.assunto==='Correcção Implementação';
+    tc.innerHTML=`<div class="card">${podeCli?`<div class="cli-box" style="margin-bottom:14px"><label>Escolher cliente</label><input id="t-cq" type="search" autocomplete="off" name="procura-cli-at" placeholder="Escreva as primeiras letras do nome ou o início do NIF…"><div class="cli-res" id="t-cr"></div></div>`:''}
+      <div class="grid g4">
+        ${fa('Cliente','cliente.nome',podeCli?'':'disabled')}${fa('NIF','cliente.nif',podeCli?'':'disabled')}${fa('Data','data','disabled','date')}
+        ${isBO()?sa('Vendedor','vendedorUid',vendOpts,dB):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
+        ${sa('Assunto','assunto',AT_ASSUNTOS,dV)}${sa('Sub-assunto','subAssunto',AT_SUBS,dV)}
+        ${fa('Conta Vodafone','conta',dV)}${fa('Número(s) afetado(s)','msisdns',dV,'text','placeholder="separados por vírgula"')}
+        ${fa('Data efetiva pretendida','dataEfetiva',dV,'date')}
+        ${fa('PN relacionado (nº)'+(corr?' *':''),'pnNumero',dV,'text','placeholder="'+(corr?'obrigatório nesta correção':'opcional')+'"')}
+        ${cred?fa('Valor do crédito (€, sem IVA) *','valor',dV,'number','step="0.01" min="0"'):''}
+        ${r.id?(isBO()?sa('BackOffice','boUid',bos().map(b=>[b.uid,b.nome]).concat(r.boUid&&!bos().some(b=>b.uid===r.boUid)?[[r.boUid,r.boNome]]:[]),AT_ABERTAS.includes(r.estado)&&p.edBO?'':'disabled'):`<div><label>BackOffice</label><input value="${esc(r.boNome||'— por atribuir —')}" disabled></div>`):''}
+        ${fa('Ref.ª do pedido na Vodafone','refVDF',dB)}
+      </div></div>
+      <div class="card"><div class="grid g2">
+        <div><label>Descrição do pedido</label><textarea data-a="descricao" rows="9" ${dV} placeholder="O que é preciso fazer. Escolha o sub-assunto para ver o que a BackOffice precisa de saber.">${esc(r.descricao)}</textarea></div>
+        <div><label>Relatório BackOffice</label><textarea data-a="resposta" rows="9" ${dB} title="Escrito pela BackOffice. O vendedor só lê." placeholder="${isBO()?'O que foi feito. Obrigatório para concluir.':''}">${esc(r.resposta)}</textarea></div>
+      </div></div>`;
+    tc.querySelectorAll('[data-a]').forEach(el=>{ const ev=el.tagName==='SELECT'?'change':'input';
+      el.addEventListener(ev,()=>{ const k=el.dataset.a; setPath(r,k,el.value); S.dirty=true;
+        if (k==='vendedorUid') r.vendedorNome=S.users[el.value]?.nome||'';
+        if (k==='boUid') r.boNome=S.users[el.value]?.nome||'';
+        if (k==='subAssunto' || k==='assunto') { const g=AT_GUIA[r.subAssunto], vazio=!String(r.descricao||'').trim() || Object.values(AT_GUIA).includes(String(r.descricao).trim()); if (k==='subAssunto' && vazio) r.descricao=g||''; atFicha(); } }); });
+    const cq=$('#t-cq'), cr=$('#t-cr');
+    if (cq) { carregarClientes().catch(()=>{});
+      cq.oninput=()=>{ const res=procurarClientes(cq.value); cr.innerHTML=res.map((c,i)=>`<div data-i="${i}"><b>${esc(c.nome)}</b><br><small>${esc(c.nif)} · ${esc(c.local)}</small></div>`).join(''); cr.classList.toggle('on',!!res.length);
+        cr.querySelectorAll('[data-i]').forEach(d=>d.onmousedown=e=>{ e.preventDefault(); const c=res[+d.dataset.i]; r.cliente={nif:c.nif, nome:c.nome}; S.dirty=true; atFicha(); }); };
+      cq.onblur=()=>setTimeout(()=>cr.classList.remove('on'),150); }
+  } else if (!r.id) tc.innerHTML=`<div class="card muted">Guarde a Atividade primeiro.</div>`;
+  else if (AT.tab==='anexos') atAnexos(tc, p);
+  else if (AT.tab==='msg') atMsgs(tc);
+  else atHistorico(tc);
+  m.querySelectorAll('[data-tt]').forEach(a=>a.onclick=()=>{ AT.tab=a.dataset.tt; clearSubs(); atFicha(); });
+  $('#t-back').onclick=e=>{ e.preventDefault(); go('#/atividades'); };
+  const on=(id,f)=>{ const b=$(id); if(b) b.onclick=f; };
+  on('#t-save',()=>atGuardar());
+  on('#t-sub',()=>atGuardar('submeter'));
+  on('#t-res',()=>atGuardar('resolvido'));
+  on('#t-tra',()=>atGuardar('tratar'));
+  on('#t-ok',()=>atGuardar('concluir'));
+  on('#t-pen',()=>pedirRazao('Pendente Comercial','<p class="muted" style="margin:0">O que falta o vendedor esclarecer ou enviar.</p>','Marcar pendente',rz=>atGuardar('pendente',rz)));
+  on('#t-agu',()=>pedirRazao('A aguardar','<p class="muted" style="margin:0">O que se aguarda (resposta da Vodafone, data efetiva, cliente…).</p>','Marcar a aguardar',rz=>atGuardar('aguardar',rz)));
+  on('#t-rec',()=>pedirRazao('Recusado','<p class="muted" style="margin:0">O pedido foi analisado e não pode ser feito (por exemplo, recusado pela Vodafone).</p>','Marcar recusado',rz=>atGuardar('recusar',rz)));
+  on('#t-can',()=>pedirRazao('Cancelar a Atividade','','Cancelar a Atividade',rz=>atGuardar('cancelar',rz)));
+  on('#t-rea',()=>atGuardar('reabrir'));
+  on('#t-del',()=>atEliminar());
+}
+function atValidar(r){
+  const e=[]; if(!String(r.cliente?.nome||'').trim()) e.push('cliente'); if(String(r.cliente?.nif||'').replace(/\s/g,'').length<5) e.push('NIF');
+  if(!r.assunto) e.push('assunto'); if(!r.subAssunto) e.push('sub-assunto');
+  const d=String(r.descricao||'').trim(); if(d.length<10 || Object.values(AT_GUIA).includes(d)) e.push('descrição do pedido');
+  if(r.assunto==='Correcção Implementação' && !String(r.pnNumero||'').trim()) e.push('PN relacionado');
+  if(r.subAssunto==='Créditos' && !(parseFloat(r.valor)>0)) e.push('valor do crédito');
+  return e;
+}
+async function atGuardar(acao, arg){
+  const r=AT.cur, p=atPerms();
+  if (acao==='submeter') { const e=atValidar(r); if(e.length) return toast('Falta: '+e.join(', '),true); }
+  if (acao==='concluir' && String(r.resposta||'').trim().length<3) return toast('Escreva o Relatório BackOffice (o que foi feito) antes de concluir.',true);
+  document.querySelectorAll('#main .row .btn').forEach(b=>b.disabled=true);
+  const isNew=!r.id, ref=isNew?doc(collection(db,'atividades')):doc(db,'atividades',r.id);
+  const data=JSON.parse(JSON.stringify(r)); ['id','criadoEm','atualizadoEm','msgUlt','msgLido','_msgVistas'].forEach(k=>delete data[k]);
+  data.cliente={nif:String(data.cliente?.nif||'').replace(/\s/g,''), nome:String(data.cliente?.nome||'').trim()}; data.msisdnsL=atMsisdns(data.msisdns);
+  let old=null;
+  try {
+    await runTransaction(db, async tx=>{
+      const cargaRef=doc(db,'config','cargaBO'), cRef=doc(db,'counters','atividades');
+      const sn=isNew?null:await tx.get(ref); old=sn&&sn.exists()?sn.data():null;
+      const cs=await tx.get(cargaRef), cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, aus=cd.ausentes||{};
+      let prox=null; if (!old?.numero) { const c=await tx.get(cRef); data.numero=c.exists()?c.data().next:1; prox=data.numero+1; } else data.numero=old.numero;
+      if (old) {   // o que só a BO decide fica como está na base de dados quando é o vendedor a gravar
+        data.estado=old.estado; data.submetidoEm=old.submetidoEm||''; data.fechadoEm=old.fechadoEm||null; data.fechadoMes=old.fechadoMes||null; data.mesRef=old.mesRef||null; data.motivo=old.motivo||'';
+        if (!isBO()) { data.boUid=old.boUid??null; data.boNome=old.boNome||''; data.resposta=old.resposta||''; data.refVDF=old.refVDF||''; data.vendedorUid=old.vendedorUid; data.vendedorNome=old.vendedorNome||''; }
+        if (!isBO() && !AT_EDIT_COM.includes(old.estado)) throw new Error('Esta Atividade já está com a BackOffice e não pode ser alterada.');
+      }
+      const agora=new Date().toISOString(), de=old?.estado||'Em Elaboração';
+      if (acao==='submeter') { if(de!=='Em Elaboração') throw new Error('Esta Atividade já foi submetida.'); data.estado='Submetido'; data.submetidoEm=agora;
+        if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus); data.boUid=b.uid; data.boNome=b.nome; } }
+      else if (acao==='resolvido') { if(de!=='Pendente Comercial') throw new Error('Esta Atividade já não está pendente.'); data.estado='Em tratamento'; data.motivo=''; }
+      else if (acao==='tratar') { data.estado='Em tratamento'; data.motivo=''; }
+      else if (acao==='pendente') { data.estado='Pendente Comercial'; data.motivo=arg||''; }
+      else if (acao==='aguardar') { data.estado='A aguardar'; data.motivo=arg||''; }
+      else if (acao==='concluir' || acao==='recusar' || acao==='cancelar') { data.estado={concluir:'Concluído',recusar:'Recusado',cancelar:'Cancelado'}[acao]; data.motivo=acao==='concluir'?'':(arg||'');
+        data.fechadoEm=agora; data.fechadoMes=mesLocal(); data.mesRef=mesLocal(); data.fechadoPorUid=S.me.uid; data.fechadoPorNome=S.me.nome; }
+      else if (acao==='reabrir') { data.estado='Em tratamento'; data.fechadoEm=null; data.fechadoMes=null; data.mesRef=null; data.motivo=''; }
+      if (acao && !['submeter','resolvido'].includes(acao) && !isBO()) throw new Error('Sem permissão para esta operação.');
+      const oc=old?.cargaContada||0, nc=(AT_ABERTAS.includes(data.estado)&&data.boUid)?1:0;
+      if (old?.boUid && oc) carga[old.boUid]=Math.max(0,(carga[old.boUid]||0)-oc);
+      if (data.boUid && nc) carga[data.boUid]=(carga[data.boUid]||0)+nc;
+      data.cargaContada=nc;
+      if (oc||nc) tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+      if (prox!=null) tx.set(cRef,{next:prox},{merge:true});
+      data.atualizadoEm=serverTimestamp(); data.atualizadoPor=S.me.uid;
+      if (isNew) { data.criadoEm=serverTimestamp(); data.criadoPor=S.me.uid; tx.set(ref,data); } else tx.set(ref,data,{merge:true});
+    });
+    const msg=r.msgUlt, lido=r.msgLido; AT.cur={...data, id:ref.id, msgUlt:msg, msgLido:lido}; delete AT.cur.atualizadoEm; delete AT.cur.criadoEm; S.dirty=false;
+    const de=old?.estado||'';
+    if (isNew) await atHist(ref.id,'Criada','');
+    if (acao==='submeter') await atHist(ref.id,'Submetida',`Atribuída a ${data.boNome} (distribuição automática)`);
+    else if (acao) await atHist(ref.id,{resolvido:'Devolvida à BO',tratar:'Em tratamento',pendente:'Pendente Comercial',aguardar:'A aguardar',concluir:'Concluída',recusar:'Recusada',cancelar:'Cancelada',reabrir:'Reaberta'}[acao], arg||(acao==='reabrir'?`De ${de}`:''));
+    else if (old) { const ch=[['assunto','Assunto'],['subAssunto','Sub-assunto'],['conta','Conta'],['msisdns','Números'],['dataEfetiva','Data efetiva'],['pnNumero','PN relacionado'],['valor','Valor'],['refVDF','Ref.ª Vodafone'],['boNome','BO'],['vendedorNome','Vendedor']].filter(([k])=>String(old[k]??'')!==String(data[k]??'')).map(([k,t])=>`${t}: ${old[k]||'—'} → ${data[k]||'—'}`);
+      if (String(old.descricao||'')!==String(data.descricao||'')) ch.push('Descrição alterada'); if (String(old.resposta||'')!==String(data.resposta||'')) ch.push('Relatório BackOffice alterado');
+      if (ch.length) await atHist(ref.id,'Alterada',ch.join('; ')); }
+    if (old || acao) await atAviso(ref.id, data, de||'Em Elaboração', data.estado);
+    toast(acao==='submeter'?`Atividade ${atNum(data)} submetida · BackOffice: ${data.boNome}`:acao==='concluir'?'Atividade concluída.':'Guardado.');
+    if (isNew) { history.replaceState(null,'','#/atividades/'+ref.id); }
+    atFicha(); return true;
+  } catch(e){ toast(errTxt(e),true); atFicha(); return false; }
+}
+async function atEliminar(){
+  const r=AT.cur; if(!r?.id) return;
+  if (r.estado==='Em Elaboração') { if(!confirm(`Eliminar a Atividade ${atNum(r)}? Não pode ser recuperada.`)) return; }
+  else { const t=prompt(`A Atividade ${atNum(r)} está em «${r.estado}». Vai ser apagada com anexos, mensagens e histórico.\n\nPara confirmar, escreva o número (${r.numero}):`); if(t===null) return; if(String(t).trim().replace(/^a/i,'')!==String(r.numero)) return toast('O número não confere. Nada foi apagado.',true); }
+  try {
+    for (const sub of ['anexos','mensagens','historico']) { try { const sn=await getDocs(collection(db,'atividades',r.id,sub));
+      for (const d of sn.docs) { if (sub==='anexos' && d.data().path) await deleteObject(sref(st,d.data().path)).catch(()=>{}); await deleteDoc(d.ref); } } catch(e){ console.warn('atEliminar',sub,e); } }
+    await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',r.id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef); if(!s.exists()) return;
+      const o=s.data(), carga={...((cs.exists()?cs.data():{}).carga||{})};
+      if (o.boUid && o.cargaContada) { carga[o.boUid]=Math.max(0,(carga[o.boUid]||0)-o.cargaContada); tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true}); }
+      tx.delete(ref); });
+    S.dirty=false; AT.cur=null; toast('Atividade eliminada.'); location.hash='#/atividades';
+  } catch(e){ toast(errTxt(e),true); }
+}
+// muda a BO de uma Atividade em aberto (usado pela redistribuição nas ausências)
+async function atRealocarTx(id, motivo){
+  let txt='';
+  await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef); const r=s.data(), cd=cs.exists()?cs.data():{};
+    if (!AT_ABERTAS.includes(r.estado)) throw new Error('Já não está em aberto.');
+    const carga={...(cd.carga||{})}, novo=escolherBO(carga, cd.ausentes||{}, [r.boUid]);
+    if (r.boUid && r.cargaContada) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-r.cargaContada);
+    carga[novo.uid]=(carga[novo.uid]||0)+1;
+    tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,{boUid:novo.uid, boNome:novo.nome, cargaContada:1, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
+    txt=`De ${r.boNome||'—'} para ${novo.nome}. ${motivo||''}`; });
+  await atHist(id,'Realocada',txt);
+}
+function atAnexos(tc, p){
+  const r=AT.cur, podeUp=isStaff()||p.own;
+  tc.innerHTML=`<div class="card">
+    ${podeUp?`<div class="row" style="margin-bottom:12px"><input type="file" id="t-fup" multiple style="max-width:420px"><button class="btn pri" id="t-bup">Carregar</button><span class="muted" style="font-size:12px">Pedido do cliente, certidão, comprovativo de IBAN, fatura… máx. 20 MB</span></div>`:''}
+    <table><thead><tr><th>Ficheiro</th><th>Por</th><th>Quando</th><th class="num">Tamanho</th><th></th></tr></thead><tbody id="t-axl"><tr><td colspan="5" class="muted">A carregar…</td></tr></tbody></table></div>`;
+  S.unsub.push(onSnapshot(query(collection(db,'atividades',r.id,'anexos'),orderBy('em','desc')), s=>{ const el=$('#t-axl'); if(!el) return;
+    el.innerHTML=s.docs.map(d=>{ const a=d.data(), pode=isBO()||(a.porUid===S.me.uid && r.estado==='Em Elaboração'); return `<tr><td><a href="#" data-open="${esc(a.path)}">${esc(a.nome)}</a></td><td>${esc(a.porNome)}</td><td>${tsTxt(a.em)}</td><td class="num">${Math.ceil((a.tamanho||0)/1024)} KB</td><td>${pode?`<button class="btn sm ghost" data-rm="${d.id}" data-p="${esc(a.path)}" style="color:var(--red-d)">Remover</button>`:''}</td></tr>`; }).join('')||`<tr><td colspan="5" class="muted">Sem anexos.</td></tr>`;
+    el.querySelectorAll('[data-open]').forEach(a=>a.onclick=async e=>{ e.preventDefault(); try{ window.open(await getDownloadURL(sref(st,a.dataset.open)),'_blank'); }catch(err){ toast(errTxt(err),true); } });
+    el.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ if(!confirm('Remover este anexo?')) return; try{ await deleteObject(sref(st,b.dataset.p)).catch(()=>{}); await deleteDoc(doc(db,'atividades',r.id,'anexos',b.dataset.rm)); atHist(r.id,'Anexo removido',b.dataset.p.split('/').pop()); }catch(err){ toast(errTxt(err),true); } });
+  }, e=>toast(errTxt(e),true)));
+  $('#t-bup')?.addEventListener('click', async()=>{ const fs=[...$('#t-fup').files]; if(!fs.length) return toast('Escolha um ficheiro.',true); $('#t-bup').disabled=true;
+    try { for (const f of fs) { if (f.size>20*1024*1024) { toast(`${f.name}: excede 20 MB`,true); continue; }
+        const path=`atividades/${r.id}/${Date.now()}_${f.name.replace(/[^\w.\-]+/g,'_')}`;
+        await uploadBytes(sref(st,path), f, {contentType:f.type||'application/octet-stream'});
+        await addDoc(collection(db,'atividades',r.id,'anexos'),{nome:f.name, path, tamanho:f.size, tipo:f.type, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()}); atHist(r.id,'Anexo adicionado',f.name); }
+      toast('Anexo(s) carregado(s).'); $('#t-fup').value=''; } catch(e){ toast(errTxt(e),true); } finally { const b=$('#t-bup'); if(b) b.disabled=false; } });
+}
+function atMsgs(tc){
+  const r=AT.cur, parte=[r.vendedorUid,r.boUid].includes(S.me.uid);
+  tc.innerHTML=`<div class="card"><div class="msgs" id="t-ml"><span class="muted">A carregar…</span></div>
+    <textarea id="t-mt" rows="3" placeholder="Escrever mensagem para ${esc(r.vendedorUid===S.me.uid ? (r.boNome||'a BackOffice') : r.vendedorNome)}…"></textarea>
+    <div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn pri" id="t-ms">Enviar</button></div></div>`;
+  const lida=()=>{ if (!parte || !msgPorLer(r)) return; const agora=new Date().toISOString(); r.msgLido={...(r.msgLido||{}),[S.me.uid]:agora};
+    setDoc(doc(db,'atividades',r.id),{msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgLido',e)); const t=document.querySelector('.tabs a[data-tt="msg"]'); if(t) t.textContent='Mensagens'; };
+  S.unsub.push(onSnapshot(query(collection(db,'atividades',r.id,'mensagens'),orderBy('em')), s=>{ const el=$('#t-ml'); if(!el) return;
+    el.innerHTML=s.docs.map(d=>{ const x=d.data(); return `<div class="msg ${x.auto?'auto':x.porUid===S.me.uid?'mine':''}"><small>${x.auto?'Aviso automático · ':''}${esc(x.porNome)} · ${tsTxt(x.em)}</small>${esc(x.texto).replace(/\n/g,'<br>')}</div>`; }).join('')||`<span class="muted">Sem mensagens.</span>`;
+    el.scrollTop=el.scrollHeight; lida(); }, e=>toast(errTxt(e),true)));
+  $('#t-ms').onclick=async()=>{ const t=$('#t-mt').value.trim(); if(!t) return;
+    try { await addDoc(collection(db,'atividades',r.id,'mensagens'),{texto:t, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
+      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome};
+      await setDoc(doc(db,'atividades',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e)); $('#t-mt').value=''; } catch(e){ toast(errTxt(e),true); } };
+}
+function atHistorico(tc){
+  const r=AT.cur;
+  tc.innerHTML=`<div class="card"><table class="hist"><thead><tr><th style="width:150px">Quando</th><th style="width:160px">Quem</th><th style="width:170px">Ação</th><th>Detalhe</th></tr></thead><tbody id="t-hl"><tr><td colspan="4" class="muted">A carregar…</td></tr></tbody></table></div>`;
+  S.unsub.push(onSnapshot(query(collection(db,'atividades',r.id,'historico'),orderBy('em','desc')), s=>{ const el=$('#t-hl'); if(!el) return;
+    el.innerHTML=s.docs.map(d=>{ const h=d.data(); return `<tr><td>${tsTxt(h.em)}</td><td>${esc(h.porNome)}</td><td>${esc(h.acao)}</td><td>${esc(h.detalhe)}</td></tr>`; }).join('')||`<tr><td colspan="4" class="muted">Sem registos.</td></tr>`; }, e=>toast(errTxt(e),true)));
+}
+
 // ---------- 9a. CATÁLOGO DE REFERÊNCIAS (Coordenador, BackOffice e Master criam, editam e apagam) ----------
 let CAT_Q = '';
 const SUBFAMS = ['GSM','BL','Fixo'];
@@ -1564,7 +1907,7 @@ function viewCatalogo(){
       <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b>${p.inativo?' <span class="muted" style="font-size:11px">· inativa</span>':''}</td><td>${esc(p.designacao)}${composicaoDe(p)?`<div class="muted" style="font-size:11px">📦 ${p.composicao.map(c=>esc(c.ref)+' '+(Math.round(c.pct*1000)/10).toLocaleString('pt-PT')+'%').join(' + ')}</div>`:''}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
         <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
     ${L.length>300?'<p class="muted" style="font-size:12px;margin-bottom:0">A mostrar as primeiras 300. Afine a pesquisa.</p>':''}</div>`;
-  const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ viewCatalogo(); const n=$('#cq'); n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
+  const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ if(!location.hash.startsWith('#/catalogo')) return; viewCatalogo(); const n=$('#cq'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
   $('#cn').onclick=()=>editarRef(null);
   m.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editarRef(S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const ref=b.closest('tr').dataset.ref;
@@ -1613,18 +1956,19 @@ function editarRef(p){
 
 // ---------- 9b. PRODUÇÃO BO (pontos e repartição do bolo mensal) ----------
 // pontos por linha: implementar = impl · conferir = conf · cancelado/reprovado = canc · devolução = −impl × pen
-const PESOS_DEF = {impl:2, conf:1, canc:2, pen:1.5};
+const PESOS_DEF = {impl:2, conf:1, canc:2, pen:1.5, ativ:2};
 let PROD_MES = null;
-function calcProducao(fechados, comDev, mes, P, bolo){
-  const L = {}; const row = (uid,nome) => (L[uid] = L[uid] || {uid, nome:nome||userNome(uid)||'—', li:0, lc:0, lx:0, nd:0, ld:0});
+function calcProducao(fechados, comDev, mes, P, bolo, ativs=[]){
+  const L = {}; const row = (uid,nome) => (L[uid] = L[uid] || {uid, nome:nome||userNome(uid)||'—', li:0, lc:0, lx:0, nd:0, ld:0, la:0});
   bos().forEach(b=>row(b.uid,b.nome));
   fechados.forEach(r=>{ const n=r.nLinhas||0;
     if (r.estado==='PN') { const iu=r.implPorUid||r.boUid; if(iu) row(iu, r.implPorNome||r.boNome).li+=n; if(r.conferidoPorUid) row(r.conferidoPorUid, r.conferidoPorNome).lc+=n; }
     else if (['Cancelado','Reprovado'].includes(r.estado) && r.boUid) row(r.boUid, r.boNome).lx+=n; });
+  ativs.forEach(a=>{ if (AT_PONTUAM.includes(a.estado) && a.boUid) row(a.boUid, a.boNome).la++; });   // atividades tratadas (concluídas ou recusadas)
   const devs=[];
   comDev.forEach(r=>(r.devolucoes||[]).forEach((d,i)=>{ if(d.mes!==mes) return; devs.push({...d, i, rpnId:r.id, numero:r.numero, cliente:r.cliente?.nome||''});
     if(!d.anulada && d.aUid){ const x=row(d.aUid,d.aNome); x.nd++; x.ld+=d.linhas||0; } }));
-  const linhas = Object.values(L).map(x=>({...x, pts: x.li*P.impl + x.lc*P.conf + x.lx*P.canc - x.ld*P.impl*P.pen}));
+  const linhas = Object.values(L).map(x=>({...x, pts: x.li*P.impl + x.lc*P.conf + x.lx*P.canc + x.la*(P.ativ||0) - x.ld*P.impl*P.pen}));
   const tot = linhas.reduce((a,x)=>a+Math.max(0,x.pts),0);
   linhas.forEach(x=>{ x.parte = tot ? Math.max(0,x.pts)/tot : 0; x.valor = Math.round(bolo*x.parte*100)/100; });
   linhas.sort((a,b)=>b.pts-a.pts || a.nome.localeCompare(b.nome));
@@ -1635,12 +1979,14 @@ async function viewProducao(){
   const m=$('#main'); if(!PROD_MES) PROD_MES=mesLocal();
   m.innerHTML=`<div class="card muted">A carregar…</div>`;
   try {
-    const [cfgS, fS, dS] = await Promise.all([getDoc(doc(db,'config','producaoBO')),
+    const [cfgS, fS, dS, aS] = await Promise.all([getDoc(doc(db,'config','producaoBO')),
       getDocs(query(collection(db,'rpn'),where('fechadoMes','==',PROD_MES))),
-      getDocs(query(collection(db,'rpn'),where('devMeses','array-contains',PROD_MES)))]);
+      getDocs(query(collection(db,'rpn'),where('devMeses','array-contains',PROD_MES))),
+      getDocs(query(collection(db,'atividades'),where('fechadoMes','==',PROD_MES)))]);
+    const ativs=aS.docs.map(d=>({id:d.id,...d.data()}));
     const cfg=cfgS.data()||{}; const P={...PESOS_DEF,...(cfg.pesos||{})}; const bolo=+((cfg.bolo||{})[PROD_MES] ?? cfg.boloPadrao ?? 0);
     const fechados=fS.docs.map(d=>({id:d.id,...d.data()})), comDev=dS.docs.map(d=>({id:d.id,...d.data()}));
-    const {linhas, devs, tot} = calcProducao(fechados, comDev, PROD_MES, P, bolo);
+    const {linhas, devs, tot} = calcProducao(fechados, comDev, PROD_MES, P, bolo, ativs);
     const mst=isMaster(), num=(id,v,w=70)=>mst?`<input type="number" step="any" id="${id}" value="${v}" style="width:${w}px">`:`<b>${String(v).replace('.',',')}</b>`;
     const pt = n => (+n||0).toLocaleString('pt-PT',{maximumFractionDigits:2});
     m.innerHTML = `
@@ -1650,24 +1996,27 @@ async function viewProducao(){
         <div><label>Implementar (pts/linha)</label>${num('pi',P.impl)}</div>
         <div><label>Conferir (pts/linha)</label>${num('pc',P.conf)}</div>
         <div><label>Cancelado/Reprovado (pts/linha)</label>${num('px',P.canc)}</div>
+        <div><label>Atividade (pts/atividade)</label>${num('pa',P.ativ)}</div>
         <div><label>Devolução (× pontos de implementar)</label>${num('pp',P.pen)}</div>
         ${mst?`<button class="btn pri" id="ps">Guardar</button>`:''}
       </div>
-      <p class="muted" style="font-size:12px;margin-bottom:0">Contam os RPN que passaram a PN (ou foram cancelados/reprovados) neste mês, e as devoluções feitas pela conferência neste mês. Cada devolução tira a quem implementou ${pt(P.impl*P.pen)} pontos por linha. O bolo reparte-se pelos pontos; quem ficar abaixo de zero recebe 0 €.</p></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Contam os RPN que passaram a PN (ou foram cancelados/reprovados) neste mês, as Atividades concluídas ou recusadas neste mês, e as devoluções feitas pela conferência neste mês. Cada devolução tira a quem implementou ${pt(P.impl*P.pen)} pontos por linha. O bolo reparte-se pelos pontos; quem ficar abaixo de zero recebe 0 €.</p></div>
       <div class="card scroll"><h2>Produção de ${fmtD(PROD_MES)}</h2><table id="ptab">
-        <thead><tr><th>BackOffice</th><th class="num">Linhas implementadas</th><th class="num">Linhas conferidas</th><th class="num">Linhas canc./reprov.</th><th class="num">Devoluções</th><th class="num">Linhas devolvidas</th><th class="num">Pontos</th><th class="num">Parte</th><th class="num">Valor €</th></tr></thead>
-        <tbody>${linhas.map(x=>`<tr data-bo="${x.uid}"><td><b>${esc(x.nome)}</b></td><td class="num">${x.li}</td><td class="num">${x.lc}</td><td class="num">${x.lx}</td><td class="num">${x.nd}</td><td class="num">${x.ld}</td><td class="num"><b>${pt(x.pts)}</b></td><td class="num">${(x.parte*100).toLocaleString('pt-PT',{maximumFractionDigits:1})}%</td><td class="num"><b>${eur(x.valor)}</b></td></tr>`).join('')||'<tr><td colspan="9" class="muted">Sem BackOffices.</td></tr>'}</tbody>
-        <tfoot><tr class="tot"><td>Total</td><td class="num">${linhas.reduce((a,x)=>a+x.li,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.lc,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.lx,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.nd,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.ld,0)}</td><td class="num">${pt(tot)}</td><td></td><td class="num">${eur(linhas.reduce((a,x)=>a+x.valor,0))}</td></tr></tfoot></table></div>
+        <thead><tr><th>BackOffice</th><th class="num">Linhas implementadas</th><th class="num">Linhas conferidas</th><th class="num">Linhas canc./reprov.</th><th class="num">Devoluções</th><th class="num">Linhas devolvidas</th><th class="num">Atividades</th><th class="num">Pontos</th><th class="num">Parte</th><th class="num">Valor €</th></tr></thead>
+        <tbody>${linhas.map(x=>`<tr data-bo="${x.uid}"><td><b>${esc(x.nome)}</b></td><td class="num">${x.li}</td><td class="num">${x.lc}</td><td class="num">${x.lx}</td><td class="num">${x.nd}</td><td class="num">${x.ld}</td><td class="num">${x.la}</td><td class="num"><b>${pt(x.pts)}</b></td><td class="num">${(x.parte*100).toLocaleString('pt-PT',{maximumFractionDigits:1})}%</td><td class="num"><b>${eur(x.valor)}</b></td></tr>`).join('')||'<tr><td colspan="10" class="muted">Sem BackOffices.</td></tr>'}</tbody>
+        <tfoot><tr class="tot"><td>Total</td><td class="num">${linhas.reduce((a,x)=>a+x.li,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.lc,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.lx,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.nd,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.ld,0)}</td><td class="num">${linhas.reduce((a,x)=>a+x.la,0)}</td><td class="num">${pt(tot)}</td><td></td><td class="num">${eur(linhas.reduce((a,x)=>a+x.valor,0))}</td></tr></tfoot></table></div>
       <div class="card scroll"><h2>Devoluções do mês</h2><table id="dtab"><thead><tr><th>Quando</th><th>RPN</th><th>Cliente</th><th>Implementou</th><th>Devolveu</th><th class="num">Linhas</th><th>Razão</th><th></th></tr></thead>
         <tbody>${devs.map(d=>`<tr style="${d.anulada?'opacity:.55':''}"><td>${tsTxt(d.em)}</td><td><a href="#/rpn/${d.rpnId}">${d.numero}</a></td><td>${esc(d.cliente)}</td><td>${esc(d.aNome)}</td><td>${esc(d.porNome)}</td><td class="num">${d.linhas}</td><td>${esc(d.motivo)}${d.anulada?` <span class="badge">penalização anulada${d.anuladaPor?' por '+esc(d.anuladaPor):''}</span>`:''}</td>
           <td>${mst?`<button class="btn sm" data-anl="${d.rpnId}" data-i="${d.i}" data-v="${d.anulada?0:1}">${d.anulada?'Repor penalização':'Anular penalização'}</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Sem devoluções neste mês.</td></tr>'}</tbody></table></div>
+      <div class="card scroll"><h2>Atividades fechadas no mês (${ativs.length})</h2><table id="atab"><thead><tr><th>Nº</th><th>Cliente</th><th>Assunto</th><th>Estado</th><th>BackOffice</th><th>Fechada em</th></tr></thead>
+        <tbody>${ativs.sort((a,b)=>(a.numero||0)-(b.numero||0)).map(a=>`<tr><td><a href="#/atividades/${a.id}"><b>${atNum(a)}</b></a></td><td>${esc(a.cliente?.nome)}</td><td>${esc(a.assunto)} · ${esc(a.subAssunto)}</td><td><span class="badge b-${(a.estado||'').replace(/ /g,'-')}">${esc(a.estado)}</span>${AT_PONTUAM.includes(a.estado)?'':' <span class="muted" style="font-size:11px">não pontua</span>'}</td><td>${esc(a.boNome||'—')}</td><td>${tsTxt(a.fechadoEm)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Nenhuma Atividade fechada neste mês.</td></tr>'}</tbody></table></div>
       <div class="card scroll"><h2>Processos fechados no mês (${fechados.length})</h2><table><thead><tr><th>Nº</th><th>Cliente</th><th>Estado</th><th class="num">Linhas</th><th>Implementou</th><th>Conferiu</th><th>Fechado em</th></tr></thead>
-        <tbody>${fechados.sort((a,b)=>(a.numero||0)-(b.numero||0)).map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero}</b></td><td>${esc(r.cliente?.nome)}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(r.estado)}</span></td><td class="num">${r.nLinhas||0}</td><td>${esc(r.estado==='PN'?(r.implPorNome||r.boNome):r.boNome||'—')}</td><td>${esc(r.conferidoPorNome||'—')}</td><td>${tsTxt(r.fechadoEm)}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nenhum processo fechado neste mês.</td></tr>'}</tbody></table></div>`;
+        <tbody>${fechados.sort((a,b)=>(a.numero||0)-(b.numero||0)).map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero}</b></td><td>${esc(r.cliente?.nome)}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')}">${esc(estTxt(r.estado))}</span></td><td class="num">${r.nLinhas||0}</td><td>${esc(r.estado==='PN'?(r.implPorNome||r.boNome):r.boNome||'—')}</td><td>${esc(r.conferidoPorNome||'—')}</td><td>${tsTxt(r.fechadoEm)}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nenhum processo fechado neste mês.</td></tr>'}</tbody></table></div>`;
     $('#pm').onchange=e=>{ if(e.target.value){ PROD_MES=e.target.value; viewProducao(); } };
     document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
     if (mst) {
       $('#ps').onclick=async()=>{ const v=id=>parseFloat($(id).value)||0;
-        try{ await setDoc(doc(db,'config','producaoBO'),{pesos:{impl:v('#pi'),conf:v('#pc'),canc:v('#px'),pen:v('#pp')}, bolo:{[PROD_MES]:v('#pb')}, boloPadrao:v('#pb'), atualizadoEm:serverTimestamp()},{merge:true}); toast('Guardado.'); viewProducao(); }catch(e){ toast(errTxt(e),true); } };
+        try{ await setDoc(doc(db,'config','producaoBO'),{pesos:{impl:v('#pi'),conf:v('#pc'),canc:v('#px'),pen:v('#pp'),ativ:v('#pa')}, bolo:{[PROD_MES]:v('#pb')}, boloPadrao:v('#pb'), atualizadoEm:serverTimestamp()},{merge:true}); toast('Guardado.'); viewProducao(); }catch(e){ toast(errTxt(e),true); } };
       document.querySelectorAll('[data-anl]').forEach(b=>b.onclick=async()=>{ const anular=b.dataset.v==='1';
         if(!confirm(anular?'Anular a penalização desta devolução?':'Repor a penalização desta devolução?')) return;
         try{ const ref=doc(db,'rpn',b.dataset.anl); const sn=await getDoc(ref); const arr=[...(sn.data().devolucoes||[])]; const i=+b.dataset.i;
@@ -1887,6 +2236,8 @@ async function admCarga(el){
         const cc=(r.estado==='Em Conferência'&&r.confUid)?(r.nLinhas||0):0; if(cc) cf[r.confUid]=(cf[r.confUid]||0)+cc;
         if(((r.cargaContada||0)!==cnt || (r.confContada||0)!==cc) && n<450){ b.update(d.ref,{cargaContada:cnt,confContada:cc}); n++; }
       });
+      (await getDocs(query(collection(db,'atividades'), where('estado','in',AT_CURSO)))).forEach(d=>{ const a=d.data(), cnt=(AT_ABERTAS.includes(a.estado)&&a.boUid)?1:0; if(cnt) c[a.boUid]=(c[a.boUid]||0)+1;
+        if((a.cargaContada||0)!==cnt && n<450){ b.update(d.ref,{cargaContada:cnt}); n++; } });
       b.set(doc(db,'config','cargaBO'),{carga:c,conf:cf,atualizadoEm:serverTimestamp()},{merge:true}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
 }
 </script>
