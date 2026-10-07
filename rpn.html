@@ -432,7 +432,7 @@ function drawFicha(){
   const tabs = [['principal','Processo'],['anexos','Anexos'],['msg','Mensagens'],['hist','Histórico']];
   if (!tabs.some(t=>t[0]===S.tab)) S.tab='principal';
   const acts = [];
-  if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button>`);
+  if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button><button class="btn" id="a-canc" title="${r.id?'Repõe o que estava gravado':'Sai sem criar o RPN'}">Cancelar</button>`);
   if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
   if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-div" title="Vários processos para o mesmo negócio (ex.: prazos de fidelização diferentes)">Dividir em vários RPN</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
@@ -464,6 +464,7 @@ function drawFicha(){
   $('#back').onclick=()=>go('#/lista');
   document.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ S.tab=a.dataset.t; clearSubs(); drawFicha(); });
   $('#a-save')?.addEventListener('click',()=>guardar());
+  $('#a-canc')?.addEventListener('click',()=>{ if (S.dirty && !confirm('Descartar as alterações que não foram guardadas?')) return; S.dirty=false; if (S.cur?.id) viewFicha(S.cur.id); else location.hash='#/lista'; });
   $('#a-sub')?.addEventListener('click',()=>acaoGrupo('submeter',{submeter:true}));
   $('#a-div')?.addEventListener('click',dividir);
   desenharGrupo();
@@ -1331,12 +1332,13 @@ function desenharProjetos(){
       :`<div class="scroll" style="margin-bottom:14px"><table id="pj-vt"><thead><tr><th>Vendedor</th><th class="num">Projetos</th><th class="num">RLMC potencial</th><th class="num">Score potencial</th><th class="num">Já tratados</th><th class="num">Ganhos</th></tr></thead><tbody>${Object.values(porV).sort((a,b)=>b.sc-a.sc).map(o=>`<tr><td>${esc(o.nome)}</td><td class="num">${o.n}</td><td class="num">${eur(o.rl)}</td><td class="num">${n3(o.sc)}</td><td class="num">${o.tr} (${Math.round(o.tr/o.n*100)}%)</td><td class="num">${o.ga}</td></tr>`).join('')}</tbody></table></div>`):''}
     <div class="scroll"><table id="pj-t"><thead><tr><th>Alerta</th><th>Cliente</th><th>NIF</th>${stf?'<th>Vendedor</th>':''}<th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>Estado</th></tr></thead>
       <tbody>${corpo||`<tr><td colspan="${cols}" class="muted">${tratar?'Nada para tratar neste momento.':'Sem Projetos neste mês.'}</td></tr>`}</tbody></table></div>
-    ${isMaster()?`<div id="pj-blq" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="pj-bq" ${PJ.cfg.bloqueio?'checked':''}> Bloquear propostas novas ao vendedor que tenha Projetos em atraso, a partir do dia <input type="number" id="pj-bd" min="1" max="28" value="${PJ.cfg.bloqueioDia||10}" style="width:64px"> de cada mês <button class="btn sm" id="pj-bs">Guardar</button></label><div class="muted" style="font-size:12px;margin-top:4px">Desligado por omissão. Quando ligado, as propostas criadas a partir de um Projeto continuam a ser permitidas.</div></div>`:''}</div>`;
+    ${isMaster()?`<div id="pj-blq" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:13px"><label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="pj-bq" ${PJ.cfg.bloqueio?'checked':''}> Bloquear propostas novas ao vendedor que tenha Projetos em atraso, a partir do dia <input type="number" id="pj-bd" min="1" max="28" value="${PJ.cfg.bloqueioDia||10}" style="width:64px"> de cada mês <button class="btn sm" id="pj-bs">Guardar</button> <button class="btn sm" id="pj-bc" title="Repõe os valores guardados">Cancelar</button></label><div class="muted" style="font-size:12px;margin-top:4px">Desligado por omissão. Quando ligado, as propostas criadas a partir de um Projeto continuam a ser permitidas.</div></div>`:''}</div>`;
   m.querySelectorAll('[data-pt]').forEach(a=>a.onclick=()=>{ PJ.tab=a.dataset.pt; viewProjetos(); });
   const pm=$('#pj-m'); if(pm) pm.onchange=()=>{ if(pm.value){ PJ.mes=pm.value; viewProjetos(); } };
   const pv=$('#pj-v'); if(pv) pv.onchange=()=>{ PJ.vend=pv.value; desenharProjetos(); };
   const pg=$('#pj-g'); if(pg) pg.onclick=async()=>{ if(!confirm(`Gerar os Projetos de ${PJ.mes.split('-').reverse().join('/')}?\n\nProcura os PN que chegam aos 6 meses do fim do contrato nesse mês. Os Projetos que já existem não são alterados.`)) return; pg.disabled=true; pg.textContent='A gerar…';
     try{ const x=await gerarProjetos(PJ.mes); toast(`${x.criados} Projeto(s) criados (${x.linhas} linhas) · ${x.jaHavia} já existiam · ${x.tiradas} linha(s) já renegociadas ou em curso · ${x.semVendedor} por atribuir.`); viewProjetos(); }catch(e){ toast(errTxt(e),true); pg.disabled=false; } };
+  const bc=$('#pj-bc'); if(bc) bc.onclick=e=>{ e.preventDefault(); desenharProjetos(); };
   const bs=$('#pj-bs'); if(bs) bs.onclick=async e=>{ e.preventDefault(); const on=$('#pj-bq').checked, dia=Math.min(28,Math.max(1,parseInt($('#pj-bd').value)||10));
     try{ await setDoc(doc(db,'config','projetos'),{bloqueio:on, bloqueioDia:dia},{merge:true}); PJ.cfg.bloqueio=on; PJ.cfg.bloqueioDia=dia; toast(on?`Bloqueio ligado: a partir do dia ${dia}.`:'Bloqueio desligado.'); }catch(err){ toast(errTxt(err),true); } };
   m.querySelectorAll('[data-pj]').forEach(tr=>tr.onclick=()=>abrirProjeto(PJ.lista.find(p=>p.id===tr.dataset.pj)));
@@ -1705,7 +1707,7 @@ function atFicha(){
   const r=AT.cur, p=atPerms(), m=$('#main'), ed=p.edV||p.edBO, dV=ed?'':'disabled', dB=p.edBO?'':'disabled';
   const tabs=[['pedido','Pedido'],['anexos','Anexos'],['msg','Mensagens'+(msgPorLer(r)?' ● nova':'')],['hist','Histórico']];
   const acts=[];
-  if (ed) acts.push(`<button class="btn" id="t-save">Guardar</button>`);
+  if (ed) acts.push(`<button class="btn" id="t-save">Guardar</button><button class="btn" id="t-canc" title="${r.id?'Repõe o que estava gravado':'Sai sem criar a Atividade'}">Cancelar</button>`);
   if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="t-sub">Submeter à BackOffice</button>`);
   if (p.own && r.estado==='Pendente Comercial') acts.push(`<button class="btn pri" id="t-res">Resolvido · devolver à BO</button>`);
   if (isBO() && r.id && AT_ABERTAS.includes(r.estado)) {
@@ -1762,6 +1764,7 @@ function atFicha(){
   $('#t-back').onclick=e=>{ e.preventDefault(); go('#/atividades'); };
   const on=(id,f)=>{ const b=$(id); if(b) b.onclick=f; };
   on('#t-save',()=>atGuardar());
+  on('#t-canc',()=>{ if (S.dirty && !confirm('Descartar as alterações que não foram guardadas?')) return; S.dirty=false; if (r.id) atAbrir(r.id); else location.hash='#/atividades'; });
   on('#t-sub',()=>atGuardar('submeter'));
   on('#t-res',()=>atGuardar('resolvido'));
   on('#t-tra',()=>atGuardar('tratar'));
@@ -2089,20 +2092,21 @@ function viewCatalogo(){
       <span class="muted">${L.length} de ${S.prodList.length} referência(s)</span><span class="sp"></span><button class="btn pri" id="cn">+ Nova referência</button></div>
     <div class="scroll"><table id="ctab"><thead><tr><th>Referência</th><th>Designação</th><th>Sub-fam.</th><th>Categoria</th><th>Tier</th><th>Pricing plan</th><th>Desc.</th><th></th></tr></thead>
       <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b>${p.inativo?' <span class="muted" style="font-size:11px">· inativa</span>':''}</td><td>${esc(p.designacao)}${composicaoDe(p)?`<div class="muted" style="font-size:11px">📦 ${p.composicao.map(c=>esc(c.ref)+' '+(Math.round(c.pct*1000)/10).toLocaleString('pt-PT')+'%').join(' + ')}</div>`:''}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
-        <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
+        <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm" data-dp title="Cria uma referência nova a partir desta">Duplicar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
     ${L.length>300?'<p class="muted" style="font-size:12px;margin-bottom:0">A mostrar as primeiras 300. Afine a pesquisa.</p>':''}</div>`;
   const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ if(!location.hash.startsWith('#/catalogo')) return; viewCatalogo(); const n=$('#cq'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
   $('#cn').onclick=()=>editarRef(null);
   m.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editarRef(S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
+  m.querySelectorAll('[data-dp]').forEach(b=>b.onclick=()=>editarRef(null, S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const ref=b.closest('tr').dataset.ref;
     const pais=S.prodList.filter(x=>(x.composicao||[]).some(c=>String(c.ref).toUpperCase()===ref.toUpperCase())).map(x=>x.ref);
     if(pais.length) return toast(`Não pode apagar: ${ref} faz parte do(s) bundle(s) ${pais.join(', ')}.`,true);
     if(!confirm(`Apagar a referência ${ref}?\n\nOs processos que já a usam não são alterados, mas deixa de aparecer na pesquisa das linhas.`)) return;
     try{ await deleteDoc(doc(db,'produtos',prodId(ref))); produtoLocal(ref,null); await catalogoMudou(); toast('Referência apagada.'); viewCatalogo(); }catch(e){ toast(errTxt(e),true); } });
 }
-function editarRef(p){
-  const nova=!p; p=p||{ref:'',designacao:'',subfamilia:'GSM',tier:'Gold',pricingPlan:'',descontinuado:false};
-  modal(`<h2>${nova?'Nova referência':'Editar '+esc(p.ref)}</h2><div class="grid g2">
+function editarRef(p, modelo){   // modelo = referência a duplicar: abre como nova, já preenchida, só falta escrever a referência
+  const nova=!p; p=p||(modelo?{...modelo, ref:''}:{ref:'',designacao:'',subfamilia:'GSM',tier:'Gold',pricingPlan:'',descontinuado:false});
+  modal(`<h2>${nova?(modelo?'Duplicar '+esc(modelo.ref):'Nova referência'):'Editar '+esc(p.ref)}</h2>${modelo?`<p class="muted" id="e-dup" style="margin-top:0">Cópia de <b>${esc(modelo.ref)}</b>. Escreva a nova referência e altere o que for diferente.</p>`:''}<div class="grid g2">
     <div><label>Referência</label><input id="e-ref" value="${esc(p.ref)}" ${nova?'':'disabled'} maxlength="18" style="text-transform:uppercase"></div>
     <div><label>Sub-família</label><select id="e-sub">${[...new Set([...SUBFAMS,p.subfamilia||'GSM'])].map(x=>`<option ${x===(p.subfamilia||'GSM')?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
     <div style="grid-column:1/-1"><label>Designação</label><input id="e-des" value="${esc(p.designacao)}"></div>
@@ -2182,7 +2186,7 @@ async function viewProducao(){
         <div><label>Cancelado/Reprovado (pts/linha)</label>${num('px',P.canc)}</div>
         <div><label>Atividade (pts/atividade)</label>${num('pa',P.ativ)}</div>
         <div><label>Devolução (× pontos de implementar)</label>${num('pp',P.pen)}</div>
-        ${mst?`<button class="btn pri" id="ps">Guardar</button>`:''}
+        ${mst?`<button class="btn pri" id="ps">Guardar</button><button class="btn" id="pcn" title="Repõe os valores guardados">Cancelar</button>`:''}
       </div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Contam os RPN que passaram a PN (ou foram cancelados/reprovados) neste mês, as Atividades concluídas ou recusadas neste mês, e as devoluções feitas pela conferência neste mês. Cada devolução tira a quem implementou ${pt(P.impl*P.pen)} pontos por linha. O bolo reparte-se pelos pontos; quem ficar abaixo de zero recebe 0 €.</p></div>
       <div class="card scroll"><h2>Produção de ${fmtD(PROD_MES)}</h2><table id="ptab">
@@ -2199,6 +2203,7 @@ async function viewProducao(){
     $('#pm').onchange=e=>{ if(e.target.value){ PROD_MES=e.target.value; viewProducao(); } };
     document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
     if (mst) {
+      $('#pcn').onclick=()=>viewProducao();
       $('#ps').onclick=async()=>{ const v=id=>parseFloat($(id).value)||0;
         try{ await setDoc(doc(db,'config','producaoBO'),{pesos:{impl:v('#pi'),conf:v('#pc'),canc:v('#px'),pen:v('#pp'),ativ:v('#pa')}, bolo:{[PROD_MES]:v('#pb')}, boloPadrao:v('#pb'), atualizadoEm:serverTimestamp()},{merge:true}); toast('Guardado.'); viewProducao(); }catch(e){ toast(errTxt(e),true); } };
       document.querySelectorAll('[data-anl]').forEach(b=>b.onclick=async()=>{ const anular=b.dataset.v==='1';
@@ -2311,7 +2316,7 @@ function admUsers(el){
       <td><select data-k="perfil">${PERFIS.map(p=>`<option value="${p}" ${u.perfil===p?'selected':''}>${PERFIL_TXT[p]}</option>`).join('')}</select></td>
       <td><input data-k="sfid" value="${esc(u.sfid)}" style="width:100px"></td><td><input data-k="vendedorPHC" value="${esc(u.vendedorPHC)}" style="width:80px"></td><td><input data-k="telefone" value="${esc(u.telefone)}" style="width:110px"></td>
       <td style="text-align:center"><input type="checkbox" data-k="recebeRPN" ${u.recebeRPN?'checked':''}></td><td style="text-align:center"><input type="checkbox" data-k="ativo" ${u.ativo?'checked':''}></td>
-      <td><button class="btn sm" data-save>Guardar</button> <button class="btn sm ghost" data-reset>Reset pw</button></td></tr>`).join('')}
+      <td style="white-space:nowrap"><button class="btn sm" data-save>Guardar</button> <button class="btn sm" data-canc title="Repõe esta linha como estava">Cancelar</button> <button class="btn sm ghost" data-reset>Reset pw</button></td></tr>`).join('')}
     </tbody></table></div>`;
   $('#nu-user').oninput=e=>{ if(!$('#nu-email')._t) $('#nu-email').value = e.target.value?`${e.target.value}@${EMAIL_DOMAIN}`:''; };
   $('#nu-email').oninput=e=>e.target._t=true;
@@ -2322,6 +2327,7 @@ function admUsers(el){
     try { const c=await createUserWithEmailAndPassword(sa,d.email,pw); await setDoc(doc(db,'users',c.user.uid),{...d,criadoEm:serverTimestamp()}); await signOut(sa); toast(`Utilizador ${d.nome} criado.`); await loadUsers(); admUsers(el); }
     catch(e){ toast(errTxt(e),true); } finally { deleteApp(sec).catch(()=>{}); }
   };
+  el.querySelectorAll('[data-canc]').forEach(b=>b.onclick=()=>admUsers(el));
   el.querySelectorAll('[data-save]').forEach(b=>b.onclick=async()=>{ const tr=b.closest('tr'), uid=tr.dataset.uid, upd={};
     tr.querySelectorAll('[data-k]').forEach(i=>upd[i.dataset.k]= i.type==='checkbox'?i.checked:i.value.trim());
     if(uid===S.me.uid && (upd.perfil!=='master'||!upd.ativo)) return toast('Não pode retirar o seu próprio acesso de master.',true);
