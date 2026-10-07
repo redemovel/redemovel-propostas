@@ -314,15 +314,21 @@ async function procurarHistorico(){
   const m2 = {}; [...S.list, ...docs].forEach(x=>m2[x.id]=x); S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0));
   S.filtros.estado=''; toast(docs.length+' processo(s) encontrado(s) no histórico.'); drawLista();
 }
+// a lista só se desenha se o utilizador ainda estiver na lista (uma leitura lenta ou a pesquisa a escrever podem terminar depois de mudar de página)
+const naLista = () => { const h=location.hash; return !h || !['#/rpn/','#/novo','#/projetos','#/clientes','#/atividades','#/catalogo','#/producao','#/admin'].some(p=>h.startsWith(p)); };
 function drawLista(){
-  if (!S.me || !S.list || !$('#main')) return;   // chamada atrasada (pesquisa a escrever) depois de sair
+  if (!S.me || !S.list || !$('#main') || !naLista()) return;
   const f = S.filtros, all = S.list;
   const nMsg = all.filter(msgPorLer).length;
   { const a=document.querySelector('header nav a[href="#/lista"]'); if(a) a.innerHTML='RPNs'+(nMsg?` <b id="rp-msg" title="RPN com mensagens por ler" style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px">💬 ${nMsg}</b>`:''); }
   const lim = (()=>{ const d=new Date(); d.setDate(d.getDate()-DIAS_CONCLUIDO); return d.toISOString(); })(), extra = new Set((S.extra||[]).map(x=>x.id));
   const velho = r => !isStaff() && f.mes===mesLocal() && ['Em Conferência','PN','Concluído'].includes(r.estado) && !extra.has(r.id) && !msgPorLer(r) && String(r.implementadoEm||r.fechadoEm||r.data||'') < lim;
   const nEnv = isBO() ? all.filter(pnPorEnviar).length : 0;
-  const base = all.filter(r => !velho(r) && (!f.env || pnPorEnviar(r)) && (!f.msg || msgPorLer(r)) && (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
+  // grupo «parcial»: uns RPN já seguiram (Concluído/PN) e outros ainda estão em aberto
+  const gEst={}; all.forEach(r=>{ if(r.grupoId){ const g=gEst[r.grupoId]=gEst[r.grupoId]||{f:0,a:0}; if(['Em Conferência','PN','Concluído'].includes(r.estado)) g.f++; else if(!FECHADOS.includes(r.estado)) g.a++; } });
+  const parcial = r => !!(r.grupoId && gEst[r.grupoId] && gEst[r.grupoId].f && gEst[r.grupoId].a);
+  const nPar = isStaff() ? new Set(all.filter(parcial).map(r=>r.grupoId)).size : 0; if (!nPar) f.par=false;
+  const base = all.filter(r => !velho(r) && (!f.env || pnPorEnviar(r)) && (!f.par || parcial(r)) && (!f.msg || msgPorLer(r)) && (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
     && (!f.ciclo || esperaVencida(r))
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.cliente?.email,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
@@ -344,6 +350,7 @@ function drawLista(){
         ${isStaff()?`<select id="fv" style="width:200px"><option value="">Todos os vendedores</option>${vends.map(([u,n])=>`<option value="${u}" ${f.vend===u?'selected':''}>${esc(n)}</option>`).join('')}</select>
         <select id="fb" style="width:180px"><option value="">Todas as BO</option>${bos().map(b=>`<option value="${b.uid}" ${f.bo===b.uid?'selected':''}>${esc(b.nome)}</option>`).join('')}</select>`:''}
         <label style="display:flex;gap:6px;align-items:center;margin:0;color:${nMsg?'var(--red-d)':'var(--ink)'};font-weight:${nMsg?700:400}"><input type="checkbox" id="fmsg" ${f.msg?'checked':''}> 💬 Mensagens por ler (${nMsg})</label>
+        ${isStaff()&&nPar?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:#b45309;font-weight:600" title="Negócios em que uns RPN já seguiram para conferência e outros ficaram à espera"><input type="checkbox" id="fpar" ${f.par?'checked':''}> ⛓ Grupos com partes por fechar (${nPar})</label>`:''}
         ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:${nEnv?'var(--red-d)':'var(--ink)'};font-weight:${nEnv?700:400}" title="PN fechados que ainda não foram enviados ao cliente"><input type="checkbox" id="fenv" ${f.env?'checked':''}> ✉ PN por enviar (${nEnv})</label>
         <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fme" ${f.meus?'checked':''}> Só os meus</label>
         <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="fci" ${f.ciclo?'checked':''}> Esperas por verificar (${all.filter(x=>esperaVencida(x)&&(!f.meus||x.boUid===S.me.uid)).length})</label>`:''}
@@ -351,7 +358,7 @@ function drawLista(){
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>':''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?(parcial(r)?' <span class="gp-par" title="Grupo com partes por fechar: uns RPN já seguiram, outros ainda estão em aberto" style="color:#b45309;font-size:11px;font-weight:600">⛓ parcial</span>':' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>'):''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -366,6 +373,7 @@ function drawLista(){
   if ($('#fv')) { $('#fv').onchange=e=>{ f.vend=e.target.value; drawLista(); }; $('#fb').onchange=e=>{ f.bo=e.target.value; drawLista(); }; }
   if ($('#fme')) $('#fme').onchange=e=>{ f.meus=e.target.checked; drawLista(); };
   if ($('#fmsg')) $('#fmsg').onchange=e=>{ f.msg=e.target.checked; drawLista(); };
+  if ($('#fpar')) $('#fpar').onchange=e=>{ f.par=e.target.checked; if (f.par) f.meus=false; drawLista(); };
   if ($('#fenv')) $('#fenv').onchange=e=>{ f.env=e.target.checked; if (f.env) f.meus=false; drawLista(); };
   if ($('#fci')) $('#fci').onchange=e=>{ f.ciclo=e.target.checked; drawLista(); };
 }
@@ -438,6 +446,7 @@ function drawFicha(){
   if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-div" title="Vários processos para o mesmo negócio (ex.: prazos de fidelização diferentes)">Dividir em vários RPN</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
   if (r.id && r.origem!=='PHC' && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
+  if (isBO() && r.id && r.origem!=='PHC' && ABERTOS.includes(r.estado)) acts.push(`<button class="btn" id="a-sep" title="Passa algumas linhas para um RPN novo do mesmo negócio (por exemplo as que ficam à espera de instalação), para as restantes poderem seguir">Separar linhas</button>`);
   if (isBO() && r.id && ['Submetido','Em Implementação','A aguardar'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-conf">Implementação terminada · enviar para conferência</button>`);
   if (isBO() && r.estado==='Em Conferência' && r.boUid!==S.me.uid && (r.confUid===S.me.uid || isMaster())) acts.push(`<button class="btn pri" id="a-ok">Conferido · fechar como PN</button><button class="btn" id="a-dev">Devolver à implementação</button>`);
   if (isBO() && r.id && ABERTOS.includes(r.estado)) acts.push(`<button class="btn" id="a-real">Realocar BO</button>`);
@@ -468,6 +477,7 @@ function drawFicha(){
   $('#a-canc')?.addEventListener('click',()=>{ if (S.dirty && !confirm('Descartar as alterações que não foram guardadas?')) return; S.dirty=false; if (S.cur?.id) viewFicha(S.cur.id); else location.hash='#/lista'; });
   $('#a-sub')?.addEventListener('click',()=>acaoGrupo('submeter',{submeter:true}));
   $('#a-div')?.addEventListener('click',dividir);
+  $('#a-sep')?.addEventListener('click',separarLinhas);
   desenharGrupo();
   $('#a-resp')?.addEventListener('click',()=>guardar({devolver:true}));
   $('#a-del')?.addEventListener('click',eliminar);
@@ -941,6 +951,7 @@ async function guardar(opts={}){
         if (old.confUid!==S.me.uid && !isMaster()) throw new Error('A conferência deste RPN está atribuída a '+(old.confNome||'outra BackOffice')+'.');
       }
       if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga, aus); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; }
+      if (opts.conferencia && opts.confPref && !data.confUid && opts.confPref!==data.boUid && !aus[opts.confPref] && bos().some(b=>b.uid===opts.confPref)) { data.confUid=opts.confPref; data.confNome=userNome(opts.confPref); }
       if (data.estado==='Em Conferência' && (!data.confUid || data.confUid===data.boUid || aus[data.confUid])) {
         const c = escolherConf(conf, aus, [data.boUid]); data.confUid=c?c.uid:null; data.confNome=c?c.nome:''; }
       // registos para a Produção BO: quem implementou (fixado ao enviar para conferência) e devoluções
@@ -1035,19 +1046,88 @@ async function aplicarNoIrmao(id, tipo, L, nota){
   if (feito!=null && antes) await msgEstado(id, antes, antes._de, antes.estado);
   return feito;
 }
+// janela do envio parcial: devolve {ids (os que seguem com o RPN aberto), fora (os que ficam), razao} ou null se cancelar
+function escolherParcial(r, abertos){
+  return new Promise(res=>{ let feito=false;
+    const pode=x=>IMPL.includes(x.estado), marcado=x=>['Submetido','Em Implementação'].includes(x.estado);
+    const close=modal(`<h2>Enviar o grupo para conferência</h2>
+      <p class="muted" style="margin-top:0">Por regra os RPN do mesmo negócio seguem juntos. Se algum tiver de ficar à espera (instalação, aprovação, documentos), desmarque-o e escreva a razão: os outros seguem e fecham como PN; o que fica continua consigo e segue mais tarde.</p>
+      <table id="gp-t"><thead><tr><th></th><th>RPN</th><th>Estado</th><th class="num">Linhas</th></tr></thead><tbody>
+        <tr><td><input type="checkbox" checked disabled></td><td><b>${r.numero}</b> <span class="muted">(este)</span></td><td>${esc(estTxt(r.estado))}</td><td class="num">${r.nLinhas||0}</td></tr>
+        ${abertos.map(x=>`<tr><td><input type="checkbox" data-gp="${esc(x.id)}" ${pode(x)&&marcado(x)?'checked':''} ${pode(x)?'':'disabled'}></td><td><b>${x.numero}</b></td><td>${esc(estTxt(x.estado))}${x.estado==='A aguardar'?` <span class="muted" style="font-size:11px">${esc(esperaTxt(x))}</span>`:''}${pode(x)?'':' <span class="muted" style="font-size:11px">· não pode seguir neste estado</span>'}</td><td class="num">${x.nLinhas||0}</td></tr>`).join('')}</tbody></table>
+      <div id="gp-rz" style="margin-top:10px"><label>Razão para não seguirem todos (obrigatória se algum ficar)</label><textarea id="gp-r" rows="2"></textarea></div>
+      <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Enviar para conferência</button></div>`, (m,fechar)=>{
+      m.querySelector('#c').onclick=()=>{ feito=true; fechar(); res(null); };
+      m.querySelector('#ok').onclick=()=>{ const ids=[...m.querySelectorAll('[data-gp]')].filter(c=>c.checked).map(c=>c.dataset.gp), fora=abertos.filter(x=>!ids.includes(x.id)), rz=m.querySelector('#gp-r').value.trim();
+        if (fora.length && rz.length<5) return toast('Escreva a razão para não seguirem todos.',true);
+        feito=true; fechar(); res({ids, fora, razao:rz}); };
+      const obs=new MutationObserver(()=>{ if(!document.body.contains(m) && !feito){ feito=true; res(null); } }); obs.observe(document.body,{childList:true}); });
+  });
+}
 async function acaoGrupo(tipo, opts){
   const r=S.cur; let irm=[];
   if (r.grupoId && r.id) {
     try { irm=await irmaos(r); } catch(e){ return toast(errTxt(e),true); }
     if (tipo==='submeter') for (const x of irm.filter(x=>x.estado==='Em Elaboração')) { const e=validarSubmissao(x); if(e.length) return toast(`O RPN ${x.numero} do mesmo grupo não está pronto — falta: ${e.join(', ')}`,true); }
-    if (tipo==='conferencia') { const mal=irm.filter(x=>!IMPL.includes(x.estado) && !FECHADOS.includes(x.estado) && x.estado!=='Em Conferência');
-      if (mal.length) return toast(`Os RPN do grupo vão juntos para conferência. Ainda não pode: ${mal.map(x=>`o ${x.numero} está em «${estTxt(x.estado)}»`).join('; ')}.`,true); }
+    if (tipo==='conferencia') {
+      // a regra é seguirem juntos; em casos excecionais (um à espera de instalação, aprovação…) a BO escolhe quais seguem e escreve a razão
+      const abertos=irm.filter(x=>!FECHADOS.includes(x.estado) && x.estado!=='Em Conferência');
+      const pref=irm.map(x=>x.estado==='Em Conferência'?x.confUid:x.conferidoPorUid).find(Boolean); if (pref) opts={...opts, confPref:pref};   // a parte que segue depois vai, se possível, para quem conferiu a primeira
+      // todos prontos → seguem juntos sem perguntar
+      if (abertos.some(x=>!['Submetido','Em Implementação'].includes(x.estado)) && !opts._ids) { const esc2=await escolherParcial(r, abertos); if (!esc2) return; opts={...opts, _ids:esc2.ids, _fora:esc2.fora, _razao:esc2.razao}; }
+    }
   }
-  const ok=await guardar(opts); if(ok!==true || !irm.length) return;
+  const ok=await guardar(opts); if(ok!==true) return;
+  if (tipo==='conferencia' && (opts._fora||[]).length) { const txt=opts._fora.map(x=>`${x.numero} (${estTxt(x.estado)})`).join(', ');
+    await hist('Conferência parcial do grupo', `Seguiu sem o(s) RPN ${txt}. Razão: ${opts._razao}`);
+    for (const x of opts._fora) await hist('Ficou para depois', `O RPN ${r.numero} do mesmo grupo seguiu para conferência sem este. Razão: ${opts._razao}`, x.id); }
+  if (!irm.length) return;
   const feitos=[];
-  for (const x of irm) { try { const n=await aplicarNoIrmao(x.id, tipo, S.cur, opts.devolverImpl); if(n!=null) feitos.push(n); } catch(e){ toast(`RPN ${x.numero}: ${errTxt(e)}`,true); } }
+  for (const x of irm) { if (tipo==='conferencia' && opts._ids && !opts._ids.includes(x.id)) continue; try { const n=await aplicarNoIrmao(x.id, tipo, S.cur, opts.devolverImpl); if(n!=null) feitos.push(n); } catch(e){ toast(`RPN ${x.numero}: ${errTxt(e)}`,true); } }
   S.grupo=null; desenharGrupo();
   if (feitos.length) toast(`Grupo: ${ {submeter:'submetidos',conferencia:'enviados para conferência',conferido:'fechados como PN',devolverImpl:'devolvidos à implementação'}[tipo] } também os RPN ${feitos.join(', ')}.`);
+}
+// BO, durante a implementação: passa as linhas escolhidas para um RPN novo do mesmo grupo (mesma BO, mesmo vendedor), que pode ficar logo «A aguardar»
+function separarLinhas(){
+  const r=S.cur; recalc(); const un=unidades(r);
+  if (S.dirty) return toast('Guarde primeiro as alterações deste RPN.',true);
+  if (un.length<2) return toast('Precisa de pelo menos 2 linhas (ou bundles) para separar.',true);
+  modal(`<h2>Separar linhas para outro RPN</h2>
+    <p class="muted" style="margin-top:0">Marque as linhas que têm de ficar à espera. Passam para um RPN novo do mesmo negócio, consigo como BackOffice. As restantes ficam neste RPN e podem seguir para conferência.</p>
+    <div class="scroll" style="max-height:300px"><table id="sp-t"><thead><tr><th></th><th>Linha</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th></tr></thead><tbody>
+    ${un.map((u,i)=>`<tr><td><input type="checkbox" data-su="${i}"></td><td>${u.g?`📦 <b>${esc(u.ls[0].bRef)}</b> <span class="muted">(${u.ls.length} linhas)</span>`:`<b>${esc(u.ls[0].ref)}</b> ${esc(u.ls[0].designacao||'')}`}</td><td>${esc(u.ls.map(l=>l.msisdn).filter(Boolean).join(', '))}</td><td class="num">${+u.ls[0].prazo||0}</td><td class="num">${eur(u.ls.reduce((a,l)=>a+(+l.rlmc||0),0))}</td></tr>`).join('')}</tbody></table></div>
+    <div class="grid g2" style="margin-top:10px"><div><label>O RPN novo fica</label><select id="sp-e"><option value="">no mesmo estado deste (${esc(estTxt(r.estado))})</option>${ESPERAS.filter(([v])=>v!=='ciclo').map(([v,t])=>`<option value="${v}">A aguardar · ${esc(t)}</option>`).join('')}</select></div>
+      <div><label>Razão (obrigatória)</label><input id="sp-r"></div></div>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Separar</button></div>`, (m,close)=>{
+    m.style.width='min(820px,94vw)'; m.querySelector('#c').onclick=close;
+    m.querySelector('#ok').onclick=async()=>{
+      const idx=[...m.querySelectorAll('[data-su]')].filter(c=>c.checked).map(c=>+c.dataset.su), rz=m.querySelector('#sp-r').value.trim(), esp=m.querySelector('#sp-e').value;
+      if (!idx.length) return toast('Marque pelo menos uma linha para separar.',true);
+      if (idx.length===un.length) return toast('Este RPN tem de ficar com pelo menos uma linha.',true);
+      if (rz.length<5) return toast('Escreva a razão.',true);
+      const bt=m.querySelector('#ok'); bt.disabled=true;
+      const vao=un.filter((u,i)=>idx.includes(i)).flatMap(u=>u.ls), ficam=un.filter((u,i)=>!idx.includes(i)).flatMap(u=>u.ls), antes=r.linhas, gAntes=r.grupoId;
+      r.linhas=ficam; r.grupoId=r.grupoId||('g'+Date.now().toString(36)+novoGid());
+      if (await guardar({silencioso:true})!==true) { r.linhas=antes; r.grupoId=gAntes; bt.disabled=false; return; }
+      try {
+        const d=JSON.parse(JSON.stringify(S.cur)); ['id','criadoEm','atualizadoEm','msgUlt','msgLido','_msgVistas','pnEmail'].forEach(x=>delete d[x]);
+        Object.assign(d,{linhas:vao, motivos:[], confUid:null, confNome:'', confContada:0, confNota:'', mesRef:null, fechadoEm:null, fechadoMes:null, devolucoes:[], devMeses:[], implementadoEm:'', separadoDe:S.cur.numero});
+        if (!ABERTOS.includes(d.estado)) d.estado='Em Implementação';
+        if (esp) Object.assign(d,{estado:'A aguardar', esperaMotivo:esp, esperaData:'', esperaDesde:hoje(), cicloDia:''});
+        totais(d); d.cargaContada=d.boUid?d.nLinhas:0;
+        const nref=doc(collection(db,'rpn'));
+        await runTransaction(db, async tx=>{ const cr=doc(db,'counters','rpn'), cg=doc(db,'config','cargaBO'), c=await tx.get(cr), cs=await tx.get(cg);
+          d.numero=c.exists()?c.data().next:1; const carga={...((cs.exists()?cs.data():{}).carga||{})};
+          if (d.boUid) carga[d.boUid]=(carga[d.boUid]||0)+d.nLinhas;
+          tx.set(cr,{next:d.numero+1}); tx.set(cg,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+          tx.set(nref,{...d, criadoEm:serverTimestamp(), criadoPor:S.me.uid, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
+        await hist('Criado', `Separado do RPN ${S.cur.numero} pela BackOffice (${d.nLinhas} linha(s)). Razão: ${rz}`, nref.id);
+        await hist('Linhas separadas', `${d.nLinhas} linha(s) passaram para o RPN ${d.numero} do mesmo grupo. Razão: ${rz}`);
+        if (S.cur.propostaRef) { const todos=[S.cur.numero, ...(await irmaos(S.cur)).map(x=>x.numero)].sort((a,b)=>a-b); updateDoc(doc(db,'propostas',S.cur.propostaRef),{rpnId:S.cur.id, rpnNumero:todos.join(' + ')}).catch(()=>{}); }
+        close(); S.grupo=null; drawFicha(); toast(`Linhas separadas para o RPN ${d.numero}${esp?' (A aguardar)':''}.`);
+      } catch(e){ console.error(e); toast(errTxt(e),true); bt.disabled=false; }
+    };
+  });
 }
 function dividir(){
   const r=S.cur; recalc(); const un=unidades(r);
@@ -1293,6 +1373,7 @@ async function viewProjetos(){
   desenharProjetos();
 }
 function desenharProjetos(){
+  if (!S.me || !location.hash.startsWith('#/projetos')) return;   // leitura terminada depois de mudar de página
   const m=$('#main'), h=hojeLocal(), stf=isStaff(), tratar=PJ.tab==='tratar';
   let L=PJ.lista.filter(p=>!tratar || projParaHoje(p));
   if (!stf && tratar && contarProj(PJ.lista)) { const a=document.querySelector('header nav a[href="#/projetos"]'); if(a) a.innerHTML='Projetos'+navProj(); }
@@ -2045,7 +2126,7 @@ async function pnServico(url, corpo){
 // popup de envio: aparece ao conferir o PN (para não esquecer) e pelo botão «Enviar PN ao cliente» da ficha
 async function pnEmailPopup(r){
   let lista=[r];
-  if (r.grupoId) { try { lista=[r, ...(await irmaos(r)).filter(x=>x.estado==='PN' && x.id!==r.id)].sort((a,b)=>(a.numero||0)-(b.numero||0)); } catch(e){} }
+  if (r.grupoId) { try { lista=[r, ...(await irmaos(r)).filter(x=>x.estado==='PN' && x.id!==r.id && !x.pnEmail)].sort((a,b)=>(a.numero||0)-(b.numero||0)); } catch(e){} }
   const cfg=await pnCfg(), gestor=await pnGestor(r), nums=lista.map(x=>x.numero).join(' + '), ja=lista.filter(x=>x.pnEmail);
   modal(`<h2>Enviar o PN ao cliente</h2>
     <p class="muted" style="margin-top:0">PN <b>${esc(nums)}</b> · ${esc(r.cliente?.nome)}${lista.length>1?' — os PN do mesmo negócio seguem num só email, um PDF por PN.':''}</p>

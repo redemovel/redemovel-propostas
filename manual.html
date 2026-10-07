@@ -476,7 +476,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <li><b>💬 Mensagens por ler</b>: mostra só os processos em que o vendedor (ou outra BackOffice) lhe deixou uma mensagem que ainda não abriu. O número aparece também no menu. A marca desaparece quando abre o separador Mensagens desse RPN.</li>
     <li><b>Mês</b>: escolhe o mês dos processos fechados (PN, cancelados, reprovados).</li>
     <li><span class="bt">Procurar no histórico</span>: procura um processo antigo pelo número exato, pelo NIF, por um contrato ou por um MSISDN, sem carregar tudo.</li>
-    <li>⛓ ao lado do número: o RPN faz parte de um grupo.</li>
+    <li>⛓ ao lado do número: o RPN faz parte de um grupo. <b>⛓ parcial</b>: parte do grupo já seguiu e parte ainda está em aberto.</li>
     <li>A marca <i>PHC</i> identifica os PN importados do sistema antigo. São só de consulta.</li>
   </ul>
 </section>
@@ -564,7 +564,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ul>
     <li>O email sai de <i>noreply@redemovel.pt</i>, que não aceita respostas. A mensagem diz ao cliente, em destaque, para escrever para o <i>geral@redemovel.pt</i> ou para o gestor de conta em caso de dúvida. O <i>geral@redemovel.pt</i> recebe uma cópia oculta de cada envio.</li>
     <li>Nos PN antigos importados do PHC o botão <span class="bt">Enviar PN ao cliente</span> também existe, para reenviar o documento quando o cliente o pede.</li>
-    <li>Os PN do mesmo grupo seguem num só email, com um PDF por PN.</li>
+    <li>Os PN do mesmo grupo seguem num só email, com um PDF por PN. Se o grupo fechar por partes, cada email leva só os PN conferidos que ainda não tinham sido enviados.</li>
     <li>Se ficou por enviar, a ficha do PN mostra <b>✉ por enviar ao cliente</b> e o botão <span class="bt">Enviar PN ao cliente</span>. Na lista, o filtro <b>✉ PN por enviar</b> mostra todos os que faltam.</li>
     <li>Depois de enviado, a ficha mostra a quem e quando, o envio fica no Histórico e o PDF nos Anexos. Pode reenviar.</li>
   </ul>
@@ -575,12 +575,31 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <p>Um negócio dividido em vários RPN forma um grupo. Reconhece-o pela faixa azul na ficha e pelo ⛓ na lista.</p>
   <ul>
     <li>Todos os RPN do grupo são atribuídos <b>à mesma BackOffice</b> e conferidos <b>pela mesma conferente</b>.</li>
-    <li>Só vão para conferência <b>todos ao mesmo tempo</b>. Se um estiver pendente, a plataforma não deixa enviar e diz qual.</li>
-    <li>Conferir fecha todos como PN; devolver devolve todos.</li>
+    <li>Em regra vão para conferência <b>todos ao mesmo tempo</b>.</li>
+    <li>Conferir fecha como PN os que estão em conferência; devolver devolve esses.</li>
     <li>Realocar um realoca o grupo.</li>
     <li>Os estados <i>Pendente</i> e <i>A aguardar</i> continuam a ser postos em cada RPN.</li>
   </ul>
   <p>A BackOffice também pode dividir um RPN que ainda esteja <i>Em Elaboração</i>, e submetê-lo em nome do vendedor.</p>
+  <h3>Situação excecional: seguir só com parte do negócio</h3>
+  <p>Quando uma parte do negócio está pronta e a outra fica parada (à espera de instalação, de portabilidade, de resposta do cliente), a parte pronta pode seguir sozinha.</p>
+  <ol>
+    <li>Num RPN pronto, carregue em <span class="bt r">Implementação terminada · enviar para conferência</span>.</li>
+    <li>Se algum RPN do grupo estiver <i>Pendente</i>, <i>A aguardar</i> ou noutro estado que não permita seguir, abre-se a janela <b>Enviar o grupo para conferência</b>, com a lista dos RPN do negócio.</li>
+    <li>Deixe marcados os RPN que seguem agora, desmarque os que ficam e escreva a <b>razão</b> (obrigatória). Os que ficam continuam como estão.</li>
+    <li>Os que seguem passam a <i>Concluído</i>, são conferidos e fechados como PN, e o email ao cliente leva só esses PN.</li>
+    <li>Quando a parte que ficou estiver pronta, envie-a para conferência da forma habitual. Vai para a <b>mesma conferente</b> da primeira parte, e o email ao cliente leva os PN que ainda não tinham sido enviados.</li>
+  </ol>
+  <p>Na lista, estes negócios ficam com <b>⛓ parcial</b> a laranja, e o filtro <span class="bt">⛓ Grupos com partes por fechar</span> mostra-os todos, para nenhum ficar esquecido. A razão fica no histórico de cada RPN.</p>
+  <h3>Separar linhas de um RPN</h3>
+  <p>Se o que fica parado são só <b>algumas linhas</b> de um RPN (e não um RPN inteiro), separe-as primeiro.</p>
+  <ol>
+    <li>Abra o RPN e carregue em <span class="bt">Separar linhas</span>.</li>
+    <li>Assinale as linhas que saem e escreva a razão. Pode pôr logo o RPN novo <i>A aguardar</i>, com a data prevista.</li>
+    <li>É criado um <b>RPN novo no mesmo grupo</b>, com essas linhas, a mesma BackOffice e o mesmo vendedor. O RPN original fica com as restantes.</li>
+    <li>O original já pode seguir para conferência, como descrito acima.</li>
+  </ol>
+  <p>Só a BackOffice separa linhas, e só em RPN ainda em aberto. Um PN fechado não se separa.</p>
 </section>
 
 <section data-p="b" id="b-catalogo">
