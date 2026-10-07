@@ -445,7 +445,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
         <div><div class="ptit">Clientes</div><div class="psub" id="cli-n"></div></div>
         <div class="frow">
           <select class="fi" id="cli-fv" onchange="renderCliLista()" style="display:none"></select>
-          <input class="fi" id="cli-q" type="search" autocomplete="off" placeholder="🔍 Nome, NIF ou localidade…" oninput="renderCliLista()">
+          <input class="fi" id="cli-q" type="search" autocomplete="off" placeholder="🔍 Nome, NIF, email, telefone ou localidade…" oninput="renderCliLista()">
           <button class="btn btn-r" onclick="novoCli()">＋ Novo cliente</button>
         </div>
       </div>
@@ -958,7 +958,7 @@ function doLogout(){
 function searchClients(q){
   const res=document.getElementById('cli-results');
   if(!q||q.length<2){res.classList.remove('open');return;}
-  const matches=CL.filter(c=>c.nome.toLowerCase().includes(q.toLowerCase())||c.ncont.includes(q)).slice(0,8);
+  const matches=CL.filter(c=>c.nome.toLowerCase().includes(q.toLowerCase())||c.ncont.includes(q)||(q.length>=3&&(c.email||'').toLowerCase().includes(q.toLowerCase()))).slice(0,8);
   res.innerHTML='';
   matches.forEach(c=>{
     const div=document.createElement('div');div.className='cli-item';
@@ -2087,9 +2087,9 @@ function renderCliLista(){
   // a lista abre vazia: só mostra resultados depois de escrever 2 letras (ou de escolher um vendedor)
   if(q.length<2&&!fv){
     document.getElementById('cli-n').textContent=CL.length.toLocaleString('pt-PT')+' cliente(s)'+(isStaffCU()?'':' na sua carteira');
-    tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:28px">'+(CL.length?'Escreva pelo menos 2 letras do nome, do NIF ou da localidade':'Sem clientes na sua carteira')+'</td></tr>';return;
+    tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:28px">'+(CL.length?'Escreva pelo menos 2 letras do nome, do NIF, do email, do telefone ou da localidade':'Sem clientes na sua carteira')+'</td></tr>';return;
   }
-  if(q.length>=2)d=d.filter(c=>c.nome.toLowerCase().includes(q)||String(c.ncont).includes(q)||(c.local||'').toLowerCase().includes(q));
+  if(q.length>=2){const dg=q.replace(/\D/g,'');d=d.filter(c=>c.nome.toLowerCase().includes(q)||String(c.ncont).includes(q)||(c.local||'').toLowerCase().includes(q)||(c.email||'').toLowerCase().includes(q)||(dg.length>=6&&String(c.tel||'').replace(/\D/g,'').includes(dg)));}
   document.getElementById('cli-n').textContent=d.length.toLocaleString('pt-PT')+' cliente(s) encontrado(s)'+(d.length>100?' · a mostrar os primeiros 100, afine a pesquisa':'');
   if(!d.length){tb.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:28px">Nenhum cliente encontrado</td></tr>';return;}
   d.slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt')).slice(0,100).forEach(c=>{
@@ -2186,7 +2186,7 @@ async function cliGravar(){
   data.vendedor=String(f.vendedor||'');data.vendnm=vendNome(data.vendedor);
   try{
     const blk=await FB.saveFicha(data,CLI_NOVO);
-    const e={nome:data.nome,ncont:data.ncont,codpost:data.codpost||'',area:data.area||'',local:data.local||'',vendedor:data.vendedor,vendnm:data.vendnm,_blk:blk};
+    const e={nome:data.nome,ncont:data.ncont,codpost:data.codpost||'',area:data.area||'',local:data.local||'',vendedor:data.vendedor,vendnm:data.vendnm,email:data.email||'',tel:[data.telefone,data.tlmvl].filter(Boolean).join(' '),_blk:blk};
     const i=CL.findIndex(c=>String(c.ncont)===data.ncont);
     const visivel=isStaffCU()||data.vendedor===CU.vendedor;
     if(i>=0){if(visivel)CL[i]=e;else CL.splice(i,1);}else if(visivel)CL.push(e);
@@ -2625,7 +2625,7 @@ const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.com
 async function commitEmBlocos(ops, n = 400, prog) {
   for (let i = 0; i < ops.length; i += n) { const b = writeBatch(db); ops.slice(i, i + n).forEach(f => f(b)); await b.commit(); if (prog) prog(Math.min(i + n, ops.length), ops.length); }
 }
-const idxDe = f => ({ nome: f.nome||'', ncont: String(f.ncont||''), codpost: f.codpost||'', area: f.area||'', local: f.local||'', vendnm: f.vendnm||'' });
+const idxDe = f => ({ nome: f.nome||'', ncont: String(f.ncont||''), codpost: f.codpost||'', area: f.area||'', local: f.local||'', vendnm: f.vendnm||'', email: f.email||'', tel: [f.telefone, f.tlmvl].filter(Boolean).join(' ') });
 
 // propostas com campo == valor; para o comercial junta comercialUid == uid.
 // Se o Firestore pedir um índice composto, recorre a só comercialUid e filtra no browser.
@@ -2704,7 +2704,7 @@ window.FB = {
     if (vendedor === '') return [];
     const q = vendedor ? query(collection(db, 'clientes'), where('vendedor', '==', String(vendedor))) : collection(db, 'clientes');
     const s = await getDocs(q); const out = [];
-    s.docs.forEach(d => (d.data().lista || []).forEach(c => out.push({ nome: c.nome||'', ncont: String(c.ncont||''), codpost: c.codpost||'', area: c.area||'', local: c.local||'', vendedor: String(d.data().vendedor||''), vendnm: c.vendnm||'', _blk: d.id })));
+    s.docs.forEach(d => (d.data().lista || []).forEach(c => out.push({ nome: c.nome||'', ncont: String(c.ncont||''), codpost: c.codpost||'', area: c.area||'', local: c.local||'', vendedor: String(d.data().vendedor||''), vendnm: c.vendnm||'', email: c.email||'', tel: c.tel||'', _blk: d.id })));
     return out;
   },
   // bloqueio (interruptor do Master, em RPN › Projetos): nº de Projetos em atraso do utilizador, ou 0 se o bloqueio não se aplica

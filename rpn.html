@@ -301,9 +301,10 @@ async function viewLista(forcar){
 }
 // procura exata em todos os processos (nº, NIF ou contrato VDF) — os resultados juntam-se à lista
 async function procurarHistorico(){
-  const t = (S.filtros.txt||'').trim(); if (t.length<4) return toast('Escreva na caixa de pesquisa o nº do processo, o NIF, o contrato VDF ou o MSISDN completos.', true);
+  const t = (S.filtros.txt||'').trim(); if (t.length<4) return toast('Escreva na caixa de pesquisa o nº do processo, o NIF, o email do cliente, o contrato VDF ou o MSISDN completos.', true);
   const col = collection(db,'rpn'), meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
   const qs = [query(col, ...meu, where('cliente.nif','==',t)), query(col, ...meu, where('contratos','array-contains',t.toUpperCase()))];
+  if (t.includes('@')) [...new Set([t, t.toLowerCase()])].forEach(e=>qs.push(query(col, ...meu, where('cliente.email','==',e))));
   if (normMsisdn(t).length>=9 && /^[\d\s+]+$/.test(t)) qs.push(query(col, ...meu, where('msisdns','array-contains',normMsisdn(t))));
   if (/^\d+$/.test(t)) qs.push(query(col, ...meu, where('numero','==',+t)));
   const r = await Promise.allSettled(qs.map(q=>getDocs(q)));
@@ -324,7 +325,7 @@ function drawLista(){
   const base = all.filter(r => !velho(r) && (!f.env || pnPorEnviar(r)) && (!f.msg || msgPorLer(r)) && (!f.meus || (r.estado==='Em Conferência' ? r.confUid===S.me.uid : r.boUid===S.me.uid))
     && (!f.ciclo || esperaVencida(r))
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
-    && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
+    && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.cliente?.email,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
   const cnt = {}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
   const rows = base.filter(r=>!f.estado || r.estado===f.estado);
   const vends = [...new Set(all.map(r=>r.vendedorUid))].map(u=>[u,userNome(u)||all.find(r=>r.vendedorUid===u)?.vendedorNome]).sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
@@ -336,7 +337,7 @@ function drawLista(){
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
-        <input id="ft" type="search" autocomplete="off" name="pesquisa-rpn" placeholder="Procurar nº, cliente, NIF, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
+        <input id="ft" type="search" autocomplete="off" name="pesquisa-rpn" placeholder="Procurar nº, cliente, NIF, email, oportunidade, MSISDN, contrato…" value="${esc(f.txt)}" style="max-width:380px">
         <button class="btn" id="fr" title="Volta a ler a lista agora. A lista atualiza-se sozinha ao fim de 1 minuto ou quando grava alguma coisa.">⟳ Atualizar</button>
         <button class="btn" id="fh" title="Procura em todos os processos, incluindo os antigos, por nº, NIF, contrato VDF ou MSISDN exatos">Procurar no histórico</button>
         <label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)">Fechados em <input id="fm" type="month" value="${esc(f.mes)}" style="width:160px"></label>
@@ -1114,7 +1115,7 @@ async function carregarClientes(){
   const col = collection(db,'clientes'); let docs = [];
   if (isStaff()) docs = (await getDocs(col)).docs;
   else if (S.me.vendedorPHC) docs = (await getDocs(query(col, where('vendedor','==',String(S.me.vendedorPHC))))).docs;
-  S.cli = docs.flatMap(d => (d.data().lista||[]).map(c => ({nome:c.nome||'', nif:String(c.ncont||''), local:c.local||c.area||'', vend:c.vendnm||'', _n:semAcento(c.nome)})));
+  S.cli = docs.flatMap(d => (d.data().lista||[]).map(c => ({nome:c.nome||'', nif:String(c.ncont||''), local:c.local||c.area||'', vend:c.vendnm||'', email:c.email||'', _n:semAcento(c.nome), _e:String(c.email||'').toLowerCase(), _t:String(c.tel||'').replace(/\D/g,'')})));
   return S.cli;
 }
 function procurarClientes(q){
@@ -1125,7 +1126,7 @@ function procurarClientes(q){
   for (const c of S.cli) {
     if (dig) { if (c.nif.startsWith(dig)) ini.push(c); else if (c.nif.includes(dig)) meio.push(c); }
     else if (c._n.startsWith(t)) ini.push(c);
-    else if (pal.every(p=>c._n.includes(p))) meio.push(c);
+    else if (pal.every(p=>c._n.includes(p)) || (t.length>=3 && c._e.includes(t))) meio.push(c);
     if (ini.length>=12) break;
   }
   return [...ini, ...meio].slice(0,12);
@@ -1414,7 +1415,7 @@ const cliPodeEditar = f => isBO() || (perfil()==='comercial' && !!S.me.vendedorP
 const cliPodeCriar = () => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC);
 const natGrupo = l => { const n=String(l.natureza||''); if(/m[óo]vel/i.test(n)) return 'Móvel'; if(/fix/i.test(n)) return 'Fixo';
   const c=S.prodMap[String(l.ref||'').toUpperCase()]?.categoria; return c==='Móvel'||c==='Fixo' ? c : 'Outros'; };
-const idxCli = f => ({ nome:f.nome||'', ncont:String(f.ncont||''), codpost:f.codpost||'', area:f.area||'', local:f.local||'', vendnm:f.vendnm||'' });
+const idxCli = f => ({ nome:f.nome||'', ncont:String(f.ncont||''), codpost:f.codpost||'', area:f.area||'', local:f.local||'', vendnm:f.vendnm||'', email:f.email||'', tel:[f.telefone,f.tlmvl].filter(Boolean).join(' ') });
 
 // grava a ficha e mantém o índice de pesquisa (a mesma transação da app Propostas)
 function gravarFicha(f, isNew){
@@ -1454,20 +1455,38 @@ async function cliLista(){
   try { await carregarClientes(); } catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
   m.innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
-      <input id="cl-q" type="search" autocomplete="off" name="procura-cli" placeholder="Nome, NIF ou localidade (pelo menos 2 letras)…" value="${esc(CL.q)}" style="max-width:420px">
+      <input id="cl-q" type="search" autocomplete="off" name="procura-cli" placeholder="Nome, NIF, email, telefone ou localidade (pelo menos 2 letras)…" value="${esc(CL.q)}" style="max-width:420px">
+      <button class="btn" id="cl-h" title="Procura exata em todas as fichas e processos: email de qualquer contacto do cliente, ou número de uma linha (MSISDN)">Procurar email ou nº de linha</button>
       <span class="muted" id="cl-n" style="font-size:12px"></span><span class="sp"></span>
       ${cliPodeCriar()?`<button class="btn pri" id="cl-nv">+ Novo cliente</button>`:''}
     </div>
-    <div class="scroll"><table id="cl-t"><thead><tr><th>Cliente</th><th>NIF</th><th>Localidade</th><th>Vendedor</th></tr></thead><tbody></tbody></table></div></div>`;
+    <div class="scroll"><table id="cl-t"><thead><tr><th>Cliente</th><th>NIF</th><th>Email</th><th>Localidade</th><th>Vendedor</th></tr></thead><tbody></tbody></table></div></div>`;
   const tb=m.querySelector('#cl-t tbody'), n=$('#cl-n');
+  const linhaCli=c=>`<tr class="click" data-nif="${esc(c.nif)}"><td><b>${esc(c.nome)}</b></td><td>${esc(c.nif)}</td><td>${esc(c.email||'')}</td><td>${esc(c.local)}</td><td class="muted">${esc(c.vend||'—')}</td></tr>`;
+  const ligar=()=>tb.querySelectorAll('[data-nif]').forEach(tr=>tr.onclick=()=>{ location.hash='#/clientes/'+encodeURIComponent(tr.dataset.nif); });
   const desenha=()=>{
     const t=semAcento(CL.q).trim(), pal=t.split(/\s+/).filter(Boolean);
-    if (t.length<2) { n.textContent=`${S.cli.length.toLocaleString('pt-PT')} cliente(s)${isStaff()?'':' na sua carteira'}`; tb.innerHTML=`<tr><td colspan="4" class="muted">${S.cli.length?'Escreva pelo menos 2 letras do nome, do NIF ou da localidade.':'Sem clientes na sua carteira.'}</td></tr>`; return; }
-    const L=S.cli.filter(c=>pal.every(p=>c._n.includes(p)||c.nif.includes(p)||semAcento(c.local).includes(p))).sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
+    if (t.length<2) { n.textContent=`${S.cli.length.toLocaleString('pt-PT')} cliente(s)${isStaff()?'':' na sua carteira'}`; tb.innerHTML=`<tr><td colspan="5" class="muted">${S.cli.length?'Escreva pelo menos 2 letras do nome, do NIF, do email, do telefone ou da localidade.':'Sem clientes na sua carteira.'}</td></tr>`; return; }
+    const dg=t.replace(/\D/g,'');
+    const L=S.cli.filter(c=>pal.every(p=>c._n.includes(p)||c.nif.includes(p)||c._e.includes(p)||semAcento(c.local).includes(p)) || (dg.length>=6 && c._t.includes(dg))).sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
     n.textContent=`${L.length.toLocaleString('pt-PT')} encontrado(s)${L.length>100?' · a mostrar os primeiros 100, afine a pesquisa':''}`;
-    tb.innerHTML=L.slice(0,100).map(c=>`<tr class="click" data-nif="${esc(c.nif)}"><td><b>${esc(c.nome)}</b></td><td>${esc(c.nif)}</td><td>${esc(c.local)}</td><td class="muted">${esc(c.vend||'—')}</td></tr>`).join('')||`<tr><td colspan="4" class="muted">Nenhum cliente encontrado.</td></tr>`;
-    tb.querySelectorAll('[data-nif]').forEach(tr=>tr.onclick=()=>{ location.hash='#/clientes/'+encodeURIComponent(tr.dataset.nif); });
+    tb.innerHTML=L.slice(0,100).map(linhaCli).join('')||`<tr><td colspan="5" class="muted">Nenhum cliente encontrado. Se procura um email de contacto ou o número de uma linha, use o botão ao lado.</td></tr>`;
+    ligar();
   };
+  // procura exata, fora do índice: email (o geral ou o de um dos 3 contactos da ficha) ou MSISDN de uma linha de RPN/PN
+  $('#cl-h').onclick=async()=>{ const q=CL.q.trim(), ms=normMsisdn(q), bt=$('#cl-h');
+    if (!q.includes('@') && !(ms.length>=9 && /^[\d\s+]+$/.test(q))) return toast('Escreva na caixa o email completo ou o número de linha completo (9 algarismos).',true);
+    bt.disabled=true; const ach={};
+    try {
+      if (q.includes('@')) { const cf=collection(db,'clientesFicha'), meu=isStaff()?[]:[where('vendedor','==',String(S.me.vendedorPHC||'-'))];
+        const rs=await Promise.allSettled([...new Set([q,q.toLowerCase()])].flatMap(e=>['email','c1email','c2email','c3email'].map(k=>getDocs(query(cf, ...meu, where(k,'==',e))))));
+        rs.filter(x=>x.status==='fulfilled').flatMap(x=>x.value.docs).forEach(d=>{ const f=d.data(); ach[f.ncont]={nome:f.nome||'', nif:String(f.ncont||''), email:f.email||'', local:f.local||'', vend:f.vendnm||''}; });
+      } else { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)];
+        (await getDocs(query(collection(db,'rpn'), ...meu, where('msisdns','array-contains',ms)))).docs.forEach(d=>{ const r=d.data(), nif=String(r.cliente?.nif||''); if(!nif) return;
+          const c=S.cli.find(x=>x.nif===nif); ach[nif]=c||{nome:r.cliente?.nome||'', nif, email:r.cliente?.email||'', local:r.cliente?.localidade||'', vend:''}; }); }
+      const L=Object.values(ach); n.textContent=`${L.length} encontrado(s) na procura exata`;
+      tb.innerHTML=L.map(linhaCli).join('')||`<tr><td colspan="5" class="muted">Nada encontrado com “${esc(q)}”.</td></tr>`; ligar();
+    } catch(e){ toast(errTxt(e),true); } finally { bt.disabled=false; } };
   $('#cl-q').oninput=e=>{ CL.q=e.target.value; desenha(); };
   const nv=$('#cl-nv'); if(nv) nv.onclick=()=>{ location.hash='#/clientes/novo'; };
   desenha(); $('#cl-q').focus();
