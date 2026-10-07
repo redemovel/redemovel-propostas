@@ -2189,13 +2189,14 @@ function viewCatalogo(){
   const L = S.prodList.filter(p=>!pal.length || pal.every(w=>semAcento(p.ref+' '+p.designacao+' '+(p.tier||'')+' '+(p.pricingPlan||'')+' '+(p.subfamilia||'')+(p.inativo?' inativa':'')+(composicaoDe(p)?' bundle '+p.composicao.map(c=>c.ref).join(' '):'')).includes(w)));
   m.innerHTML = `<div class="card"><div class="row" style="margin-bottom:12px">
       <input id="cq" type="search" autocomplete="off" placeholder="Procurar por referência, designação, tier ou pricing plan…" value="${esc(CAT_Q)}" style="max-width:420px">
-      <span class="muted">${L.length} de ${S.prodList.length} referência(s)</span><span class="sp"></span><button class="btn pri" id="cn">+ Nova referência</button></div>
+      <span class="muted">${L.length} de ${S.prodList.length} referência(s)</span><span class="sp"></span><button class="btn" id="csim" title="Mostra o que aconteceria a cada tarifário das Propostas ao juntar os dois catálogos. Não grava nada.">Simular união com as Propostas</button><button class="btn pri" id="cn">+ Nova referência</button></div>
     <div class="scroll"><table id="ctab"><thead><tr><th>Referência</th><th>Designação</th><th>Sub-fam.</th><th>Categoria</th><th>Tier</th><th>Pricing plan</th><th>Desc.</th><th></th></tr></thead>
       <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b>${p.inativo?' <span class="muted" style="font-size:11px">· inativa</span>':''}</td><td>${esc(p.designacao)}${composicaoDe(p)?`<div class="muted" style="font-size:11px">📦 ${p.composicao.map(c=>esc(c.ref)+' '+(Math.round(c.pct*1000)/10).toLocaleString('pt-PT')+'%').join(' + ')}</div>`:''}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
         <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm" data-dp title="Cria uma referência nova a partir desta">Duplicar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
     ${L.length>300?'<p class="muted" style="font-size:12px;margin-bottom:0">A mostrar as primeiras 300. Afine a pesquisa.</p>':''}</div>`;
   const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ if(!location.hash.startsWith('#/catalogo')) return; viewCatalogo(); const n=$('#cq'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
   $('#cn').onclick=()=>editarRef(null);
+  $('#csim').onclick=simularUniao;
   m.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editarRef(S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-dp]').forEach(b=>b.onclick=()=>editarRef(null, S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const ref=b.closest('tr').dataset.ref;
@@ -2203,6 +2204,55 @@ function viewCatalogo(){
     if(pais.length) return toast(`Não pode apagar: ${ref} faz parte do(s) bundle(s) ${pais.join(', ')}.`,true);
     if(!confirm(`Apagar a referência ${ref}?\n\nOs processos que já a usam não são alterados, mas deixa de aparecer na pesquisa das linhas.`)) return;
     try{ await deleteDoc(doc(db,'produtos',prodId(ref))); produtoLocal(ref,null); await catalogoMudou(); toast('Referência apagada.'); viewCatalogo(); }catch(e){ toast(errTxt(e),true); } });
+}
+// ---- união dos catálogos, passo 1: simulação (só lê; não grava nada) ----
+const UN_EST={ok:['Junta-se à referência','#15803d'], sem:['Sem Ref PHC','#b45309'], inex:['Referência não existe','var(--red-d)'], rep:['Referência repetida','var(--red-d)'], nome:['Nome repetido','var(--red-d)']};
+const unKey=r=>{ const k=String(r||'').trim().toUpperCase(); return /^[.\-]*$/.test(k)?'':k; };
+// lista = tarifários das Propostas; devolve uma linha por tarifário com o que lhe aconteceria
+function unAnalisar(lista){
+  const nRef={}, nNome={};
+  lista.forEach(t=>{ const k=unKey(t.refPHC); if(k) nRef[k]=(nRef[k]||0)+1; const n=String(t.name||'').trim().toUpperCase(); nNome[n]=(nNome[n]||0)+1; });
+  const linhas=lista.map(t=>{ const k=unKey(t.refPHC), p=k?S.prodMap[k]:null, n=String(t.name||'').trim().toUpperCase();
+    let e='ok', nota='';
+    if (!n) { e='nome'; nota='Tarifário sem nome.'; }
+    else if (nNome[n]>1) { e='nome'; nota=`Há ${nNome[n]} tarifários com este nome.`; }
+    else if (!k) { e='sem'; nota='Tem de ganhar uma referência antes da união.'; }
+    else if (nRef[k]>1) { e='rep'; nota=`Usada em ${nRef[k]} tarifários: ${lista.filter(x=>unKey(x.refPHC)===k).map(x=>x.name).join(', ')}.`+(p?'':' Além disso, não existe no catálogo.'); }
+    else if (!p) { e='inex'; nota='Corrigir a Ref PHC do tarifário ou criar a referência.'; }
+    else nota=[p.descontinuado?'descontinuada':'', p.inativo?'inativa':''].filter(Boolean).join(' · ');
+    return {t, k, p, e, nota}; });
+  const usadas=new Set(linhas.filter(x=>x.k).map(x=>x.k));
+  const livres=S.prodList.filter(p=>!usadas.has(p.ref.toUpperCase()) && !p.descontinuado && !p.inativo);
+  const c={ok:0,sem:0,inex:0,rep:0,nome:0}; linhas.forEach(x=>c[x.e]++);
+  return {linhas, livres, c};
+}
+async function simularUniao(){
+  let lista;
+  try { const d=await getDoc(doc(db,'config','tarifarios')); lista=d.exists()&&Array.isArray(d.data().lista)?d.data().lista:[]; }
+  catch(e){ return toast(errTxt(e),true); }
+  if (!lista.length) return toast('Não há tarifários gravados nas Propostas (está a ser usada a lista interna de reserva). Nada para simular.',true);
+  const {linhas, livres, c}=unAnalisar(lista), prob=c.sem+c.inex+c.rep+c.nome;
+  let filtro=prob?'prob':'todos';
+  modal(`<h2>Simulação da união dos catálogos</h2>
+    <p class="muted" style="margin-top:0">Isto é só uma simulação: <b>não foi gravado nada</b>. Mostra o que aconteceria a cada um dos ${lista.length} tarifários das Propostas ao passar para o catálogo único (${S.prodList.length} referências).</p>
+    <div id="un-res" style="padding:10px 12px;border-radius:8px;margin-bottom:10px;font-weight:600;${prob?'background:#fef3c7;color:#92400e':'background:#dcfce7;color:#166534'}">${prob?`${prob} tarifário(s) têm de ser corrigidos antes da união. ${c.ok} estão prontos.`:`Os ${c.ok} tarifários estão prontos para a união.`}</div>
+    <div class="row" id="un-f" style="gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+    <div class="scroll" style="max-height:46vh"><table id="un-t"><thead><tr><th>Tarifário (Propostas)</th><th>Ref PHC</th><th>Resultado</th><th>Referência no catálogo</th><th>Nota</th></tr></thead><tbody></tbody></table></div>
+    <p class="muted" id="un-liv" style="font-size:12px;margin-bottom:0">${livres.length} referência(s) ativas do catálogo não têm tarifário nas Propostas. Não é um problema: ficam no catálogo sem descrição comercial.</p>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="un-cp">Copiar para o Excel</button><button class="btn pri" id="c">Fechar</button></div>`, (m,close)=>{
+    m.style.width='min(1000px,96vw)'; m.querySelector('#c').onclick=close;
+    const vis=()=>linhas.filter(x=>filtro==='todos'||(filtro==='prob'?x.e!=='ok':x.e===filtro));
+    const draw=()=>{
+      m.querySelector('#un-f').innerHTML=[['prob','A corrigir',prob],['ok','Prontos',c.ok],['sem',UN_EST.sem[0],c.sem],['inex',UN_EST.inex[0],c.inex],['rep',UN_EST.rep[0],c.rep],['nome',UN_EST.nome[0],c.nome],['todos','Todos',linhas.length]].filter(b=>b[2]||b[0]==='todos'||b[0]==='prob').map(([k,l,n])=>`<button class="btn sm ${filtro===k?'pri':''}" data-uf="${k}">${l} (${n})</button>`).join('');
+      m.querySelectorAll('[data-uf]').forEach(b=>b.onclick=()=>{ filtro=b.dataset.uf; draw(); });
+      const L=vis().slice().sort((a,b)=>(a.e==='ok')-(b.e==='ok') || a.e.localeCompare(b.e) || a.k.localeCompare(b.k) || String(a.t.name).localeCompare(String(b.t.name)));
+      m.querySelector('#un-t tbody').innerHTML=L.map(x=>`<tr data-ue="${x.e}"><td><b>${esc(x.t.name||'(sem nome)')}</b></td><td style="font-family:monospace;font-size:12px">${esc(x.t.refPHC||'—')}</td><td style="font-weight:600;color:${UN_EST[x.e][1]};white-space:nowrap">${UN_EST[x.e][0]}</td><td>${x.p?`<b>${esc(x.p.ref)}</b> <span class="muted">${esc(x.p.designacao||'')}${x.p.tier?' · '+esc(x.p.tier):''}</span>`:'<span class="muted">—</span>'}</td><td class="muted" style="font-size:12px">${esc(x.nota)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Nenhum tarifário neste filtro.</td></tr>'; };
+    draw();
+    m.querySelector('#un-cp').onclick=()=>{ const txt=['Tarifário\tRef PHC\tResultado\tReferência no catálogo\tDesignação\tNota'].concat(vis().map(x=>[x.t.name||'',x.t.refPHC||'',UN_EST[x.e][0],x.p?x.p.ref:'',x.p?x.p.designacao||'':'',x.nota].join('\t'))).join('\n');
+      const fim=()=>toast(vis().length+' linha(s) copiadas.');
+      const alt=()=>{ const a=document.createElement('textarea'); a.value=txt; document.body.appendChild(a); a.select(); try{ document.execCommand('copy'); fim(); }catch(e){ toast('Não foi possível copiar.',true); } a.remove(); };
+      if (navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(fim,alt); else alt(); };
+  });
 }
 function editarRef(p, modelo){   // modelo = referência a duplicar: abre como nova, já preenchida, só falta escrever a referência
   const nova=!p; p=p||(modelo?{...modelo, ref:''}:{ref:'',designacao:'',subfamilia:'GSM',tier:'Gold',pricingPlan:'',descontinuado:false});
