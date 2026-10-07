@@ -560,7 +560,7 @@ ORDER BY c.no DESC;
       </div>
       <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);margin-top:10px"><input type="checkbox" id="adm-cli-subst"> Se repetir a importação: substituir as fichas que já existem (perde alterações feitas na plataforma)</label>
     </div>
-    <div class="tw" style="margin-bottom:20px"><div class="tt" style="display:flex;justify-content:space-between;align-items:center"><div class="ttit">Tarifários <span id="adm-tf-info" style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px"></span></div><button class="btn btn-r btn-sm" onclick="admTFEdit(-1)">＋ Novo tarifário</button></div>
+    <div class="tw" id="adm-tf-box" style="margin-bottom:20px"><div class="tt" style="display:flex;justify-content:space-between;align-items:center"><div class="ttit">Tarifários <span id="adm-tf-info" style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px"></span></div><button class="btn btn-r btn-sm" onclick="admTFEdit(-1)">＋ Novo tarifário</button></div>
     <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <button class="btn btn-g btn-sm" id="adm-tf-cruzar" onclick="admRun('Cruzamento',admTFCruzar)">🔗 Cruzar com o catálogo (Ref PHC)</button>
       <span id="adm-tf-filtros" style="display:none;gap:6px;flex-wrap:wrap"></span>
@@ -634,6 +634,14 @@ const BT=[
   {name:"ONE NET NÚMERO EMPRESA",dados:"",chamadas:"",partilha:"",roaming:"",internacional:"",roamingTDR:"",fixo:"Número de empresa ONE NET",equipamentos:"",obs:""},
 ];
 
+var TF_UNIDO=false;
+const TF_VAR_CAMPOS=['dados','chamadas','partilha','roaming','internacional','roamingTDR','fixo','equipamentos','obs'];
+// uma linha por variante comercial; a Ref PHC é sempre a referência do catálogo
+function tfDoCatalogo(l){
+  const out=[];
+  (l||[]).forEach(p=>{if(!p||!p.ref||!Array.isArray(p.variantes))return;p.variantes.forEach(v=>{const n=String(v&&v.name||'').trim().toUpperCase();if(!n)return;const t={name:n,refPHC:p.ref};TF_VAR_CAMPOS.forEach(k=>t[k]=String(v[k]||''));out.push(t);});});
+  return out.sort((a,b)=>a.name.localeCompare(b.name,'pt',{numeric:true,sensitivity:'base'}));
+}
 // ══ LIGAÇÃO FIREBASE (substitui o Google Apps Script) ══════════════════
 const SU_ANTIGA="https://script.google.com/macros/s/AKfycbyEA8cL7L9uMcAhpujjIgV72MOtrh2Fvv8-Ozl2UJy0FdzYAFkKpi0yyw-SKVD_Rb4C/exec"; // só para a importação inicial (Administração)
 const EMAIL_DOMAIN='redemovel.pt';
@@ -714,10 +722,21 @@ async function enterApp(user){
     }
     CM=users.filter(u=>u.ativo===true&&u.nome).map(userToCM).sort((a,b)=>a.nome.localeCompare(b.nome,'pt'));
     CU=CM.find(c=>c.uid===user.uid);
+    // catálogo único: depois da união (feita no RPN › Tarifário) os tarifários são as variantes comerciais das referências
+    TF_UNIDO=false;
     try{
-      const t=await FB.tarifarios();
-      if(t&&Array.isArray(t.lista)&&t.lista.length){TF=t.lista;TF_HEADERS=t.headers||null;}else{TF=BT;}
-    }catch(e){TF=BT;}
+      const cfg=await FB.catCfg();
+      if(cfg.unido===true){
+        const tu=tfDoCatalogo(await FB.produtos(cfg));
+        if(tu.length){TF=tu;TF_HEADERS=cfg.tfHeaders||null;TF_UNIDO=true;}
+      }
+    }catch(e){console.warn('catálogo único:',e);}
+    if(!TF_UNIDO){
+      try{
+        const t=await FB.tarifarios();
+        if(t&&Array.isArray(t.lista)&&t.lista.length){TF=t.lista;TF_HEADERS=t.headers||null;}else{TF=BT;}
+      }catch(e){TF=BT;}
+    }
     document.getElementById('lp').value='';
     document.getElementById('ls').style.display='none';
     // Verificar expiração de password
@@ -2476,6 +2495,7 @@ function tfEstado(t){
 }
 const TF_EST={sem:['Sem Ref PHC','#b45309'],inex:['Ref não existe no catálogo','var(--red)'],desc:['Descontinuado no catálogo','#b45309'],ok:['Certo','#15803d']};
 async function admTFCruzar(){
+  if(tfSoNoRPN())return;
   const l=await FB.produtos();
   _cat={};l.forEach(p=>{if(p.ref)_cat[refKey(p.ref)]=p;});
   document.getElementById('adm-tf-refs').innerHTML=l.filter(p=>p.ref).sort((a,b)=>a.ref.localeCompare(b.ref)).map(p=>'<option value="'+eh(p.ref)+'">'+eh(p.designacao||'')+'</option>').join('');
@@ -2501,7 +2521,13 @@ function admTFCopiar(){
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(fim,()=>tfCopiaAlt(txt,fim));else tfCopiaAlt(txt,fim);
 }
 function tfCopiaAlt(txt,fim){const a=document.createElement('textarea');a.value=txt;document.body.appendChild(a);a.select();try{document.execCommand('copy');fim();}catch(e){toast('⚠','Não foi possível copiar');}a.remove();}
+function tfSoNoRPN(){if(!TF_UNIDO)return false;toast('⚠','Os tarifários gerem-se agora no RPN › Tarifário');return true;}
 function renderAdmTF(){
+  if(TF_UNIDO){
+    const bx=document.getElementById('adm-tf-box');
+    if(bx&&!bx.dataset.unido){bx.dataset.unido='1';bx.innerHTML='<div class="tt"><div class="ttit">Tarifários</div></div><div id="adm-tf-unido" style="padding:16px;font-size:13px;line-height:1.6">O catálogo é agora <b>único</b>: os '+TF.length+' tarifários das propostas são as variantes comerciais das referências e gerem-se em <a href="rpn-dev.html#/catalogo" style="color:var(--red);font-weight:600;text-decoration:underline">RPN › Tarifário</a> (criar, alterar, duplicar).<br><span style="color:var(--muted);font-size:12px">As alterações feitas lá chegam às Propostas na entrada seguinte.</span></div>';}
+    return;
+  }
   const tb=document.getElementById('adm-tf-body');if(!tb)return;
   const interno=TF===BT;
   document.getElementById('adm-tf-info').textContent=interno?'A usar a lista interna de reserva ('+BT.length+'). Importe ou crie tarifários para a substituir.':TF.length+' tarifário(s)';
@@ -2547,11 +2573,13 @@ function renderAdmTF(){
   });
 }
 function admTFEdit(i){
+  if(tfSoNoRPN())return;
   _tfEdit=i;const t=i>=0?TF[i]:{};
   document.getElementById('mo-tf-b').innerHTML=TF_CAMPOS.map(([k,l])=>'<div class="fg"><label class="flbl">'+l+'</label><input class="finp" id="tf-'+k+'"'+(k==='refPHC'?' list="adm-tf-refs"':'')+' style="margin-bottom:0" value="'+eh(t[k]||'')+'"></div>').join('');
   openM('mo-tf');
 }
 async function admTFSave(){
+  if(tfSoNoRPN())return;
   const t={};TF_CAMPOS.forEach(([k])=>t[k]=document.getElementById('tf-'+k).value.trim());
   t.name=t.name.toUpperCase();
   if(!t.name){toast('⚠','Falta o nome do tarifário');return;}
@@ -2562,6 +2590,7 @@ async function admTFSave(){
   catch(e){toast('⚠','Erro: '+fbErr(e));}
 }
 async function admTFDel(i){
+  if(tfSoNoRPN())return;
   if(!confirm('Eliminar o tarifário "'+TF[i].name+'"?'))return;
   const lista=(TF===BT?BT.map(x=>({...x})):TF.slice());lista.splice(i,1);
   try{await FB.saveTarifarios({lista,headers:TF_HEADERS||null});TF=lista;renderAdmTF();toast('✓','Tarifário eliminado');}
@@ -2575,6 +2604,7 @@ function tsvRows(txt){
 }
 function pick(o,inc,not){const k=Object.keys(o).find(k=>k.includes(inc)&&(!not||!k.includes(not)));return k?o[k]:'';}
 async function admTFPaste(){
+  if(tfSoNoRPN())return;
   const rows=tsvRows(document.getElementById('adm-tf-paste').value);
   const lista=rows.map(o=>({name:pick(o,'nome').toUpperCase(),refPHC:pick(o,'phc')||pick(o,'ref'),dados:pick(o,'dados'),chamadas:pick(o,'chamada'),partilha:pick(o,'partilha'),roaming:pick(o,'roaming','tdr'),internacional:pick(o,'intern'),roamingTDR:pick(o,'tdr'),fixo:pick(o,'fixo'),equipamentos:pick(o,'equip'),obs:pick(o,'obs')})).filter(t=>t.name);
   if(!lista.length){toast('⚠','Nada para importar. A 1ª linha tem de ter os títulos das colunas (Nome, Ref PHC, Dados…).');return;}
@@ -2651,8 +2681,10 @@ window.FB = {
     await updateDoc(doc(db, 'users', u.uid), { passAlteradaEm: hoje }); _users = null;
   },
   // economia de leituras: usa o catálogo guardado no browser pela app RPN se a versão (config/catalogo) for a mesma
-  async produtos() {
-    let v = ''; try { v = String((await getDoc(doc(db, 'config', 'catalogo'))).data()?.v || ''); } catch (e) {}
+  // versão do catálogo e estado da união (unido = os tarifários das Propostas vêm do catálogo único)
+  async catCfg() { try { return (await getDoc(doc(db, 'config', 'catalogo'))).data() || {}; } catch (e) { return {}; } },
+  async produtos(cfg) {
+    let v = ''; if (cfg) v = String(cfg.v || ''); else { try { v = String((await getDoc(doc(db, 'config', 'catalogo'))).data()?.v || ''); } catch (e) {} }
     if (v) { try { const c = JSON.parse(localStorage.getItem('rdm-catalogo') || 'null'); if (c && c.v === v && Array.isArray(c.l) && c.l.length) return c.l; } catch (e) {} }
     const l = (await getDocs(collection(db, 'produtos'))).docs.map(d => d.data());
     if (v) { try { localStorage.setItem('rdm-catalogo', JSON.stringify({ v, l })); } catch (e) {} }
