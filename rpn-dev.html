@@ -1974,22 +1974,26 @@ async function pnPdf(r, saud, gestor){
 }
 // corpo do email: em tabela de 640px (o Outlook ignora larguras em <div>), imagem de cabeçalho opcional (config/email.imagem, tem de ser https)
 // e versão em texto simples (os filtros de spam penalizam a falta dela)
-function pnEmailCorpo(r, saud, lista, gestor, imagem){
+function pnEmailCorpo(r, saud, lista, gestor, imagem, alta){   // alta = imagem ao alto: fica à esquerda do texto, como no email antigo
   const g=gestor||null, varios=lista.length>1, F='font-family:Arial,Helvetica,sans-serif;';
   const P=[saud,
     `No âmbito da n/ política de qualidade, visando informação e conferência, pela presente anexamos ${varios?'os documentos referentes':'o documento referente'} à gestão da v/ conta Vodafone, conforme fomos por V. Exas. mandatados.`,
     'Lembramos que mantemos à V/ disposição uma equipa de excelência, devidamente formada e motivada para prestar apoio nas comunicações Fixas ou Móveis da V/ empresa.'];
   const p=t=>`<p style="margin:0 0 16px;${F}font-size:15px;line-height:1.55;color:#222222">${t}</p>`;
-  const cab = imagem
+  const cabTxt=`<tr><td bgcolor="#008080" style="padding:${alta&&imagem?'14px 24px':'22px 28px'};background:#008080"><span style="${F}font-size:${alta&&imagem?22:28}px;font-weight:bold;color:#ffffff;letter-spacing:.5px">redemóvel</span>${alta&&imagem?'<span':'<br><span'} style="${F}font-size:12px;color:#d9f2f2">${alta&&imagem?' &nbsp;·&nbsp; ':''}Agente Autorizado Vodafone · Empresas e Profissionais</span></td></tr>`;
+  const cab = imagem && !alta
     ? `<tr><td style="padding:0;line-height:0"><img src="${esc(imagem)}" width="640" alt="Redemóvel · Agente Autorizado Vodafone" style="display:block;width:100%;max-width:640px;height:auto;border:0"></td></tr>`
-    : `<tr><td bgcolor="#008080" style="padding:22px 28px;background:#008080"><span style="${F}font-size:28px;font-weight:bold;color:#ffffff;letter-spacing:.5px">redemóvel</span><br><span style="${F}font-size:12px;color:#d9f2f2">Agente Autorizado Vodafone · Empresas e Profissionais</span></td></tr>`;
+    : cabTxt;
+  const lado = imagem && alta;
   const html=`<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Processo de Negócio Vodafone</title></head>
 <body style="margin:0;padding:0;background:#eef0f2">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef0f2" style="background:#eef0f2"><tr><td align="center" style="padding:20px 10px">
 <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:640px;max-width:640px;background:#ffffff;border:1px solid #dcdfe3">
 ${cab}
 <tr><td height="4" bgcolor="#e60000" style="height:4px;line-height:4px;font-size:0;background:#e60000">&nbsp;</td></tr>
-<tr><td style="padding:28px 28px 8px">
+<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+${lado?`<td width="200" valign="top" style="width:200px;padding:24px 0 20px 24px"><img src="${esc(imagem)}" width="200" alt="Redemóvel · cuidamos das telecomunicações da sua empresa" style="display:block;width:200px;height:auto;border:0"></td>`:''}
+<td valign="top" style="padding:${lado?'24px 24px 8px 20px':'28px 28px 8px'}">
 ${p(`<b>${esc(P[0])}</b>`)}${p(esc(P[1]))}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 20px"><tr>
 <td width="6" bgcolor="#e60000" style="width:6px;background:#e60000;font-size:0;line-height:0">&nbsp;</td>
@@ -1998,7 +2002,7 @@ ${p(`<b>${esc(P[0])}</b>`)}${p(esc(P[1]))}
 Envie um email para <a href="mailto:${PN_RESPOSTA}" style="color:#b00000;font-weight:bold">${PN_RESPOSTA}</a>${g?` ou contacte o seu gestor de conta:<br><b>${esc(g.nome)}</b>${g.email?` · <a href="mailto:${esc(g.email)}" style="color:#b00000;font-weight:bold">${esc(g.email)}</a>`:''}${g.telefone?` · ${esc(g.telefone)}`:''}`:'.'}<br>
 <span style="font-size:12px;color:#666666">Por favor não responda a esta mensagem: é enviada de um endereço automático que não é lido.</span></td></tr></table>
 ${p(esc(P[2]))}${p('Com os melhores cumprimentos,<br><b>Redemóvel</b> · '+fmtD(hojeLocal()))}
-</td></tr>
+</td></tr></table></td></tr>
 <tr><td bgcolor="#f6f7f8" style="padding:14px 28px 18px;background:#f6f7f8;border-top:1px solid #dcdfe3;${F}font-size:11px;line-height:1.5;color:#777777">Arpuro e Redemóvel, Lda. · Avenida da Liberdade, 3700-153 São João da Madeira · NIPC 503198749 · <a href="https://www.redemovel.pt" style="color:#777777">www.redemovel.pt</a><br>Recebe esta mensagem por ser cliente da Redemóvel e por termos tratado um processo na sua conta Vodafone.</td></tr>
 </table></td></tr></table></body></html>`;
   const text=[P[0], P[1],
@@ -2038,7 +2042,7 @@ async function pnEmailPopup(r){
       bt.disabled=true; bt.textContent='A enviar…';
       try {
         const pdfs=[]; for (const x of lista) pdfs.push(await pnPdf(x, saud(), gestor));
-        await pnServico(cfg.url, { to:para, toName:String(r.cliente?.nome||''), subject:`Processo de Negócio Vodafone Nº.${nums} | ${r.cliente?.nif||''} | ${r.cliente?.nome||''}`, ...pnEmailCorpo(r, saud(), lista, gestor, cfg.imagem||''), attachments:pdfs.map(f=>({name:f.nome, content:f.b64})) });
+        await pnServico(cfg.url, { to:para, toName:String(r.cliente?.nome||''), subject:`Processo de Negócio Vodafone Nº.${nums} | ${r.cliente?.nif||''} | ${r.cliente?.nome||''}`, ...pnEmailCorpo(r, saud(), lista, gestor, cfg.imagem||'', !!cfg.imagemAlta), attachments:pdfs.map(f=>({name:f.nome, content:f.b64})) });
         const agora=new Date().toISOString(), marca={em:agora, porUid:S.me.uid, porNome:S.me.nome, para};
         for (let i=0;i<lista.length;i++) { const x=lista[i];
           await updateDoc(doc(db,'rpn',x.id),{pnEmail:marca}).catch(e=>console.warn('pnEmail',e)); x.pnEmail=marca;
@@ -2055,15 +2059,18 @@ async function admEmail(el){
   const cfg=await pnCfg();
   el.innerHTML=`<div class="card"><h2>Envio do PN ao cliente</h2>
     <p class="muted" style="margin-top:0">O email sai de <b>noreply@redemovel.pt</b> através de um serviço intermédio (script Google + Brevo). Cole aqui o endereço do script (termina em <i>/exec</i>). Enquanto estiver vazio, o envio fica desligado e o resto da plataforma funciona normalmente.</p>
-    <div class="row"><div style="flex:1;min-width:320px"><label>Endereço do serviço de email</label><input id="em-url" value="${esc(cfg.url||'')}" placeholder="https://script.google.com/macros/s/…/exec"></div><div style="flex:1;min-width:320px"><label>Imagem de cabeçalho do email (opcional, endereço https)</label><input id="em-img" value="${esc(cfg.imagem||'')}" placeholder="https://redemovel.github.io/redemovel-propostas/email-cabecalho.jpg"></div><button class="btn pri" id="em-sv" style="align-self:end">Guardar</button><button class="btn" id="em-ts" style="align-self:end" ${cfg.url?'':'disabled'}>Enviar email de teste para mim</button></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">O teste envia uma mensagem simples para ${esc(S.me.email||'o seu email')}. As instruções de montagem estão no ficheiro LEIA-ME-EMAIL.md.<br>Imagem de cabeçalho: com cerca de 640 px de largura, carregada no mesmo repositório do GitHub. Sem imagem, o email leva um cabeçalho de texto. O Outlook e outros programas só mostram imagens depois de o destinatário autorizar.</p>
+    <div class="row"><div style="flex:1;min-width:320px"><label>Endereço do serviço de email</label><input id="em-url" value="${esc(cfg.url||'')}" placeholder="https://script.google.com/macros/s/…/exec"></div><div style="flex:1;min-width:320px"><label>Imagem do email (opcional, endereço https)</label><input id="em-img" value="${esc(cfg.imagem||'')}" placeholder="https://redemovel.github.io/redemovel-propostas/email-cabecalho.jpg"></div><button class="btn pri" id="em-sv" style="align-self:end">Guardar</button><button class="btn" id="em-ts" style="align-self:end" ${cfg.url?'':'disabled'}>Enviar email de teste para mim</button></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">O teste envia uma mensagem simples para ${esc(S.me.email||'o seu email')}. As instruções de montagem estão no ficheiro LEIA-ME-EMAIL.md.<br>Imagem: carregada no mesmo repositório do GitHub. Se for ao alto (como a do email antigo), fica à esquerda do texto; se for uma faixa ao largo (cerca de 640 px), fica no topo. Sem imagem, o email leva só o cabeçalho de texto. O Outlook e outros programas só mostram imagens depois de o destinatário autorizar.</p>
     <div id="em-prev" style="margin-top:14px"></div></div>`;
   { const ex={numero:'50049', cliente:{nome:'Cliente Exemplo, Lda', nif:'500000000', interlocutor:'Nome do Cliente'}, vendedorNome:S.me.nome};
-    const h=pnEmailCorpo(ex, 'Ilustre Sr. Nome do Cliente', [ex], {nome:S.me.nome, email:S.me.email||'', telefone:S.me.telefone||''}, cfg.imagem||'').html;
+    const h=pnEmailCorpo(ex, 'Ilustre Sr. Nome do Cliente', [ex], {nome:S.me.nome, email:S.me.email||'', telefone:S.me.telefone||''}, cfg.imagem||'', !!cfg.imagemAlta).html;
     $('#em-prev').innerHTML='<label>Pré-visualização do email (dados de exemplo)</label><iframe id="em-fr" style="width:100%;height:560px;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>'; $('#em-fr').srcdoc=h; }
   $('#em-sv').onclick=async()=>{ const u=$('#em-url').value.trim(); if (u && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(u)) return toast('O endereço deve ser o do script Google e terminar em /exec.',true);
     const im=$('#em-img').value.trim(); if (im && !/^https:\/\/[^\s"'<>]+\.(jpe?g|png|gif)$/i.test(im)) return toast('A imagem tem de ser um endereço https terminado em .jpg, .png ou .gif.',true);
-    try { await setDoc(doc(db,'config','email'),{url:u, imagem:im, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome},{merge:true}); toast(u?'Envio de email ligado.':'Envio de email desligado.'); admEmail(el); } catch(e){ toast(errTxt(e),true); } };
+    // mede a imagem: ao alto fica à esquerda do texto; ao largo fica como faixa no topo
+    const dim = im ? await new Promise(res=>{ const i=new Image(); i.onload=()=>res({w:i.naturalWidth,h:i.naturalHeight}); i.onerror=()=>res(null); i.src=im; }) : null;
+    if (im && !dim) return toast('Não foi possível abrir a imagem nesse endereço. Confirme que o ficheiro já está no GitHub e que o nome está certo.',true);
+    try { await setDoc(doc(db,'config','email'),{url:u, imagem:im, imagemAlta:!!(dim && dim.h>dim.w*0.7), atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome},{merge:true}); toast(u?'Envio de email ligado.':'Envio de email desligado.'); admEmail(el); } catch(e){ toast(errTxt(e),true); } };
   $('#em-ts').onclick=async()=>{ const b=$('#em-ts'); b.disabled=true;
     try { await pnServico(cfg.url,{teste:true, to:S.me.email, toName:S.me.nome, subject:'Teste de envio · plataforma Redemóvel', html:'<!DOCTYPE html><html lang="pt"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222"><p>Este é um email de teste da plataforma Redemóvel.</p><p>Se o recebeu, o envio dos PN aos clientes está a funcionar.</p><p style="font-size:11px;color:#777">Arpuro e Redemóvel, Lda. · São João da Madeira · www.redemovel.pt</p></body></html>', text:'Este é um email de teste da plataforma Redemóvel.\n\nSe o recebeu, o envio dos PN aos clientes está a funcionar.\n\n--\nArpuro e Redemóvel, Lda. · São João da Madeira · www.redemovel.pt', attachments:[]}); toast('Email de teste enviado para '+S.me.email+'.'); }
     catch(e){ toast(errTxt(e),true); } finally { b.disabled=false; } };
