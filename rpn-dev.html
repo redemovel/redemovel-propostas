@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RPN · Redemóvel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2712%27 fill=%27%23e60000%27/%3E%3Ctext x=%2732%27 y=%2745%27 font-family=%27Arial,Helvetica,sans-serif%27 font-size=%2726%27 font-weight=%27700%27 text-anchor=%27middle%27 fill=%27%23fff%27%3ERPN%3C/text%3E%3C/svg%3E">
 <style>
 :root{--red:#e60000;--red-d:#b80000;--ink:#1d1d1f;--mut:#6b6b70;--line:#e3e3e6;--bg:#f5f5f7;--card:#fff;--ok:#1a7f37;--warn:#b26a00;--info:#0b5cad;}
 *{box-sizing:border-box}
@@ -440,15 +441,14 @@ function drawFicha(){
   if (isBO() && r.estado==='Em Conferência' && r.boUid!==S.me.uid && (r.confUid===S.me.uid || isMaster())) acts.push(`<button class="btn pri" id="a-ok">Conferido · fechar como PN</button><button class="btn" id="a-dev">Devolver à implementação</button>`);
   if (isBO() && r.id && ABERTOS.includes(r.estado)) acts.push(`<button class="btn" id="a-real">Realocar BO</button>`);
   if (isBO() && r.estado==='Em Conferência') acts.push(`<button class="btn" id="a-realc">Realocar conferência</button>`);
-  if (isBO() && r.estado==='PN' && r.origem!=='PHC') acts.push(`<button class="btn ${r.pnEmail?'':'pri'}" id="a-pnm" title="Envia ao cliente o PDF do Processo de Negócio">${r.pnEmail?'Reenviar PN ao cliente':'Enviar PN ao cliente'}</button>`);
+  if (isBO() && r.estado==='PN') acts.push(`<button class="btn ${r.pnEmail||r.origem==='PHC'?'':'pri'}" id="a-pnm" title="Envia ao cliente o PDF do Processo de Negócio">${r.pnEmail?'Reenviar PN ao cliente':'Enviar PN ao cliente'}</button>`);
   if (isMaster() && ['PN','Concluído'].includes(r.estado) && r.origem!=='PHC') acts.push(`<button class="btn" id="a-reab">Reabrir</button>`);
-  if (r.id) acts.push(`<button class="btn" id="a-mail">Email</button>`);
 
   $('#main').innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <button class="btn ghost" id="back">← Lista</button>
       <h1>${r.numero?`${r.estado==='PN'?'PN':'RPN'} ${r.numero}`:'Novo RPN'}</h1>
-      <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(estTxt(r.estado))}</span>${r.estado==='PN'&&r.origem!=='PHC'?(r.pnEmail?`<span class="muted" id="pn-env" style="font-size:12px">✉ enviado ao cliente (${esc(r.pnEmail.para)}) em ${tsTxt(r.pnEmail.em)}</span>`:`<span id="pn-env" style="font-size:12px;color:var(--red-d);font-weight:600">✉ por enviar ao cliente</span>`):''}
+      <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(estTxt(r.estado))}</span>${r.estado==='PN'&&(r.origem!=='PHC'||r.pnEmail)?(r.pnEmail?`<span class="muted" id="pn-env" style="font-size:12px">✉ enviado ao cliente (${esc(r.pnEmail.para)}) em ${tsTxt(r.pnEmail.em)}</span>`:`<span id="pn-env" style="font-size:12px;color:var(--red-d);font-weight:600">✉ por enviar ao cliente</span>`):''}
       ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
       ${r.estado==='Em Conferência'?`<span class="muted">Conferência: <b>${esc(r.confNome||'em fila (sem BO disponível)')}</b></span>`:''}
       ${r.origem==='PHC'?`<span class="badge">histórico PHC</span>`:(r.estado==='PN'?`<span class="muted">Conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:'')}
@@ -477,7 +477,6 @@ function drawFicha(){
   $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
   $('#a-pnm')?.addEventListener('click',()=>pnEmailPopup(S.cur));
   $('#a-reab')?.addEventListener('click',()=>{ if(confirm('Reabrir este processo? Volta a “Em Implementação”.')) guardar({reabrir:true}); });
-  $('#a-mail')?.addEventListener('click',()=>enviarEmail(''));
   const tc = $('#tabc');
   if (S.tab==='principal') tabPrincipal(tc, dis, p);
   else if (S.tab==='anexos') tabAnexos(tc, p);
@@ -713,7 +712,8 @@ function tabAnexos(tc, p){
 
 // ---- mensagens ----
 // mensagem por ler: a última não é minha, sou parte do processo (vendedor, BO ou conferente) e ainda não abri as Mensagens depois dela
-const msgPorLer = r => !!(r && r.msgUlt && r.msgUlt.porUid!==S.me.uid && [r.vendedorUid,r.boUid,r.confUid].includes(S.me.uid) && String(r.msgLido?.[S.me.uid]||'') < String(r.msgUlt.em||''));
+const msgPorLer = r => !!(r && r.msgUlt && r.msgUlt.porUid!==S.me.uid && (r.msgUlt.auto ? r.vendedorUid===S.me.uid : [r.vendedorUid,r.boUid,r.confUid].includes(S.me.uid)) &&   // os avisos automáticos de estado são só para o vendedor
+  String(r.msgLido?.[S.me.uid]||'') < String(r.msgUlt.em||''));
 function marcarMsgLidas(r, ult){   // ult = última mensagem no ecrã; apanha também as que chegam com o separador aberto
   if (!r?.id || ![r.vendedorUid,r.boUid,r.confUid].includes(S.me.uid)) return;
   const chegou = !!(ult && ult.porUid!==S.me.uid && r._msgVistas!==undefined && r._msgVistas!==ult._n);
@@ -723,11 +723,12 @@ function marcarMsgLidas(r, ult){   // ult = última mensagem no ecrã; apanha ta
   setDoc(doc(db,'rpn',r.id),{msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgLido',e));
   const t=document.querySelector('.tabs a[data-t="msg"]'); if(t) t.textContent='Mensagens';
 }
+const msgPara = r => r.vendedorUid===S.me.uid ? 'a BackOffice' : [r.boUid,r.confUid].includes(S.me.uid) ? 'o Comercial' : 'o Comercial ou a BackOffice';
 function tabMsg(tc){
   const r=S.cur;
   if (!r.id) { tc.innerHTML=`<div class="card muted">Guarde o RPN primeiro.</div>`; return; }
   tc.innerHTML = `<div class="card"><div class="msgs" id="ml"><span class="muted">A carregar…</span></div>
-    <textarea id="mt" rows="3" placeholder="Escrever mensagem para ${esc(r.vendedorUid===S.me.uid ? (r.boNome||'a BackOffice') : r.vendedorNome)}…"></textarea>
+    <textarea id="mt" rows="3" placeholder="Escrever mensagem para ${msgPara(r)}…"></textarea>
     <div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn pri" id="ms">Enviar</button></div></div>`;
   const un = onSnapshot(query(collection(db,'rpn',r.id,'mensagens'),orderBy('em')), s=>{
     const el=$('#ml'); if(!el) return;
@@ -737,7 +738,7 @@ function tabMsg(tc){
   }, e=>toast(errTxt(e),true));
   S.unsub.push(un);
   $('#ms').onclick = async ()=>{ const t=$('#mt').value.trim(); if(!t) return; try{ await addDoc(collection(db,'rpn',r.id,'mensagens'),{texto:t,porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()});
-      const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome};   // assinala «por ler» à outra parte, na lista
+      const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome,auto:false};   // assinala «por ler» à outra parte, na lista
       await setDoc(doc(db,'rpn',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e));
       $('#mt').value=''; }catch(e){ toast(errTxt(e),true); } };
 }
@@ -773,7 +774,7 @@ async function msgEstado(id, r, antigo, novo){
   else if (novo==='Em Conferência') extra='O processo está implementado. Segue para conferência interna e passa depois a PN.';
   const agora=new Date().toISOString(), texto=`Novo estado: "${estTxt(novo)}"`+(extra?'\n'+extra:'');
   try { await addDoc(collection(db,'rpn',id,'mensagens'),{texto, auto:true, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
-    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome}; await setDoc(doc(db,'rpn',id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
+    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:true}; await setDoc(doc(db,'rpn',id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
     if (S.cur?.id===id) { S.cur.msgUlt=u; S.cur.msgLido={...(S.cur.msgLido||{}),[S.me.uid]:agora}; }
   } catch(e){ console.warn('msgEstado',e); }
 }
@@ -1622,7 +1623,7 @@ async function atAviso(id, r, antigo, novo){
   const extra = novo==='Concluído' ? (r.resposta?'Relatório BackOffice: '+r.resposta:'') : (['Pendente Comercial','A aguardar','Cancelado','Recusado'].includes(novo) && r.motivo ? 'Motivo: '+r.motivo : '');
   const agora=new Date().toISOString(), texto=`Novo estado: "${novo}"`+(extra?'\n'+extra:'');
   try { await addDoc(collection(db,'atividades',id,'mensagens'),{texto, auto:true, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
-    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome}; await setDoc(doc(db,'atividades',id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
+    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:true}; await setDoc(doc(db,'atividades',id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
     if (AT.cur?.id===id) { AT.cur.msgUlt=u; AT.cur.msgLido={...(AT.cur.msgLido||{}),[S.me.uid]:agora}; }
   } catch(e){ console.warn('atAviso',e); }
 }
@@ -1880,7 +1881,7 @@ function atAnexos(tc, p){
 function atMsgs(tc){
   const r=AT.cur, parte=[r.vendedorUid,r.boUid].includes(S.me.uid);
   tc.innerHTML=`<div class="card"><div class="msgs" id="t-ml"><span class="muted">A carregar…</span></div>
-    <textarea id="t-mt" rows="3" placeholder="Escrever mensagem para ${esc(r.vendedorUid===S.me.uid ? (r.boNome||'a BackOffice') : r.vendedorNome)}…"></textarea>
+    <textarea id="t-mt" rows="3" placeholder="Escrever mensagem para ${msgPara(r)}…"></textarea>
     <div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn pri" id="t-ms">Enviar</button></div></div>`;
   const lida=()=>{ if (!parte || !msgPorLer(r)) return; const agora=new Date().toISOString(); r.msgLido={...(r.msgLido||{}),[S.me.uid]:agora};
     setDoc(doc(db,'atividades',r.id),{msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgLido',e)); const t=document.querySelector('.tabs a[data-tt="msg"]'); if(t) t.textContent='Mensagens'; };
@@ -1889,7 +1890,7 @@ function atMsgs(tc){
     el.scrollTop=el.scrollHeight; lida(); }, e=>toast(errTxt(e),true)));
   $('#t-ms').onclick=async()=>{ const t=$('#t-mt').value.trim(); if(!t) return;
     try { await addDoc(collection(db,'atividades',r.id,'mensagens'),{texto:t, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
-      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome};
+      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:false};
       await setDoc(doc(db,'atividades',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e)); $('#t-mt').value=''; } catch(e){ toast(errTxt(e),true); } };
 }
 function atHistorico(tc){
@@ -1963,17 +1964,31 @@ async function pnPdf(r, saud){
   const uri=d.output('datauristring');
   return { nome:pnNomeFicheiro(r), b64:uri.slice(uri.indexOf('base64,')+7), blob:d.output('blob') };
 }
-function pnEmailHtml(r, saud, lista){
-  const g=S.users[r.vendedorUid]||{}, p=t=>`<p style="margin:0 0 14px">${t}</p>`;
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;max-width:640px">
-<img src="http://www.redemovel.pt/imagens/imagem_email_clt_negocio.jpg" alt="Redemóvel" style="max-width:100%;border:0;margin:0 0 16px">
-${p(esc(saud))}
-${p(`No âmbito da n/ política de qualidade, visando informação e conferência, pela presente anexamos ${lista.length>1?'os documentos referentes':'documento referente'} à gestão da v/ conta Vodafone, conforme fomos por V. Exas. mandatados.`)}
-${p('Para qualquer esclarecimento adicional sobre este assunto, poderá contactar-nos por resposta a este E-Mail, ou por qualquer outro contacto listado na nossa página <a href="http://www.redemovel.pt">www.redemovel.pt</a>.')}
-${r.vendedorNome?p(`O v/ gestor de conta é <b>${esc(r.vendedorNome)}</b>${g.email?` · <a href="mailto:${esc(g.email)}">${esc(g.email)}</a>`:''}${g.telefone?` · ${esc(g.telefone)}`:''}.`):''}
-${p('Lembramos que mantemos à V/ disposição uma equipa de excelência, devidamente formada e motivada para prestar apoio nas comunicações Fixas ou Móveis da V/ empresa.')}
-${p('Redemóvel, '+fmtD(hojeLocal()))}
-</div>`;
+// corpo do email: sem imagens externas e com versão em texto simples (os filtros de spam penalizam a falta de ambos)
+function pnEmailCorpo(r, saud, lista){
+  const g=S.users[r.vendedorUid]||{}, varios=lista.length>1;
+  const P=[saud,
+    `No âmbito da n/ política de qualidade, visando informação e conferência, pela presente anexamos ${varios?'os documentos referentes':'o documento referente'} à gestão da v/ conta Vodafone, conforme fomos por V. Exas. mandatados.`,
+    'Lembramos que mantemos à V/ disposição uma equipa de excelência, devidamente formada e motivada para prestar apoio nas comunicações Fixas ou Móveis da V/ empresa.'];
+  const gestor=r.vendedorNome ? [r.vendedorNome, g.email, g.telefone].filter(Boolean) : [];
+  const p=t=>`<p style="margin:0 0 14px;line-height:1.5">${t}</p>`;
+  const html=`<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Processo de Negócio Vodafone</title></head>
+<body style="margin:0;padding:0;background:#f4f4f4"><div style="max-width:640px;margin:0 auto;background:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222222">
+<div style="padding:18px 24px;border-bottom:3px solid #e60000"><span style="font-size:24px;font-weight:bold;color:#008080;letter-spacing:.5px">redemóvel</span><span style="font-size:12px;color:#666666"> &nbsp;·&nbsp; Agente Autorizado Vodafone · Empresas e Profissionais</span></div>
+<div style="padding:22px 24px 8px">
+${p(esc(P[0]))}${p(esc(P[1]))}
+<div style="margin:6px 0 18px;padding:14px 16px;background:#fff4f4;border:1px solid #e60000;border-left:6px solid #e60000;border-radius:4px;line-height:1.5">
+<b style="color:#b00000;font-size:15px">Tem alguma dúvida ou precisa de um esclarecimento?</b><br>
+Envie um email para <a href="mailto:${PN_RESPOSTA}" style="color:#b00000;font-weight:bold">${PN_RESPOSTA}</a>${gestor.length?` ou contacte o seu gestor de conta, <b>${esc(gestor[0])}</b>${g.email?`, <a href="mailto:${esc(g.email)}" style="color:#b00000;font-weight:bold">${esc(g.email)}</a>`:''}${g.telefone?`, telefone ${esc(g.telefone)}`:''}`:''}.<br>
+<span style="font-size:12px;color:#555555">Por favor não responda a esta mensagem: é enviada de um endereço automático que não é lido.</span></div>
+${p(esc(P[2]))}${p('Redemóvel, '+fmtD(hojeLocal()))}
+</div>
+<div style="padding:12px 24px 18px;border-top:1px solid #dddddd;font-size:11px;color:#777777;line-height:1.5">Arpuro e Redemóvel, Lda. · Avenida da Liberdade, 3700-153 São João da Madeira · NIPC 503198749 · <a href="https://www.redemovel.pt" style="color:#777777">www.redemovel.pt</a><br>Recebe esta mensagem por ser cliente da Redemóvel e por termos tratado um processo na sua conta Vodafone.</div>
+</div></body></html>`;
+  const text=[P[0], P[1],
+    `TEM ALGUMA DÚVIDA OU PRECISA DE UM ESCLARECIMENTO?\nEnvie um email para ${PN_RESPOSTA}`+(gestor.length?` ou contacte o seu gestor de conta, ${gestor.join(', ')}`:'')+'.\nPor favor não responda a esta mensagem: é enviada de um endereço automático que não é lido.',
+    P[2], 'Redemóvel, '+fmtD(hojeLocal()), '--\nArpuro e Redemóvel, Lda. · Avenida da Liberdade, 3700-153 São João da Madeira · NIPC 503198749 · www.redemovel.pt'].join('\n\n');
+  return {html, text};
 }
 const pnPorEnviar = r => r.estado==='PN' && r.origem!=='PHC' && !r.pnEmail;
 const pnCfg = async () => { try { return (await getDoc(doc(db,'config','email'))).data()||{}; } catch(e){ return {}; } };
@@ -1995,7 +2010,7 @@ async function pnEmailPopup(r){
     ${ja.length?`<div class="warnbox" id="pe-ja">Já foi enviado: ${ja.map(x=>`PN ${x.numero} a ${esc(x.pnEmail.para)} em ${tsTxt(x.pnEmail.em)}`).join('; ')}. Se enviar agora, o cliente recebe outra vez.</div>`:''}
     <div class="grid"><div><label>Email do cliente</label><input type="email" id="pe-para" value="${esc(r.cliente?.email||'')}" placeholder="email do cliente"></div>
       <div><label>Saudação (confirme Sr. / Sra. e o nome)</label><input id="pe-saud" value="${esc(pnSaudacao(r))}"></div></div>
-    <p class="muted" style="font-size:12px;margin:10px 0 0">Sai de <b>noreply@redemovel.pt</b> com o PDF em anexo. Se o cliente responder, a resposta vai para <b>${PN_RESPOSTA}</b>, que também recebe uma cópia oculta.</p>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">Sai de <b>noreply@redemovel.pt</b> com o PDF em anexo. A mensagem diz ao cliente, em destaque, para escrever para <b>${PN_RESPOSTA}</b> ou para o gestor de conta em caso de dúvida (o noreply não aceita respostas). O <b>${PN_RESPOSTA}</b> recebe uma cópia oculta.</p>
     ${cfg.url?'':`<div class="warnbox" id="pe-off" style="margin:10px 0 0">O envio de email ainda não está ligado (Administração › Email). Pode ver o PDF e enviar mais tarde.</div>`}
     <div class="row" style="margin-top:14px"><button class="btn" id="pe-ver">Ver o PDF</button><span class="sp"></span><button class="btn" id="c">Enviar mais tarde</button><button class="btn pri" id="pe-ok" ${cfg.url?'':'disabled'}>Enviar agora</button></div>`, (m,close)=>{
     m.querySelector('#c').onclick=close;
@@ -2006,7 +2021,7 @@ async function pnEmailPopup(r){
       bt.disabled=true; bt.textContent='A enviar…';
       try {
         const pdfs=[]; for (const x of lista) pdfs.push(await pnPdf(x, saud()));
-        await pnServico(cfg.url, { to:para, toName:String(r.cliente?.nome||''), subject:`Processo de Negócio Vodafone Nº.${nums} | ${r.cliente?.nif||''} | ${r.cliente?.nome||''}`, html:pnEmailHtml(r, saud(), lista), attachments:pdfs.map(f=>({name:f.nome, content:f.b64})) });
+        await pnServico(cfg.url, { to:para, toName:String(r.cliente?.nome||''), subject:`Processo de Negócio Vodafone Nº.${nums} | ${r.cliente?.nif||''} | ${r.cliente?.nome||''}`, ...pnEmailCorpo(r, saud(), lista), attachments:pdfs.map(f=>({name:f.nome, content:f.b64})) });
         const agora=new Date().toISOString(), marca={em:agora, porUid:S.me.uid, porNome:S.me.nome, para};
         for (let i=0;i<lista.length;i++) { const x=lista[i];
           await updateDoc(doc(db,'rpn',x.id),{pnEmail:marca}).catch(e=>console.warn('pnEmail',e)); x.pnEmail=marca;
@@ -2028,7 +2043,7 @@ async function admEmail(el){
   $('#em-sv').onclick=async()=>{ const u=$('#em-url').value.trim(); if (u && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(u)) return toast('O endereço deve ser o do script Google e terminar em /exec.',true);
     try { await setDoc(doc(db,'config','email'),{url:u, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome},{merge:true}); toast(u?'Envio de email ligado.':'Envio de email desligado.'); admEmail(el); } catch(e){ toast(errTxt(e),true); } };
   $('#em-ts').onclick=async()=>{ const b=$('#em-ts'); b.disabled=true;
-    try { await pnServico(cfg.url,{teste:true, to:S.me.email, toName:S.me.nome, subject:'Teste de envio · plataforma Redemóvel', html:'<p>Este é um email de teste da plataforma Redemóvel. Se o recebeu, o envio dos PN aos clientes está a funcionar.</p>', attachments:[]}); toast('Email de teste enviado para '+S.me.email+'.'); }
+    try { await pnServico(cfg.url,{teste:true, to:S.me.email, toName:S.me.nome, subject:'Teste de envio · plataforma Redemóvel', html:'<!DOCTYPE html><html lang="pt"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222"><p>Este é um email de teste da plataforma Redemóvel.</p><p>Se o recebeu, o envio dos PN aos clientes está a funcionar.</p><p style="font-size:11px;color:#777">Arpuro e Redemóvel, Lda. · São João da Madeira · www.redemovel.pt</p></body></html>', text:'Este é um email de teste da plataforma Redemóvel.\n\nSe o recebeu, o envio dos PN aos clientes está a funcionar.\n\n--\nArpuro e Redemóvel, Lda. · São João da Madeira · www.redemovel.pt', attachments:[]}); toast('Email de teste enviado para '+S.me.email+'.'); }
     catch(e){ toast(errTxt(e),true); } finally { b.disabled=false; } };
 }
 // logótipos do documento (JPEG em base64)

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Manual · Redemóvel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2712%27 fill=%27%23008080%27/%3E%3Ctext x=%2732%27 y=%2745%27 font-family=%27Arial,Helvetica,sans-serif%27 font-size=%2740%27 font-weight=%27700%27 text-anchor=%27middle%27 fill=%27%23fff%27%3EM%3C/text%3E%3C/svg%3E">
 <style>
 :root{--red:#e60000;--red-d:#b30000;--ink:#1c1c1c;--muted:#6b7280;--line:#e5e7eb;--bg:#f6f7f9;--card:#fff;--am:#fff7e0;--am-l:#f2c94c;--az:#eef2ff;--az-l:#c7d2fe;--vd:#ecfdf3;--vd-l:#a7e3bd}
 *{box-sizing:border-box}
@@ -354,7 +355,6 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <li><b>Mensagens por ler</b>: quando o menu <i>RPNs</i> mostrar 💬 com um número, há mensagens para si. Na lista, marque <b>💬 Mensagens por ler</b> para ver só esses processos. Não há aviso por email: convém olhar para o contador sempre que entra.</li>
     <li><b>Avisos automáticos</b>: sempre que a BackOffice muda o estado do RPN, recebe uma mensagem <i>Novo estado: "…"</i>, com o motivo quando existe (por exemplo os documentos em falta). O último aviso é o de <i>Concluído</i>.</li>
     <li><b>Concluídos</b>: 8 dias depois de concluído, o processo sai da sua lista. Continua na ficha do cliente (separador RPN e PN) e em <span class="bt">Procurar no histórico</span>. Pode sempre abri-lo para acompanhar a conferência e a passagem a PN.</li>
-    <li><span class="bt">Email</span>: abre o seu programa de email com uma mensagem para a BackOffice do processo, já com o número e a ligação do RPN.</li>
     <li><b>Histórico</b>: mostra quem fez o quê e quando.</li>
   </ul>
   <h3>Eliminar um RPN</h3>
@@ -513,7 +513,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ol>
     <li>Mude o estado para <i>Pendente Comercial</i> ou <i>Pendente Documentos</i>.</li>
     <li>Assinale o(s) <b>motivo(s) de pendência</b>: Doc. Identificação, Contrato, CRC, Morada, Condições Comerciais, Dívida.</li>
-    <li>Guarde. Se quiser, escreva uma mensagem ou use o botão <span class="bt">Email</span> para avisar o vendedor.</li>
+    <li>Guarde. O vendedor recebe o aviso automático nas Mensagens; se quiser, acrescente uma mensagem sua.</li>
   </ol>
   <p>O vendedor corrige e carrega em "Resolvido · devolver à BO". O RPN volta a <i>Em Implementação</i>, consigo.</p>
   <h3>Cancelar ou reprovar</h3>
@@ -561,7 +561,8 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <li><span class="bt r">Enviar agora</span> envia o email com o PDF em anexo. <span class="bt">Enviar mais tarde</span> fecha a janela sem enviar.</li>
   </ol>
   <ul>
-    <li>O email sai de <i>noreply@redemovel.pt</i>. Se o cliente responder, a resposta vai para o <i>geral@redemovel.pt</i>, que recebe também uma cópia oculta.</li>
+    <li>O email sai de <i>noreply@redemovel.pt</i>, que não aceita respostas. A mensagem diz ao cliente, em destaque, para escrever para o <i>geral@redemovel.pt</i> ou para o gestor de conta em caso de dúvida. O <i>geral@redemovel.pt</i> recebe uma cópia oculta de cada envio.</li>
+    <li>Nos PN antigos importados do PHC o botão <span class="bt">Enviar PN ao cliente</span> também existe, para reenviar o documento quando o cliente o pede.</li>
     <li>Os PN do mesmo grupo seguem num só email, com um PDF por PN.</li>
     <li>Se ficou por enviar, a ficha do PN mostra <b>✉ por enviar ao cliente</b> e o botão <span class="bt">Enviar PN ao cliente</span>. Na lista, o filtro <b>✉ PN por enviar</b> mostra todos os que faltam.</li>
     <li>Depois de enviado, a ficha mostra a quem e quando, o envio fica no Histórico e o PDF nos Anexos. Pode reenviar.</li>
