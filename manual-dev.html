@@ -446,8 +446,27 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   </ul>
 </section>
 
+<section data-p="v" id="v-comissao">
+  <h2>2.10 A minha comissão <span class="tag v">Vendedores</span></h2>
+  <p>No RPN, abra <span class="bt">A minha comissão</span>. O painel é calculado com os seus <b>PN do mês</b> (conta a data do PN) e atualiza-se sempre que entra ou carrega em <span class="bt">⟳ Atualizar</span>.</p>
+  <h3>O que vê</h3>
+  <ul>
+    <li><b>Eventos para escalão</b>: a soma dos eventos (Score) dos seus PN do mês. Cada evento de <b>Nova Receita</b> (Móvel ou Fixo) conta <b>3</b>; Refidelização conta 1. Exemplo: 90 eventos de Refidelização + 10 de Nova = 90 + 3 × 10 = 120.</li>
+    <li><b>Escalão</b>, de 1 a 6: <b>1 Partida</b> (menos de 12 eventos, sem comissão) · <b>2 Arranque</b> (12) · <b>3 Ritmo</b> (36) · <b>4 Embalo</b> (60) · <b>5 Elite</b> (82) · <b>6 Lenda</b> (115). <b>Todos</b> os eventos do mês são pagos ao valor do escalão atingido; por isso, cada subida de escalão faz subir a comissão do mês inteiro.</li>
+    <li><b>Comissão atual</b> e <b>comissão no fim do mês</b> (projeção ao ritmo dos dias úteis já decorridos).</li>
+    <li><b>Gráfico</b>: quanto vale a comissão do mês com mais eventos. Os saltos são as subidas de escalão e as majorações.</li>
+    <li><b>Objetivos do mês</b>: ⅓ dos objetivos trimestrais da sua ficha (Nova Móvel, Nova Fixo, Ref Móvel, Ref Fixo). Com 3 objetivos cumpridos a comissão do mês sobe 20 %; com 4, sobe 40 %.</li>
+    <li><b>RPN em curso</b>: eventos que ainda não são PN, com o escalão que atingiria se passassem a PN este mês.</li>
+    <li><b>O seu treinador</b>: mensagens com o que falta para o escalão seguinte, a projeção do mês e os objetivos mais próximos.</li>
+    <li><b>Ranking da equipa</b>: comissões apuradas no último RUN, de Vendedores e de BackOffice.</li>
+  </ul>
+  <h3>No PN</h3>
+  <p>Nos seus PN há o separador <b>Comissão</b>, linha a linha: a comissão <b>prevista</b> (com o escalão do mês do PN) e a comissão <b>gerada</b>, quando a Vodafone a pagar. O estado mostra <i>gerada</i>, <i>por receber</i> ou <i>charge-back</i>.</p>
+  <div class="aviso">A comissão final só é apurada depois de a Vodafone pagar cada linha (normalmente no RUN do mês seguinte) e pode incluir prémios trimestrais ou acertos. Desativações dão origem a charge-back, mesmo depois de paga.</div>
+</section>
+
 <section data-p="v" id="v-faq">
-  <h2>2.10 Perguntas frequentes <span class="tag v">Vendedores</span></h2>
+  <h2>2.11 Perguntas frequentes <span class="tag v">Vendedores</span></h2>
   <h3>Não encontro um cliente.</h3>
   <p>Só vê os clientes da sua carteira. Se o cliente existe mas está com outro vendedor, ou sem vendedor, peça à chefia para o atribuir.</p>
   <h3>Não encontro uma referência nas linhas do RPN.</h3>
@@ -603,10 +622,10 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
 </section>
 
 <section data-p="b" id="b-catalogo">
-  <h2>3.7 Tarifário (catálogo de referências) <span class="tag b">BackOffice</span></h2>
-  <p>No RPN, abra <span class="bt">Tarifário</span>. É o catálogo único: serve os RPN e, depois da união, também as Propostas. BackOffice, Coordenador e Master podem criar, alterar e apagar referências.</p>
+  <h2>3.7 Catálogo de referências <span class="tag b">BackOffice</span></h2>
+  <p>No RPN, abra <span class="bt">Catálogo</span>. BackOffice, Coordenador e Master podem criar, alterar e apagar referências.</p>
   <ul>
-    <li><b>Procurar</b>: por referência, designação, nome usado nas Propostas, tier ou pricing plan.</li>
+    <li><b>Procurar</b>: por referência, designação, tier ou pricing plan.</li>
     <li><span class="bt">+ Nova referência</span>: referência, sub-família, designação, tier, pricing plan e se está descontinuada.</li>
     <li><span class="bt">Editar</span>: tudo menos a referência, que não muda depois de criada.</li>
     <li><span class="bt">Apagar</span>: os processos que já a usam não são alterados; deixa só de aparecer na pesquisa.</li>
@@ -620,19 +639,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <h3>Referências inativas</h3>
   <p>Uma referência marcada como <b>Inativa</b> não aparece na pesquisa das linhas, mas continua a servir como parte de um pacote.</p>
   <div class="aviso">O tier e o estado "descontinuado" entram no cálculo do Score. Um erro no catálogo afeta o Score de todos os processos novos com essa referência.</div>
-  <h3>Nas Propostas: variantes comerciais</h3>
-  <ul>
-    <li>Cada referência é <b>única</b>: a plataforma não deixa criar duas iguais.</li>
-    <li>Na ficha da referência, a secção <b>Nas Propostas</b> tem as <b>variantes comerciais</b>: o nome com que aparece nas propostas e a descrição (dados, chamadas, partilha, roaming, internacional, fixo, equipamentos, obs).</li>
-    <li>Uma referência pode ter várias variantes (por exemplo, o mesmo pacote com streaming de 3 ou de 24 meses). No RPN aparece sempre só a referência.</li>
-    <li>O <b>nome</b> de cada variante também é único em todo o Tarifário.</li>
-    <li>Uma referência sem variantes não aparece nas Propostas.</li>
-    <li>Evite mudar o nome de uma variante já usada: as propostas antigas guardam esse nome.</li>
-    <li>As alterações chegam às Propostas na entrada seguinte de cada utilizador.</li>
-  </ul>
-  <h3>União com as Propostas</h3>
-  <p>O botão <span class="bt">União com as Propostas</span> mostra o que acontece a cada tarifário antigo das Propostas (simulação, não grava nada). Quando não houver casos por corrigir, o Master pode <b>unir os catálogos</b>. A lista antiga fica guardada e o Master pode desfazer a união no mesmo botão. Depois da união, os tarifários deixam de ser geridos em Propostas › Administração.</p>
-  <div class="dica"><span class="bt">Duplicar</span>, em cada linha do Tarifário, abre uma referência nova já preenchida com os dados da original (designação, tier, pricing plan, composição, descrição comercial). Só falta escrever a nova referência e alterar o que for diferente.</div>
+  <div class="dica"><span class="bt">Duplicar</span>, em cada linha do Catálogo, abre uma referência nova já preenchida com os dados da original (designação, tier, pricing plan, composição). Só falta escrever a nova referência e alterar o que for diferente.</div>
 </section>
 
 <section data-p="b" id="b-projetos">
@@ -659,6 +666,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   </table></div>
   <p>O valor mensal definido pela administração é repartido pelas BackOffices na proporção dos pontos de cada uma. Os pesos podem ser alterados pelo Master.</p>
   <p>Uma penalização por devolução pode ser anulada pelo Master, se a devolução não se justificar.</p>
+  <p>Em <span class="bt">Comissões</span> vê o ranking da equipa (Vendedores e BackOffice) com as comissões apuradas no último RUN.</p>
 </section>
 
 <section data-p="b" id="b-atividades">
