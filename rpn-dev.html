@@ -2391,7 +2391,7 @@ let PLANO = null, PLANO_EM = 0;
 async function lerPlano(forcar){
   if (PLANO && !forcar && Date.now()-PLANO_EM < 300000) return PLANO;
   const s = await getDoc(doc(db,'config','planoVendedor'));
-  PLANO = s.exists() ? s.data() : {}; if (!PLANO.versoes?.length) PLANO.versoes=[PLANO_DEF]; PLANO.objVend=PLANO.objVend||{}; PLANO_EM=Date.now();
+  PLANO = s.exists() ? s.data() : {}; if (!PLANO.versoes?.length) PLANO.versoes=[PLANO_DEF]; PLANO.objVend=PLANO.objVend||{}; PLANO.objTrim=PLANO.objTrim||{}; PLANO_EM=Date.now();
   return PLANO;
 }
 const versaoDe = (vs, mes) => [...vs].sort((a,b)=>a.desde<b.desde?-1:1).filter(v=>v.desde<=mes).pop() || [...vs].sort((a,b)=>a.desde<b.desde?-1:1)[0];
@@ -2401,7 +2401,9 @@ const escNum = i => (i ?? -1) + 2;
 const escNome = (v, i) => (v?.nomes || NOMES_ESC)[escNum(i)-1] || '';
 const escTxt = (v, i) => `${escNum(i)} · ${escNome(v, i)}`;
 const escIdx = (v, x) => v.escaloes.indexOf(x);
-const objDe = (uid, v) => { const o=PLANO.objVend?.[uid]||{}; return Object.fromEntries(v.objetivos.map(x=>[x.id, o[x.id]!=null && o[x.id]!=='' ? +o[x.id] : +x.trim||0])); };
+// objetivo trimestral do vendedor: 1.º o definido para esse trimestre (objTrim), 2.º o individual (objVend), 3.º o padrão do plano
+const objDe = (uid, v, mes) => { const t = mes ? (PLANO.objTrim?.[trimId(mes)]?.[uid]||{}) : {}, o=PLANO.objVend?.[uid]||{}, ok = x => x!=null && x!=='' && !isNaN(+x);
+  return Object.fromEntries(v.objetivos.map(x=>[x.id, ok(t[x.id]) ? +t[x.id] : ok(o[x.id]) ? +o[x.id] : +x.trim||0])); };
 function natNorm(n){ n=String(n||''); const nova=/nova/i.test(n);
   if (nova && /\bss\b|smart/i.test(n)) return 'Nova SS'; if (/fix/i.test(n)) return nova?'Nova Fixo':'Ref Fixo'; return nova?'Nova Móvel':'Ref Móvel'; }
 const r3 = x => Math.round((+x||0)*1000)/1000;
@@ -2419,6 +2421,38 @@ function comCalc(v, ev, obj){
   const base = e ? Object.entries(ev).reduce((a,[n,x])=>a+x*(/^Nova/.test(n)?e.nova:e.ref),0) : 0;
   return {pts, e, i, prox, objs, cumpridos, maj, base, total: base*(1+maj)};
 }
+// ---- PRÉMIO TRIMESTRAL do vendedor (plano out/2024, como no mapa Excel do Master) ----
+// por categoria (Móvel, Fixo): eventos Nova × 20 € × % de atingimento do objetivo Nova da categoria (máx. 100 %);
+// soma das categorias → patamar inferior (<85 € = 0; 85/165/330/500/660; a partir de 660 € paga o valor, até 1 700 €);
+// índice do vendedor (júnior/assistente 50 %) aplica-se aos objetivos e ao prémio; pago em 3 prestações iguais.
+const PREMIO_DEF = { valorEvento:20, cats:[{id:'M', nome:'Móvel', obj:'NM', nat:['Nova Móvel']},{id:'F', nome:'Fixo', obj:'NF', nat:['Nova Fixo']}],
+  patamares:[85,165,330,500,660], teto:1700, prestacoes:3, atraso:3 };   // atraso: meses entre o fim do trimestre e a 1.ª prestação
+const premioDe = v => ({...PREMIO_DEF, ...(v?.premio||{})});
+const indiceDe = uid => { const x = PLANO?.objVend?.[uid]?.indice; return x!=null && x!=='' && !isNaN(+x) ? +x/100 : 1; };
+const r2 = x => Math.round((+x||0)*100)/100;
+function premioCalc(v, evTrim, obj, ind){
+  const P = premioDe(v); ind = ind ?? 1;
+  const cats = P.cats.map(c=>{ const ev=c.nat.reduce((a,n)=>a+(evTrim[n]||0),0), ob=(+obj[c.obj]||0)*ind, at=ob>0?Math.min(1, ev/ob):0;
+    return {...c, ev, ob, at, val: ev*P.valorEvento*at}; });
+  const apurado = cats.reduce((a,c)=>a+c.val,0), pt = [...P.patamares].map(Number).sort((a,b)=>a-b), topo = pt.at(-1);
+  const patamar = apurado >= topo-1e-9 ? Math.min(+P.teto||Infinity, apurado) : (pt.filter(x=>apurado>=x-1e-9).pop()||0);
+  const prox = apurado >= topo-1e-9 ? null : pt.find(x=>apurado<x-1e-9);
+  const premio = r2(patamar*ind);
+  return {P, cats, apurado, patamar, premio, prox, ind, prest: k => k<P.prestacoes ? r2(premio/P.prestacoes) : r2(premio-(P.prestacoes-1)*r2(premio/P.prestacoes))};
+}
+// eventos Nova que faltam numa categoria para chegar a um valor apurado
+function premioFalta(v, evTrim, obj, ind, alvo, cat){
+  const P = premioDe(v), c = P.cats.find(x=>x.id===cat), n = c.nat[0];
+  const val = x => premioCalc(v, {...evTrim, [n]:(evTrim[n]||0)+x}, obj, ind).apurado;
+  if (val(1000) < alvo) return null; let lo=0, hi=1000; for (let i=0;i<40;i++){ const m=(lo+hi)/2; if (val(m)>=alvo) hi=m; else lo=m; } return hi;
+}
+// que trimestre se paga num RUN e qual a prestação (1…n)
+function premioEmPagamento(v, mesRun){
+  const P = premioDe(v);
+  for (let k=0; k<P.prestacoes; k++){ const e = somaMeses(mesRun, -(+P.atraso + k)); if (+e.split('-')[1] % 3 === 0) return {trim: trimId(e), k: k+1, n: P.prestacoes}; }
+  return null;
+}
+const runsDoPremio = (v, trim) => { const P=premioDe(v), fim=trimMeses(trim)[2]; return Array.from({length:P.prestacoes}, (_,k)=>somaMeses(fim, +P.atraso+k)); };
 // dias úteis (seg–sex, sem feriados nacionais)
 function pascoa(a){ const b=a%19,c=Math.floor(a/100),d=a%100,e=Math.floor(c/4),f=c%4,g=Math.floor((c+8)/25),h=Math.floor((c-g+1)/3),i=(19*b+c-e-h+15)%30,k=Math.floor(d/4),l=d%4,m=(32+2*f+2*k-i-l)%7,n=Math.floor((b+11*i+22*m)/451),mes=Math.floor((i+m-7*n+114)/31),dia=((i+m-7*n+114)%31)+1; return new Date(a,mes-1,dia); }
 const isoL = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -2463,14 +2497,17 @@ async function viewComissao(){
       const pagS = await getDocs(query(collection(db,'comissoesVend'), where('uid','==',CM.uid), where('mes','in',runs))).catch(()=>null);
       const pagas = {}; (pagS?.docs||[]).forEach(d=>(d.data().detalhe||[]).forEach(p=>{ pagas[p.rpnId]=Math.round(((pagas[p.rpnId]||0)+(+p.valor||0))*100)/100; }));
       const cvDocs = (pagS?.docs||[]).map(d=>d.data()), runDoc = cvDocs.find(d=>d.mes===CM.mes);   // o que foi pago no RUN deste mês (todos os PN)
-      CM.dados = {chave, pns, curso, pagas, cvDocs, runDet: runDoc?.detalhe||[], pagoRun: runDoc ? +runDoc.valor||0 : null, pagoOrigem: runDoc?.origem||''}; CM.em = Date.now();
+      // prémio trimestral em pagamento neste RUN: PN do vendedor nesse trimestre (uma leitura; o trimestre em curso já veio acima)
+      let premioPg = premioEmPagamento(versaoDe(PLANO.versoes, CM.mes), CM.mes);
+      if (premioPg) { const mq = trimMeses(premioPg.trim); premioPg.pns = (await getDocs(query(col, where('vendedorUid','==',CM.uid), where('mesRef','in',mq))).catch(()=>null))?.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN') ?? null; }
+      CM.dados = {chave, pns, curso, pagas, cvDocs, runDet: runDoc?.detalhe||[], pagoRun: runDoc ? +runDoc.valor||0 : null, pagoOrigem: runDoc?.origem||'', premioPg}; CM.em = Date.now();
     }
     drawComissao(podeEscolher, vends);
   } catch(e){ console.error(e); m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; }
 }
 function drawComissao(podeEscolher, vends){
   const m=$('#main'); if (!m || !location.hash.startsWith('#/comissao')) return;
-  const v = versaoDe(PLANO.versoes, CM.mes), obj = objDe(CM.uid, v), T = trimDe(CM.mes);
+  const v = versaoDe(PLANO.versoes, CM.mes), obj = objDe(CM.uid, v, CM.mes), T = trimDe(CM.mes);
   const pnMes = CM.dados.pns.filter(r=>r.mesRef===CM.mes), pnTrim = CM.dados.pns;
   const ev = eventosDe(pnMes), evCurso = eventosDe(CM.dados.curso), evTrim = eventosDe(pnTrim);
   const c = comCalc(v, ev, obj);
@@ -2553,6 +2590,7 @@ function drawComissao(podeEscolher, vends){
           return `<tr><td>${esc(o.nome)}</td><td class="num">${f1(o.feito)}</td><td class="num">${f1(o.mes)}</td><td class="num">${f1(tq)} / ${o.trim}</td><td><div class="cm-bar"><span class="${pr<100?'lo':''}" style="width:${pr}%"></span></div></td></tr>`; }).join('')}</tbody></table>
         <p class="muted" style="font-size:12px;margin-bottom:0">Objetivo do mês = ⅓ do trimestral. Para o escalão, ${Object.entries(v.pesos).filter(([,x])=>x!==1).map(([n,x])=>`${esc(n)} conta ${String(x).replace('.',',')}×`).join(', ')||'todos os eventos contam 1×'}.</p></div>
     </div>
+    ${premioCard({v, obj, evTrim, T, atual, duT, duTF, eu})}
     <div class="card scroll"><h2>Comissões previstas · PN criados em ${mesTxt(CM.mes)} (${pnMes.length})</h2>
       <table><thead><tr><th>PN</th><th>Cliente</th><th class="num">Linhas</th><th class="num">Eventos p/ escalão</th><th class="num">Prevista</th><th class="num">Paga</th><th class="num">Saldo</th><th>Estado</th></tr></thead>
       <tbody>${porPN.map(x=>{ const pg=CM.dados.pagas?.[x.r.id], tem=pg!=null; return `<tr class="click" data-id="${x.r.id}"><td><b>${x.r.numero||''}</b></td><td>${esc(x.r.cliente?.nome)}</td><td class="num">${x.r.nLinhas||(x.r.linhas||[]).length}</td><td class="num">${f1(x.pts)}</td><td class="num">${eur(x.val)}</td><td class="num">${tem?eur(pg):'—'}</td><td class="num">${tem?eur(x.val-pg):'—'}</td><td>${saldoTxt(x.val, pg||0, tem)}</td></tr>`; }).join('')||'<tr><td colspan="8" class="muted">Ainda sem PN neste mês.</td></tr>'}</tbody>
@@ -2560,7 +2598,7 @@ function drawComissao(podeEscolher, vends){
       <p class="muted" style="font-size:12px;margin-bottom:0">Previsão com o escalão e a majoração atuais. A comissão final é apurada quando a Vodafone paga cada linha (normalmente no RUN do mês seguinte) e pode incluir prémios trimestrais ou acertos. A coluna «Paga» soma o que estes PN já receberam nos RUN seguintes. Clique num PN para ver todos os pagamentos.</p></div>
     <div class="card scroll"><h2>Comissões pagas · RUN de ${mesTxt(CM.mes)}${CM.dados.pagoRun!=null?` · ${eur(CM.dados.pagoRun)}`:''}</h2>
       ${CM.dados.runDet.length ? `<table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Movimentos</th><th class="num">Pago neste RUN</th></tr></thead>
-      <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr class="click" data-rid="${esc(p.rpnId)}"><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td></tr>`).join('')}</tbody>
+      <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr ${p.rpnId?`class="click" data-rid="${esc(p.rpnId)}"`:''}><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total pago neste RUN (inclui PN de meses anteriores e charge-backs)</td><td class="num">${eur(CM.dados.pagoRun||0)}</td></tr></tfoot></table>` : `<p class="muted" style="margin:0">Ainda não há comissões apuradas no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
     <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div>
     <div class="card"><h2>Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="muted">A carregar…</div></div>`;
@@ -2579,6 +2617,50 @@ function drawComissao(podeEscolher, vends){
   $('#cm-v')?.addEventListener('change', e => { CM.uid=e.target.value; viewComissao(); });
   m.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.id, CM.dados.pns.find(r=>r.id===t.dataset.id)));
   m.querySelectorAll('tr[data-rid]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.rid, CM.dados.pns.find(r=>r.id===t.dataset.rid)));
+}
+// cartão «Prémio trimestral» do painel: trimestre em construção + prestação em pagamento neste RUN
+function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
+  const ind = indiceDe(CM.uid), q = premioCalc(v, evTrim, obj, ind), P = q.P, tId = trimId(CM.mes), fechado = !atual || T.meses[2] < mesLocal();
+  const pctE = x => Math.round(x*100)+' %';
+  const fim = !fechado && duTF>0 && duTF<duT && duTF/duT>=0.2 ? premioCalc(v, escalarEv(evTrim, duT/duTF), obj, ind) : null;
+  const pts = [...P.patamares].map(Number).sort((a,b)=>a-b);
+  const chip = (x, on, lab) => `<span style="display:inline-block;padding:4px 10px;border-radius:14px;margin:0 6px 6px 0;font-weight:700;font-variant-numeric:tabular-nums;${on?'background:var(--ok);color:#fff':'background:#f0eef0;color:var(--mut)'}">${lab}</span>`;
+  const escada = pts.map((x,i)=>chip(x, q.patamar>=x-1e-9, i===pts.length-1 ? eur0(x)+'+' : eur0(x))).join('');
+  let dica = '';
+  if (!fechado) {
+    if (q.prox) { const f = P.cats.map(c=>({c, x:premioFalta(v, evTrim, obj, ind, q.prox, c.id)})).filter(o=>o.x!=null).sort((a,b)=>a.x-b.x);
+      if (f.length) dica = `Faltam <b>${f1(f[0].x)} eventos Nova ${esc(f[0].c.nome)}</b>${f[1]?` (ou ${f1(f[1].x)} Nova ${esc(f[1].c.nome)})`:''} para chegar ao patamar de <b>${eur0(q.prox)}</b>.`; }
+    else if (q.patamar < (+P.teto||Infinity)) dica = `Já passou os ${eur0(pts.at(-1))}: a partir daqui cada evento Nova conta por inteiro, até ${eur0(P.teto)}.`;
+    else dica = `Atingiu o teto do prémio (${eur0(P.teto)}).`;
+  }
+  const cap = q.cats.filter(c=>c.at<1 && c.ev>0);
+  // prestação em pagamento neste RUN
+  let pg = '';
+  const pp = CM.dados.premioPg;
+  if (pp) { const vq = versaoDe(PLANO.versoes, trimMeses(pp.trim)[2]);
+    const gr = (CM.dados.runDet||[]).filter(x=>x.premio || (x.linhas||[]).some(l=>/prémio trimestral/i.test(l.tipo||'')) && !x.rpnId);
+    const qq = pp.pns ? premioCalc(vq, eventosDe(pp.pns), objDe(CM.uid, vq, trimMeses(pp.trim)[2]), ind) : null, runs = runsDoPremio(vq, pp.trim);
+    pg = `<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Em pagamento no RUN de ${mesTxt(CM.mes)}</div>
+      <div style="font-size:15px;margin:6px 0 2px">Prémio do <b>${trimTxt(pp.trim)}</b></div>
+      ${qq ? `<div class="cm-big" style="font-size:34px">${eur(gr.length ? gr.reduce((a,x)=>a+(+x.valor||0),0) : qq.prest(pp.k))} € <small>prestação ${pp.k} de ${pp.n}</small></div>
+        <p class="muted" style="font-size:13px;margin:6px 0 0">Prémio do trimestre: <b>${eur(qq.premio)} €</b> (apurado ${eur(qq.apurado)} €${qq.ind!==1?` · índice ${pctE(qq.ind)}`:''}) · ${qq.cats.map(c=>`Nova ${esc(c.nome)} ${f1(c.ev)} ev. (${pctE(c.at)})`).join(' · ')}.<br>
+        Prestações nos RUN de ${runs.map(m=>mesTxt(m).split(' ')[0]).join(', ')}. ${gr.length?'<b>Já gravado neste RUN.</b>':'Estimativa até a comissão do RUN ser gravada.'}</p>
+        ${qq.premio<=0?`<div class="cm-msg"><i aria-hidden="true">ℹ️</i><p>O ${trimTxt(pp.trim)} não chegou ao primeiro patamar (${eur0(pts[0])}).</p></div>`:''}` : `<p class="muted">Não foi possível ler os PN desse trimestre.</p>`}`;
+  }
+  return `<div class="card"><h2 style="margin-bottom:4px">Prémio trimestral</h2>
+    <div class="cm-two" style="align-items:start">
+      <div><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">${fechado?'Prémio apurado':'Em construção'} · ${trimTxt(tId)}${!fechado?' (até hoje)':''}</div>
+        <div class="cm-big" style="font-size:34px;margin:6px 0">${eur(q.premio)} € <small>${q.ind!==1?`patamar ${eur0(q.patamar)} × índice ${pctE(q.ind)}`:'patamar atingido'}</small></div>
+        <div style="margin:8px 0 4px">${escada}</div>
+        <table style="margin-top:6px"><thead><tr><th>Categoria</th><th class="num">Eventos Nova</th><th class="num">Objetivo Nova</th><th class="num">Atingimento</th><th class="num">Valor</th></tr></thead>
+        <tbody>${q.cats.map(c=>`<tr><td>${esc(c.nome)}</td><td class="num">${f1(c.ev)}</td><td class="num">${f1(c.ob)}</td><td class="num">${pctE(c.at)}</td><td class="num">${eur(c.val)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr class="tot"><td colspan="4">Apurado (eventos Nova × ${eur0(P.valorEvento)} × atingimento)</td><td class="num">${eur(q.apurado)}</td></tr></tfoot></table>
+        ${dica?`<div class="cm-msg ${q.prox?'push':'cel'}"><i aria-hidden="true">${q.prox?'🎯':'🏆'}</i><p>${dica}${cap.length&&q.prox?` Cada evento Nova também sobe o atingimento${cap.length===1?' de '+esc(cap[0].nome):''}, por isso vale a dobrar.`:''}</p></div>`:''}
+        ${fim?`<div class="cm-msg"><i aria-hidden="true">📈</i><p>Ao ritmo atual, fecha o trimestre com ~${eur0(fim.apurado)} apurados → prémio de <b>${eur0(fim.premio)}</b>.</p></div>`:''}
+      </div>
+      <div>${pg || `<p class="muted">Nenhum prémio trimestral em pagamento no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
+    </div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × % do objetivo trimestral Nova atingido (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} nos objetivos e no prémio.`:''}</p></div>`;
 }
 // mensagens do «treinador»: só regras e números do próprio vendedor (nada de valores Vodafone)
 function comCoach(o){
@@ -2746,7 +2828,7 @@ async function conciliarRun(R){
     const sn = await getDocs(query(col, where('mesRef','==',mp))), porV = {};
     sn.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN' && r.vendedorUid).forEach(r=>{ (porV[r.vendedorUid]=porV[r.vendedorUid]||[]).push(r); });
     const v = versaoDe(PLANO.versoes, mp), vf = fin ? versaoDe(fin.versoes||[FIN_DEF], mp) : {pct:[]};
-    Object.entries(porV).forEach(([uid, rs])=>{ const c=comCalc(v, eventosDe(rs), objDe(uid, v)); tier[uid+'|'+mp] = {pts:c.pts, esc:escTxt(v,c.i), pct: c.i>=0 ? (+vf.pct[c.i]||0) : 0, maj:c.maj, cumpridos:c.cumpridos}; });
+    Object.entries(porV).forEach(([uid, rs])=>{ const c=comCalc(v, eventosDe(rs), objDe(uid, v, mp)); tier[uid+'|'+mp] = {pts:c.pts, esc:escTxt(v,c.i), pct: c.i>=0 ? (+vf.pct[c.i]||0) : 0, maj:c.maj, cumpridos:c.cumpridos}; });
   }
   casa.forEach(x=>{ if (x.uid && x.mesPN && x.f!=='ag') { const t=tier[x.uid+'|'+x.mesPN]||{pct:0,maj:0,esc:0}; x.t=t; x.com=Math.round(x.l[RL.val]*t.pct/100*(1+t.maj)*100)/100; } else x.com=0; });
   return {casa, tier};
@@ -2756,7 +2838,7 @@ function verGravado(g, nome){
   const det = [...(g.detalhe||[])].sort((a,b)=>(b.valor||0)-(a.valor||0));
   modal(`<h2>${esc(nome)} · RUN de ${mesTxt(g.mes)}</h2><p class="muted" style="margin-top:0">${g.origem==='PHC'?'Importado do PHC (pago)':'Gravado na plataforma'} · ${det.length} PN · <b>${eur(g.valor)}</b></p>
     <div class="scroll" style="max-height:60vh"><table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Linhas</th><th class="num">Pago</th></tr></thead>
-    <tbody>${det.map(p=>`<tr class="click" data-pn="${esc(p.rpnId)}"><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num">${eur(p.valor)}</td></tr>`).join('')}</tbody></table></div>
+    <tbody>${det.map(p=>`<tr ${p.rpnId?`class="click" data-pn="${esc(p.rpnId)}"`:''}><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num">${eur(p.valor)}</td></tr>`).join('')}</tbody></table></div>
     <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{
       m.querySelector('#c').onclick=close; m.querySelectorAll('[data-pn]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.pn)); });
 }
@@ -2776,7 +2858,7 @@ function cmsVend(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e a conciliar com os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
     if (!R.existe) { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
-      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>${cardGrav}`;
+      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>${cardGrav}${premiosHTML(await premiosRun(CMS_MES).catch(()=>null))}`;
       box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
       ligaMes(()=>cmsVend(box)); return; }
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
@@ -2786,10 +2868,12 @@ function cmsVend(box){
     const sem = casa.filter(x=>!x.uid && x.f!=='ag'), ag = casa.filter(x=>x.f==='ag'), totRec = casa.reduce((a,x)=>a+x.l[RL.val],0);
     const lst = Object.values(pv).sort((a,b)=>b.com-a.com);
     const {grav, gravPor, nomeV, cardGrav} = await cardGravado(CMS_MES);
+    const PR = await premiosRun(CMS_MES).catch(e=>{ console.warn('prémio', e); return null; });
     box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
         ${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()?'':'-->'}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
       ${cardGrav}
+      ${premiosHTML(PR, gravPor)}
 ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN de ${mesTxt(CMS_MES)}</h2>
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão · %</th><th class="num">Linhas</th><th class="num">Recebido</th><th class="num">Charge-backs</th><th class="num">Comissão calculada</th><th class="num">Gravado</th><th class="num">Margem</th></tr></thead>
       <tbody>${lst.map(o=>`<tr><td><b>${esc(userNome(o.uid)||o.uid)}</b></td><td style="font-size:12px">${Object.entries(o.meses).sort().map(([mp,x])=>`${mp.split('-').reverse().join('/')} · ${x.t?.esc||'—'} · ${String(x.t?.pct||0).replace('.',',')} %${x.t?.maj?` +${Math.round(x.t.maj*100)} %`:''}`).join('<br>')}</td>
@@ -2808,17 +2892,44 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     if ($('#cms-g')) $('#cms-g').onclick = () => gravarComissoes(casa, lst).then(()=>cmsVend(box));
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
+// prémio trimestral de toda a equipa para um RUN (BO Financeiro / Master): uma leitura dos PN do trimestre
+async function premiosRun(mesRun){
+  await lerPlano(); const pg = premioEmPagamento(versaoDe(PLANO.versoes, mesRun), mesRun); if (!pg) return null;
+  const mq = trimMeses(pg.trim), vq = versaoDe(PLANO.versoes, mq[2]);
+  const sn = await getDocs(query(collection(db,'rpn'), where('mesRef','in',mq)));
+  const porV = {}; sn.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN' && r.vendedorUid).forEach(r=>(porV[r.vendedorUid]=porV[r.vendedorUid]||[]).push(r));
+  const uids = [...new Set([...vendedoresProj().map(x=>x.uid), ...Object.keys(porV)])].filter(u=>!['master','backoffice'].includes(S.users[u]?.perfil));
+  const lista = uids.map(uid=>{ const q=premioCalc(vq, eventosDe(porV[uid]||[]), objDe(uid, vq, mq[2]), indiceDe(uid)); return {uid, nome:userNome(uid)||uid, q, prest:q.prest(pg.k)}; })
+    .filter(x=>x.q.apurado>0 || x.q.premio>0).sort((a,b)=>b.q.apurado-a.q.apurado);
+  return {...pg, vq, lista, runs: runsDoPremio(vq, pg.trim)};
+}
+function premiosHTML(PR, gravPor){
+  if (!PR) return '';
+  const pctE = x => Math.round(x*100)+' %', cats = premioDe(PR.vq).cats;
+  return `<div class="card scroll"><h2>Prémio trimestral · ${trimTxt(PR.trim)} · prestação ${PR.k} de ${PR.n}</h2>
+    <p class="muted" style="font-size:12px;margin-top:0">Pago nos RUN de ${PR.runs.map(m=>mesTxt(m)).join(', ')}. Eventos Nova pela data do PN; objetivos e índice de cada vendedor (Plano e objetivos).</p>
+    <table><thead><tr><th>Vendedor</th>${cats.map(c=>`<th class="num">Nova ${esc(c.nome)}</th><th class="num">% obj.</th><th class="num">€</th>`).join('')}<th class="num">Apurado</th><th class="num">Patamar</th><th class="num">Índice</th><th class="num">Prémio</th><th class="num">Este RUN</th></tr></thead>
+    <tbody>${PR.lista.map(x=>`<tr><td><b>${esc(x.nome)}</b></td>${x.q.cats.map(c=>`<td class="num">${f1(c.ev)}</td><td class="num">${pctE(c.at)}</td><td class="num">${eur(c.val)}</td>`).join('')}<td class="num">${eur(x.q.apurado)}</td><td class="num">${x.q.patamar?eur(x.q.patamar):'—'}</td><td class="num">${pctE(x.q.ind)}</td><td class="num"><b>${x.q.premio?eur(x.q.premio):'—'}</b></td><td class="num"><b>${x.prest?eur(x.prest):'—'}</b></td></tr>`).join('')||`<tr><td colspan="${5+cats.length*3}" class="muted">Sem eventos Nova no trimestre.</td></tr>`}</tbody>
+    <tfoot><tr class="tot"><td colspan="${1+cats.length*3+3}">Total</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.premio,0))}</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.prest,0))}</td></tr></tfoot></table>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Ao gravar as comissões do mês, a prestação entra no valor de cada vendedor como uma linha «Prémio trimestral».</p></div>`;
+}
 // grava o que os vendedores podem ver: só € de comissão (nunca o recebido nem a %)
 async function gravarComissoes(casa, lst){
-  if (!confirm(`Gravar as comissões do RUN de ${mesTxt(CMS_MES)}?\n\nO ranking fica visível a toda a equipa e cada vendedor passa a ver a comissão de cada linha dos seus PN.`)) return;
+  if (!confirm(`Gravar as comissões do RUN de ${mesTxt(CMS_MES)}?\n\nO ranking fica visível a toda a equipa e cada vendedor passa a ver a comissão de cada linha dos seus PN.\nInclui a prestação do prémio trimestral que se paga neste RUN.`)) return;
   try {
     const b = writeBatch(db), mes = CMS_MES;
+    // prestação do prémio trimestral: entra no total de cada vendedor (mesmo sem linhas neste RUN)
+    const PR = await premiosRun(mes), prem = {};
+    (PR?.lista||[]).filter(x=>x.prest).forEach(x=>{ prem[x.uid] = {rpnId:'', premio:true, numero:'Prémio', cliente:`Prémio trimestral · ${trimTxt(PR.trim)}`, mesPN:'', valor:x.prest,
+      linhas:[{pos:'', cod:'', msisdn:'', plano:'', tipo:'Prémio trimestral', ativacao:'', desc:`Prémio do ${trimTxt(PR.trim)}: ${eur(x.q.premio)} € · prestação ${PR.k} de ${PR.n}`, eventos:0, valor:x.prest}]}; });
+    Object.keys(prem).filter(u=>!lst.some(o=>o.uid===u)).forEach(u=>lst.push({uid:u, com:0}));
+    lst.forEach(o=>{ o.com = (o.com||0) + (prem[o.uid]?.valor||0); });
     const rank = [...lst.map(o=>({uid:o.uid, nome:userNome(o.uid), cat:'Vendedor', valor:Math.round(o.com*100)/100})).filter(x=>S.users[x.uid]?.perfil!=='master'), ...await rankingBO(mes)];
     b.set(doc(db,'comissoesVend',mes), {mes, ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome});
     lst.forEach(o=>{ const pns={};
       casa.filter(x=>x.uid===o.uid && x.f!=='ag').forEach(x=>{ const p=pns[x.r.id]=pns[x.r.id]||{rpnId:x.r.id, numero:x.r.numero||'', cliente:x.r.cliente?.nome||'', mesPN:x.mesPN, valor:0, linhas:[]};
         p.valor=Math.round((p.valor+x.com)*100)/100; p.linhas.push({pos:x.l[RL.pos], cod:x.l[RL.cod], msisdn:x.l[RL.msisdn], plano:x.l[RL.ppn], tipo:FAMILIAS.find(f=>f[0]===x.f)[1], ativacao:x.l[RL.cri], desc:descVDF(x.l), eventos:x.l[RL.rlmcA]?Math.round(x.l[RL.rlmcA]/SCORE_BASE*1000)/1000:0, valor:x.com}); });
-      b.set(doc(db,'comissoesVend',mes+'_'+o.uid), {mes, uid:o.uid, valor:Math.round(o.com*100)/100, pns:Object.keys(pns), detalhe:Object.values(pns), gravadoEm:serverTimestamp()}); });
+      b.set(doc(db,'comissoesVend',mes+'_'+o.uid), {mes, uid:o.uid, valor:Math.round(o.com*100)/100, pns:Object.keys(pns), detalhe:[...Object.values(pns), ...(prem[o.uid]?[prem[o.uid]]:[])], gravadoEm:serverTimestamp()}); });
     b.set(doc(db,'runs',mes), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome}, {merge:true});
     await b.commit(); CMS_RUN=null; toast('Comissões gravadas.');
   } catch(e){ toast(errTxt(e), true); }
@@ -2831,7 +2942,9 @@ async function cmsPlano(box){
     const FIN = fs.exists() && fs.data().versoes?.length ? fs.data() : {versoes:[FIN_DEF]};
     const vs = [...PLANO.versoes].sort((a,b)=>a.desde<b.desde?-1:1), v = JSON.parse(JSON.stringify(vs.at(-1)));
     const vf = JSON.parse(JSON.stringify(versaoDe(FIN.versoes, v.desde)));
-    const vend = vendedoresProj(), inp=(id,val,w=70,step='any')=>`<input type="number" step="${step}" id="${id}" value="${val}" style="width:${w}px">`;
+    const OT = JSON.parse(JSON.stringify(PLANO.objTrim||{})), OT_LISTA = Array.from({length:10},(_,k)=>trimId(somaMeses(mesLocal(), 3-3*k)));
+    let OT_T = trimId(mesLocal());
+    const PR0 = premioDe(v), vend = vendedoresProj(), inp=(id,val,w=70,step='any')=>`<input type="number" step="${step}" id="${id}" value="${val}" style="width:${w}px">`;
     const eurEv = i => ({ref: (+vf.pct[i]||0)/100*(+vf.valorEvento.ref||0), nova: (+vf.pct[i]||0)/100*(+vf.valorEvento.nova||0)});
     box.innerHTML = `
       <div class="card"><h2>Plano em vigor desde ${v.desde.split('-').reverse().join('/')}</h2>
@@ -2845,14 +2958,31 @@ async function cmsPlano(box){
           ${NAT_COM.map(n=>`<div><label>Peso ${esc(n)}</label>${inp('pl-p-'+n.replace(/\W/g,''),v.pesos?.[n]??1,60)}</div>`).join('')}
         </div>
         <div class="row" style="gap:16px;flex-wrap:wrap;margin-top:10px">${v.maj.map((x,i)=>`<div><label>Com ${x.n} objetivos: majoração %</label><input type="hidden" id="pl-mn-${i}" value="${x.n}">${inp('pl-mp-'+i,x.pct)}</div>`).join('')}</div></div>
+      <div class="card"><h2>Prémio trimestral</h2>
+        <div class="row" style="gap:16px;flex-wrap:wrap">
+          <div><label>€ por evento Nova</label>${inp('pr-ve',PR0.valorEvento)}</div>
+          ${PR0.patamares.map((x,i)=>`<div><label>Patamar ${i+1} (€)</label>${inp('pr-pt-'+i,x,80)}</div>`).join('')}
+          <div><label>Teto (€)</label>${inp('pr-teto',PR0.teto,80)}</div>
+          <div><label>Prestações</label>${inp('pr-n',PR0.prestacoes,60,'1')}</div>
+          <div><label>1.ª prestação: meses após o fim do trimestre</label>${inp('pr-at',PR0.atraso,60,'1')}</div>
+        </div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % do objetivo Nova atingido (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Com ${PR0.atraso} meses, o prémio do 1.º trimestre paga-se nos RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}. O índice de cada vendedor (júnior/assistente 50 %) está na tabela de objetivos.</p></div>
       <div class="card scroll"><h2>Objetivos trimestrais</h2>
-        <table><thead><tr><th>Vendedor</th>${v.objetivos.map(o=>`<th class="num">${esc(o.nome)}</th>`).join('')}</tr></thead>
-        <tbody><tr class="tot"><td>Padrão (todos)</td>${v.objetivos.map(o=>`<td class="num">${inp('ob-d-'+o.id,o.trim)}</td>`).join('')}</tr>
-        ${vend.map(x=>`<tr><td>${esc(x.nome)}</td>${v.objetivos.map(o=>`<td class="num"><input type="number" step="any" data-ov="${x.uid}|${o.id}" value="${PLANO.objVend?.[x.uid]?.[o.id]??''}" placeholder="${o.trim}" style="width:70px"></td>`).join('')}</tr>`).join('')}</tbody></table>
-        <p class="muted" style="font-size:12px;margin-bottom:0">Vazio = usa o padrão. Objetivo do mês = ⅓ do trimestral. Para acrescentar uma métrica (ex.: Nova Smart Solutions) basta pedir: entra como mais uma coluna, sem mexer no resto.</p></div>
+        <table><thead><tr><th>Vendedor</th>${v.objetivos.map(o=>`<th class="num">${esc(o.nome)}</th>`).join('')}<th class="num" title="Júnior / assistente de loja: 50 %. Aplica-se aos objetivos e ao valor do prémio trimestral">Índice prémio %</th></tr></thead>
+        <tbody><tr class="tot"><td>Padrão (todos)</td>${v.objetivos.map(o=>`<td class="num">${inp('ob-d-'+o.id,o.trim)}</td>`).join('')}<td class="num muted">100</td></tr>
+        ${vend.map(x=>`<tr><td>${esc(x.nome)}</td>${v.objetivos.map(o=>`<td class="num"><input type="number" step="any" data-ov="${x.uid}|${o.id}" value="${PLANO.objVend?.[x.uid]?.[o.id]??''}" placeholder="${o.trim}" style="width:70px"></td>`).join('')}<td class="num"><input type="number" step="any" data-ov="${x.uid}|indice" value="${PLANO.objVend?.[x.uid]?.indice??''}" placeholder="100" style="width:70px"></td></tr>`).join('')}</tbody></table>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Vazio = usa o padrão. Objetivo do mês = ⅓ do trimestral. O índice só mexe no prémio trimestral: os objetivos Nova contam a ×índice e o prémio também (ex.: 50 % → objetivo 39 passa a 19,5 e um patamar de 85 € paga 42,50 €). Para acrescentar uma métrica (ex.: Nova Smart Solutions) basta pedir: entra como mais uma coluna, sem mexer no resto.</p></div>
+      <div class="card scroll"><div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Objetivos de um trimestre</h2><span class="sp"></span>
+        <div><label>Trimestre</label><select id="ot-t">${OT_LISTA.map(t=>`<option value="${t}" ${t===OT_T?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div></div>
+        <div id="ot-b" style="margin-top:8px"></div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Quando os objetivos de um vendedor mudam num trimestre, escreva-os aqui: valem só para esse trimestre (escalão, majoração e prémio trimestral). Vazio = usa os objetivos acima.</p></div>
       <div class="card"><div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
         <button class="btn pri" id="pl-s">Guardar</button><button class="btn" id="pl-c">Cancelar</button><span class="sp"></span>
         <div><label>Criar nova versão a partir de</label><input type="month" id="pl-nv" style="width:160px"></div><button class="btn" id="pl-nb" title="Os meses anteriores continuam com a versão atual">Guardar como nova versão</button></div></div>`;
+    const otLer = () => box.querySelectorAll('[data-ot]').forEach(e=>{ const [uid,id]=e.dataset.ot.split('|'), o=(OT[OT_T]=OT[OT_T]||{}); o[uid]=o[uid]||{}; if (e.value==='') delete o[uid][id]; else o[uid][id]=+e.value; if (!Object.keys(o[uid]).length) delete o[uid]; });
+    const otDraw = () => { const o = OT[OT_T]||{}; $('#ot-b').innerHTML = `<table><thead><tr><th>Vendedor</th>${v.objetivos.map(x=>`<th class="num">${esc(x.nome)}</th>`).join('')}</tr></thead>
+        <tbody>${vend.map(x=>`<tr><td>${esc(x.nome)}</td>${v.objetivos.map(ob=>`<td class="num"><input type="number" step="any" data-ot="${x.uid}|${ob.id}" value="${o[x.uid]?.[ob.id]??''}" placeholder="${PLANO.objVend?.[x.uid]?.[ob.id]??ob.trim}" style="width:70px"></td>`).join('')}</tr>`).join('')}</tbody></table>`; };
+    otDraw(); $('#ot-t').onchange = e => { otLer(); OT_T = e.target.value; otDraw(); };
     const ler = () => {
       const nv = JSON.parse(JSON.stringify(v)), nf = JSON.parse(JSON.stringify(vf)), num = id => parseFloat($('#'+id).value)||0;
       nf.valorEvento = {ref:num('pl-vr'), nova:num('pl-vn')};
@@ -2861,14 +2991,15 @@ async function cmsPlano(box){
       nv.pesos = Object.fromEntries(NAT_COM.map(n=>[n, num('pl-p-'+n.replace(/\W/g,''))]));
       nv.maj = v.maj.map((x,i)=>({n:+$('#pl-mn-'+i).value, pct:num('pl-mp-'+i)}));
       nv.objetivos = v.objetivos.map(o=>({...o, trim:num('ob-d-'+o.id)}));
+      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at')))};
       const ov = {}; box.querySelectorAll('[data-ov]').forEach(e=>{ const [uid,id]=e.dataset.ov.split('|'); if (e.value!=='') (ov[uid]=ov[uid]||{})[id]=+e.value; });
-      return {nv, nf, ov};
+      otLer(); return {nv, nf, ov};
     };
     box.querySelectorAll('[id^="pl-pct-"],#pl-vr,#pl-vn').forEach(e=>e.oninput=()=>{ const {nv}=ler(); nv.escaloes.forEach((x,i)=>{ $('#pl-er-'+i).textContent=eur(x.ref); $('#pl-en-'+i).textContent=eur(x.nova); }); });
     const gravar = async desde => { const {nv, nf, ov} = ler(); nv.desde = nf.desde = desde;
       const pv = [...PLANO.versoes.filter(x=>x.desde!==desde), nv].sort((a,b)=>a.desde<b.desde?-1:1), pf = [...FIN.versoes.filter(x=>x.desde!==desde), nf].sort((a,b)=>a.desde<b.desde?-1:1);
       try { const b = writeBatch(db);
-        b.set(doc(db,'config','planoVendedor'), {versoes:pv, objVend:ov, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
+        b.set(doc(db,'config','planoVendedor'), {versoes:pv, objVend:ov, objTrim:OT, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
         b.set(doc(db,'configFin','comissao'), {versoes:pf, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
         await b.commit(); PLANO=null; CM.dados=null; toast('Plano guardado.'); cmsPlano(box); } catch(e){ toast(errTxt(e), true); } };
     $('#pl-s').onclick = () => gravar(v.desde);
@@ -2906,7 +3037,7 @@ async function tierVend(uid, mes, v){
   let rs = null;
   if (CM.dados && CM.uid===uid) { const T=trimDe(CM.mes).meses; if (T.includes(mes) && mes<=CM.mes) rs = CM.dados.pns.filter(r=>r.mesRef===mes); }   // já lidos pelo painel
   if (!rs) rs = (await getDocs(query(collection(db,'rpn'), where('vendedorUid','==',uid), where('mesRef','==',mes)))).docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.estado==='PN');
-  return (TIER_MEM[k] = comCalc(v, eventosDe(rs), objDe(uid, v)));
+  return (TIER_MEM[k] = comCalc(v, eventosDe(rs), objDe(uid, v, mes)));
 }
 async function pagosPN(r){
   if (CVPN_MEM[r.id]) return CVPN_MEM[r.id];
