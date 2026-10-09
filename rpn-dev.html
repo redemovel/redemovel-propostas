@@ -3116,19 +3116,22 @@ async function agenteRecalcular(t){
   await setDoc(doc(db,'agente',t), d); return d;
 }
 // velocímetro: 0–150 %, vermelho até 90 %, amarelo 90–100 %, verde acima de 100 %
-function gaugeSVG(pct, titulo, sub){
+function gaugeSVG(pct, titulo, sub, real){
+  // real != null → trimestre em curso: o ponteiro mostra a PROJEÇÃO ao ritmo atual (pct) e por baixo o realizado
   const cx=100, cy=90, R=74, W=16, MAX=150, ang = p => Math.PI*(1-Math.min(MAX,Math.max(0,p))/MAX);
   const pt = (p, r) => [cx + r*Math.cos(ang(p)), cy - r*Math.sin(ang(p))];
   const arco = (a,b,cor) => { const [x1,y1]=pt(a,R), [x2,y2]=pt(b,R); return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${cor}" stroke-width="${W}"/>`; };
   const [nx,ny]=pt(pct, R-8), [tx,ty]=pt(90, R+12), cor = pct>=100?'#2e7d32':pct>=90?'#b58900':'#c00000';
-  return `<div style="text-align:center;min-width:0"><svg viewBox="0 0 200 142" style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${Math.round(pct)} %">
+  const proj = real!=null, txt = proj ? (pct>MAX ? `> ${MAX} %` : `~${Math.round(pct)} %`) : `${Math.round(pct)} %`;
+  return `<div style="text-align:center;min-width:0"><svg viewBox="0 0 200 142" style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${proj?'projeção ':''}${Math.round(pct)} %">
     ${arco(0,90,'#e00000')}${arco(90,100,'#f5b400')}${arco(100,MAX,'#9bbb59')}
     <text x="${cx-R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">0</text><text x="${cx+R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">150</text>
     <text x="${tx.toFixed(1)}" y="${(ty+2).toFixed(1)}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">90</text>
     <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#111" stroke-width="3.5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="6" fill="#111"/>
-    <text x="${cx}" y="${cy+30}" text-anchor="middle" style="font:800 20px system-ui;fill:${cor}">${Math.round(pct)} %</text>
+    <text x="${cx}" y="${cy+30}" text-anchor="middle" style="font:800 20px system-ui;fill:${cor}">${txt}</text>
     <text x="${cx}" y="${cy+48}" text-anchor="middle" style="font:12px system-ui;fill:#6b6b70">${esc(sub)}</text></svg>
-    <div style="font-weight:700;margin-top:-2px">${esc(titulo)}</div></div>`;
+    <div style="font-weight:700;margin-top:-2px">${esc(titulo)}</div>
+    ${proj?`<div style="font-size:12px;color:#6b6b70;margin-top:2px">ao ritmo atual fecha em ${txt} · feito ${Math.round(real)} %</div>`:''}</div>`;
 }
 function agenteHTML(A, trim){
   const o = A.obj[trim]||{}, eu = (A.euros||{})[trim]||{}, r = A.real[trim]?.ev||{}, temObj = AG_MET.some(m=>+o[m.id]>0), mst = isMaster();
@@ -3139,12 +3142,12 @@ function agenteHTML(A, trim){
   if (!temObj) return `<p class="muted" style="margin:0">Ainda não há objetivos Vodafone para o ${trimTxt(trim)}.${mst?' Defina-os em Comissionamento › Objetivos Vodafone.':''}</p>`;
   const L = AG_MET.map(m=>{ const oe=+o[m.id]||0, re=m.nat.reduce((a,n)=>a+(r[n]||0),0), pc=oe?re/oe*100:0, y=ytd(m.id), proj = dec>0&&dec<100 ? re/dec*100 : re; return {m, oe, re, pc, y, pj: oe&&dec<100 ? proj/oe*100 : null}; });
   const curto = {NM:'Nova Móvel (RLMC 1)', RM:'Ref. Móvel (RLMC 2)', NF:'Nova Fixo (RLMC 3)', RF:'Ref. Fixo (RLMC 4)', SS:'Nova Smart (RLMC 5)'};
-  const gauges = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 8px;margin-bottom:12px">${L.filter(x=>x.oe>0).map(x=>gaugeSVG(x.pc, curto[x.m.id], `${Math.round(x.re)} de ${Math.round(x.oe)} eventos`)).join('')}</div>`;
+  const gauges = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 8px;margin-bottom:12px">${L.filter(x=>x.oe>0).map(x=>(x.pj!=null ? gaugeSVG(x.pj, curto[x.m.id], `${Math.round(x.re)} de ${Math.round(x.oe)} eventos`, x.pc) : gaugeSVG(x.pc, curto[x.m.id], `${Math.round(x.re)} de ${Math.round(x.oe)} eventos`))).join('')}</div>`;
   const rows = L.map(x=>`<tr><td><b>${esc(x.m.nome)}</b></td><td class="num">${x.oe?Math.round(x.oe):'—'}</td><td class="num">${Math.round(x.re)}</td>
       <td style="min-width:150px"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:90px;position:relative;height:6px;background:#ece9ea;border-radius:3px"><span style="display:block;height:100%;border-radius:3px;width:${Math.min(100,x.pc)}%;background:${cor(x.pc)}"></span><i style="position:absolute;left:${dec}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${cor(x.pc)};min-width:48px;text-align:right">${x.oe?Math.round(x.pc)+' %':'—'}</b></div></td>
       <td class="num" title="Ao ritmo atual, no fim do trimestre">${x.pj!=null?`~${Math.round(x.pj)} %`:'—'}</td><td class="num">${x.y==null?'—':Math.round(x.y)+' %'}</td></tr>`).join('');
   return gauges + `<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra). Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra).${dec<100?' Os velocímetros mostram a projeção para o fim do trimestre ao ritmo atual; o «feito» é o atingimento até hoje.':''} Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>`;
 }
 async function desenharAgente(box, mes){
   try { const t = trimId(mes||mesLocal()), A = await agenteDados(t); box.innerHTML = agenteHTML(A, t); }
