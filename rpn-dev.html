@@ -2711,24 +2711,50 @@ async function conciliarRun(R){
   casa.forEach(x=>{ if (x.uid && x.mesPN && x.f!=='ag') { const t=tier[x.uid+'|'+x.mesPN]||{pct:0,maj:0,esc:0}; x.t=t; x.com=Math.round(x.l[RL.val]*t.pct/100*(1+t.maj)*100)/100; } else x.com=0; });
   return {casa, tier};
 }
+const CMS_RUN_RANK = (snap, uid) => { const r=snap.docs.find(d=>!d.data().uid)?.data()?.ranking||[]; return (r.find(x=>x.uid===uid)||{}).nome||''; };
+function verGravado(g, nome){
+  const det = [...(g.detalhe||[])].sort((a,b)=>(b.valor||0)-(a.valor||0));
+  modal(`<h2>${esc(nome)} · RUN de ${mesTxt(g.mes)}</h2><p class="muted" style="margin-top:0">${g.origem==='PHC'?'Importado do PHC (pago)':'Gravado na plataforma'} · ${det.length} PN · <b>${eur(g.valor)}</b></p>
+    <div class="scroll" style="max-height:60vh"><table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Linhas</th><th class="num">Pago</th></tr></thead>
+    <tbody>${det.map(p=>`<tr class="click" data-pn="${esc(p.rpnId)}"><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num">${eur(p.valor)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{
+      m.querySelector('#c').onclick=close; m.querySelectorAll('[data-pn]').forEach(t=>t.onclick=()=>{ close(); go('#/rpn/'+t.dataset.pn); }); });
+}
+async function cardGravado(mes){
+    // o que está gravado para este RUN (importado do PHC ou gravado na plataforma): é o que os vendedores veem
+    const gS = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
+    const grav = gS.docs.map(d=>({id:d.id,...d.data()})).filter(d=>d.uid).sort((a,b)=>(b.valor||0)-(a.valor||0)), gravPor = Object.fromEntries(grav.map(g=>[g.uid,g]));
+    const nomeV = uid => userNome(uid) || (CMS_RUN_RANK(gS, uid)) || uid;
+    const cardGrav = `<div class="card scroll"><h2>Comissões gravadas · RUN de ${mesTxt(mes)}</h2>
+      <p class="muted" style="font-size:12px;margin-top:0">${grav.length ? (grav.some(g=>g.origem==='PHC') ? 'Valores importados do PHC: o que foi efetivamente pago a cada vendedor.' : 'Valores gravados na plataforma.') + ' É o que cada vendedor vê no ranking e no separador «Comissão» dos seus PN.' : 'Ainda não há comissões gravadas para este RUN.'}</p>
+      ${grav.length?`<table><thead><tr><th>Vendedor</th><th>Origem</th><th class="num">PN</th><th class="num">Linhas</th><th class="num">Pago</th><th></th></tr></thead>
+      <tbody>${grav.map(g=>`<tr><td><b>${esc(nomeV(g.uid))}</b></td><td>${g.origem==='PHC'?'<span class="badge">PHC</span>':'Plataforma'}</td><td class="num">${(g.detalhe||[]).length}</td><td class="num">${(g.detalhe||[]).reduce((a,p)=>a+(p.linhas||[]).length,0)}</td><td class="num"><b>${eur(g.valor)}</b></td><td><button class="btn sm" data-gv="${esc(g.id)}">Ver PN</button></td></tr>`).join('')}</tbody>
+      <tfoot><tr class="tot"><td colspan="4">Total pago</td><td class="num">${eur(grav.reduce((a,g)=>a+(+g.valor||0),0))}</td><td></td></tr></tfoot></table>`:''}</div>`;
+  return {grav, gravPor, nomeV, cardGrav};
+}
 function cmsVend(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e a conciliar com os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
-    if (!R.existe) { box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>`; ligaMes(()=>cmsVend(box)); return; }
+    if (!R.existe) { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
+      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>${cardGrav}`;
+      box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
+      ligaMes(()=>cmsVend(box)); return; }
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
     const {casa} = await conciliarRun(R);
     const pv = {}; casa.forEach(x=>{ if (!x.uid || x.f==='ag') return; const o=pv[x.uid]=pv[x.uid]||{uid:x.uid, rec:0, com:0, n:0, cb:0, meses:{}}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; if (x.l[RL.val]<0) o.cb+=x.com;
       const mm=o.meses[x.mesPN]=o.meses[x.mesPN]||{rec:0,com:0,t:x.t}; mm.rec+=x.l[RL.val]; mm.com+=x.com; });
     const sem = casa.filter(x=>!x.uid && x.f!=='ag'), ag = casa.filter(x=>x.f==='ag'), totRec = casa.reduce((a,x)=>a+x.l[RL.val],0);
     const lst = Object.values(pv).sort((a,b)=>b.com-a.com);
+    const {grav, gravPor, nomeV, cardGrav} = await cardGravado(CMS_MES);
     box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
         ${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()?'':'-->'}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
-${isMaster()?`      <div class="card scroll"><h2>Comissões a pagar · RUN de ${mesTxt(CMS_MES)}</h2>
-      <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão · %</th><th class="num">Linhas</th><th class="num">Recebido</th><th class="num">Charge-backs</th><th class="num">Comissão</th><th class="num">Margem</th></tr></thead>
+      ${cardGrav}
+${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN de ${mesTxt(CMS_MES)}</h2>
+      <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão · %</th><th class="num">Linhas</th><th class="num">Recebido</th><th class="num">Charge-backs</th><th class="num">Comissão calculada</th><th class="num">Gravado</th><th class="num">Margem</th></tr></thead>
       <tbody>${lst.map(o=>`<tr><td><b>${esc(userNome(o.uid)||o.uid)}</b></td><td style="font-size:12px">${Object.entries(o.meses).sort().map(([mp,x])=>`${mp.split('-').reverse().join('/')} · ${x.t?.esc||'—'} · ${String(x.t?.pct||0).replace('.',',')} %${x.t?.maj?` +${Math.round(x.t.maj*100)} %`:''}`).join('<br>')}</td>
-        <td class="num">${o.n}</td><td class="num">${eur(o.rec)}</td><td class="num">${eur(o.cb)}</td><td class="num"><b>${eur(o.com)}</b></td><td class="num">${eur(o.rec-o.com)}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nenhuma linha imputada.</td></tr>'}</tbody>
-      <tfoot><tr class="tot"><td colspan="3">Total imputado</td><td class="num">${eur(lst.reduce((a,o)=>a+o.rec,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.cb,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.com,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.rec-o.com,0))}</td></tr></tfoot></table>
+        <td class="num">${o.n}</td><td class="num">${eur(o.rec)}</td><td class="num">${eur(o.cb)}</td><td class="num"><b>${eur(o.com)}</b></td><td class="num">${gravPor[o.uid]?eur(gravPor[o.uid].valor):'—'}</td><td class="num">${eur(o.rec-o.com)}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma linha imputada.</td></tr>'}</tbody>
+      <tfoot><tr class="tot"><td colspan="3">Total imputado</td><td class="num">${eur(lst.reduce((a,o)=>a+o.rec,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.cb,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.com,0))}</td><td class="num">${grav.length?eur(grav.reduce((a,g)=>a+(+g.valor||0),0)):'—'}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.rec-o.com,0))}</td></tr></tfoot></table>
       <p class="muted" style="font-size:12px;margin-bottom:0">RUN total ${eur(totRec)} · agência (sem POS) ${eur(ag.reduce((a,x)=>a+x.l[RL.val],0))} · por imputar ${eur(sem.reduce((a,x)=>a+x.l[RL.val],0))}.</p></div>
 `:`      <div class="card scroll"><h2>Conciliação · RUN de ${mesTxt(CMS_MES)}</h2>
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão</th><th class="num">Linhas imputadas</th></tr></thead>
@@ -2738,6 +2764,7 @@ ${isMaster()?`      <div class="card scroll"><h2>Comissões a pagar · RUN de ${
       <table><thead><tr><th>Código</th><th>POS</th><th>NIF</th><th>MSISDN</th><th>Plano</th><th>Ativação</th><th>SFID → vendedor</th><th class="num">Valor</th></tr></thead>
       <tbody>${sem.sort((a,b)=>Math.abs(b.l[RL.val])-Math.abs(a.l[RL.val])).slice(0,300).map(x=>`<tr><td>${esc(x.l[RL.cod])}</td><td>${esc(x.l[RL.pos])}</td><td>${esc(x.l[RL.nif])}</td><td>${esc(x.l[RL.msisdn])}</td><td>${esc(x.l[RL.ppn])}</td><td>${fmtD(x.l[RL.cri])}</td><td>${esc(x.l[RL.sfid])}${x.sfidUid?' → '+esc(userNome(x.sfidUid)):''}</td><td class="num">${eur(x.l[RL.val])}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Tudo imputado.</td></tr>'}</tbody></table></div>`;
     ligaMes(()=>cmsVend(box));
+    box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
     if ($('#cms-g')) $('#cms-g').onclick = () => gravarComissoes(casa, lst).then(()=>cmsVend(box));
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
