@@ -2868,7 +2868,7 @@ function lerTabela(txt){   // texto copiado do SSMS (tabulações) ou CSV com ; 
   const h = ls[0].split(sep).map(x=>x.trim().replace(/^"|"$/g,'').toLowerCase());
   return ls.slice(1).map(l=>{ const c=l.split(sep); const o={}; h.forEach((k,i)=>o[k]=String(c[i]??'').trim().replace(/^"|"$/g,'')); return o; });
 }
-const codDaDesc = d => (String(d||'').toUpperCase().match(/\b(CTRA[A-Z_]*|CR_[A-Z_]+|PRM_[A-Z_]+|CT_[A-Z_]+|AJ_[A-Z_]+|IC_[A-Z_]+)\b/)||[])[1] || 'PHC';
+const codDaDesc = d => (String(d||'').toUpperCase().match(/(?:^|\s)(CTRA[A-Z_]*|CR_[A-Z_]+|PRM_[A-Z_]+|CT_[A-Z_]+|AJ_[A-Z_]+|IC_[A-Z_]+)(?=\s|$)/)||[])[1] || 'PHC';
 function cmsHist(box){
   if (!isMaster()) { box.innerHTML='<div class="card muted">Só o Master importa o histórico.</div>'; return; }
   box.innerHTML = `<div class="card"><h2>Histórico de comissões do PHC (36 RUN)</h2>
@@ -2884,8 +2884,8 @@ function cmsHist(box){
     if (fa && !(A[0] && 'run' in A[0] && 'valor' in A[0] && 'pos' in A[0])) return toast('O ficheiro A não tem as colunas run, pos, valor… Confirme que é o resultado da consulta A.', true);
     if (fb && !(B[0] && 'run' in B[0] && 'pnstamp' in B[0] && 'valor' in B[0])) return toast('O ficheiro B não tem as colunas run, pnstamp, valor… Confirme que é o resultado da consulta B.', true);
     const mesesA = {}, mesesB = {};
-    A.forEach(o=>{ const m=runMes(o.run); if (!m) return; const d=String(o.descricao||''); const rl=(d.match(/RLMC\s+([\d.,]+)/i)||[])[1];
-      (mesesA[m]=mesesA[m]||[]).push([codDaDesc(d), String(o.pos||'').toUpperCase(), '', o.nif||'', String(o.msisdn||'').replace(/\.0+$/,''), '', o.produto||d.slice(0,80), /REFIDELIZ/i.test(d)?'REFIDELIZACAO':/NOVA|ACTIV|ATIV/i.test(d)?'NOVA':'', 0, '', (o.ativacao||'').slice(0,10), '',
+    A.forEach(o=>{ const m=runMes(o.run); if (!m) return; const d=String(o.descricao||''), pr=String(o.produto||''); const rl=(d.match(/RLMC\s+([\d.,]+)/i)||[])[1];
+      (mesesA[m]=mesesA[m]||[]).push([codDaDesc(pr+' '+d), String(o.pos||'').toUpperCase(), '', o.nif||'', String(o.msisdn||'').replace(/\.0+$/,''), '', (d.replace(/^\S+\s+\d+\s+/,'').replace(/\s+RLMC.*$/i,'')||pr).slice(0,80), /REFIDELIZ/i.test(pr)?'REFIDELIZACAO':pr.split(/\s+(?=CTRA|CR_|PRM_|CT_|AJ_|IC_)/)[0]||'', 0, '', (o.ativacao||'').slice(0,10), '',
         rl?numX(rl):0, Math.round(numX(o.valor)*100)/100, ((d.match(/LINHA\s+(GOLD|SILVER|BRONZE|ESTANHO)/i)||[])[1]||'').toUpperCase(), 0, 0, String(o.vendedor||''), o.pnstamp||'']); });
     B.forEach(o=>{ const m=runMes(o.run); if (m) (mesesB[m]=mesesB[m]||[]).push(o); });
     const existentes = {}; for (const m of Object.keys(mesesA)) { const s=await getDoc(doc(db,'runs',m)); if (s.exists()) existentes[m]=s.data(); }
