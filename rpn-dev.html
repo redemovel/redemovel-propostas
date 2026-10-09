@@ -3099,12 +3099,14 @@ async function agenteDados(trim){
   if (AG_MEM && AG_MEM.trim===trim && Date.now()-AG_MEM.em<300000) return AG_MEM;
   const [y] = trim.split('-T').map(Number), tAno = [1,2,3,4].map(t=>y+'-T'+t).filter(t=>t<=trim);
   const [oS, ...rS] = await Promise.all([getDoc(doc(db,'config','agenteObjetivos')), ...tAno.map(t=>getDoc(doc(db,'agente',t)).catch(()=>null))]);
-  const obj = oS.exists() ? (oS.data().trimestres||{}) : {}, real = {};
+  // público: objetivos em EVENTOS (config/agenteObjetivos.eventos); os € ficam em configFin (só o Master)
+  const obj = oS.exists() ? (oS.data().eventos||{}) : {}, real = {};
+  let euros = {}; if (isMaster()) { try { const f=await getDoc(doc(db,'configFin','agenteObjetivos')); euros = f.exists() ? (f.data().trimestres||{}) : {}; } catch(_){} }
   tAno.forEach((t,i)=>{ if (rS[i]?.exists()) real[t]=rS[i].data(); });
   // staff: recalcula o trimestre em curso (1×/dia) e os anteriores do ano que faltem
   if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && String(r.dia||'') < hojeLocal()) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
     if (velho) { try { real[t] = await agenteRecalcular(t); } catch(e){ console.warn('agente', e); } } }
-  return (AG_MEM = {trim, obj, real, tAno, em:Date.now()});
+  return (AG_MEM = {trim, obj, euros, real, tAno, em:Date.now()});
 }
 async function agenteRecalcular(t){
   const meses = trimMeses(t).filter(m=>m<=mesLocal());
@@ -3113,19 +3115,36 @@ async function agenteRecalcular(t){
   const d = {trim:t, ev, dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
   await setDoc(doc(db,'agente',t), d); return d;
 }
+// velocímetro: 0–150 %, vermelho até 90 %, amarelo 90–100 %, verde acima de 100 %
+function gaugeSVG(pct, titulo, sub){
+  const cx=100, cy=90, R=74, W=16, MAX=150, ang = p => Math.PI*(1-Math.min(MAX,Math.max(0,p))/MAX);
+  const pt = (p, r) => [cx + r*Math.cos(ang(p)), cy - r*Math.sin(ang(p))];
+  const arco = (a,b,cor) => { const [x1,y1]=pt(a,R), [x2,y2]=pt(b,R); return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${cor}" stroke-width="${W}"/>`; };
+  const [nx,ny]=pt(pct, R-8), [tx,ty]=pt(90, R+12), cor = pct>=100?'#2e7d32':pct>=90?'#b58900':'#c00000';
+  return `<div style="text-align:center;min-width:0"><svg viewBox="0 0 200 142" style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${Math.round(pct)} %">
+    ${arco(0,90,'#e00000')}${arco(90,100,'#f5b400')}${arco(100,MAX,'#9bbb59')}
+    <text x="${cx-R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">0</text><text x="${cx+R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">150</text>
+    <text x="${tx.toFixed(1)}" y="${(ty+2).toFixed(1)}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">90</text>
+    <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#111" stroke-width="3.5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="6" fill="#111"/>
+    <text x="${cx}" y="${cy+30}" text-anchor="middle" style="font:800 20px system-ui;fill:${cor}">${Math.round(pct)} %</text>
+    <text x="${cx}" y="${cy+48}" text-anchor="middle" style="font:12px system-ui;fill:#6b6b70">${esc(sub)}</text></svg>
+    <div style="font-weight:700;margin-top:-2px">${esc(titulo)}</div></div>`;
+}
 function agenteHTML(A, trim){
-  const o = A.obj[trim]||{}, r = A.real[trim]?.ev||{}, temObj = AG_MET.some(m=>+o[m.id]>0);
-  const ytd = id => { let ob=0, re=0; A.tAno.forEach(t=>{ const oo=+(A.obj[t]||{})[id]||0; if (oo>0) { ob+=oo/SCORE_BASE; re+=AG_MET.find(m=>m.id===id).nat.reduce((a,n)=>a+((A.real[t]?.ev||{})[n]||0),0); } }); return ob ? re/ob*100 : null; };
+  const o = A.obj[trim]||{}, eu = (A.euros||{})[trim]||{}, r = A.real[trim]?.ev||{}, temObj = AG_MET.some(m=>+o[m.id]>0), mst = isMaster();
+  const ytd = id => { let ob=0, re=0; A.tAno.forEach(t=>{ const oo=+(A.obj[t]||{})[id]||0; if (oo>0) { ob+=oo; re+=AG_MET.find(m=>m.id===id).nat.reduce((a,n)=>a+((A.real[t]?.ev||{})[n]||0),0); } }); return ob ? re/ob*100 : null; };
   const meses = trimMeses(trim), duT = meses.reduce((a,m)=>a+diasUteis(m),0), duF = meses.reduce((a,m)=>a+(m<mesLocal()?diasUteis(m):m===mesLocal()?diasUteis(m,hojeLocal()):0),0);
   const dec = duT ? Math.min(100, duF/duT*100) : 100;
-  const cor = p => p>=100?'var(--ok)':p>=90?'#65a30d':p>=Math.min(dec,90)*0.9?'var(--warn)':'var(--red-d)';
-  if (!temObj) return `<p class="muted" style="margin:0">Ainda não há objetivos Vodafone para o ${trimTxt(trim)}.${isMaster()?' Defina-os em Comissionamento › Objetivos Vodafone.':''}</p>`;
-  const rows = AG_MET.map(m=>{ const ob=+o[m.id]||0, oe=ob/SCORE_BASE, re=m.nat.reduce((a,n)=>a+(r[n]||0),0), pc=oe?re/oe*100:0, y=ytd(m.id), proj = dec>0&&dec<100 ? re/dec*100 : re;
-    return `<tr><td><b>${esc(m.nome)}</b></td><td class="num">${ob?eur(ob):'—'}</td><td class="num">${ob?Math.round(oe):'—'}</td><td class="num">${Math.round(re)}</td>
-      <td style="min-width:150px"><div style="display:flex;align-items:center;gap:8px"><div class="cm-bar" style="flex:1;position:relative"><span style="width:${Math.min(100,pc)}%;background:${cor(pc)}"></span><i style="position:absolute;left:${dec}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${cor(pc)};min-width:48px;text-align:right">${ob?Math.round(pc)+' %':'—'}</b></div></td>
-      <td class="num" title="Ao ritmo atual, no fim do trimestre">${ob&&dec<100?`~${Math.round(oe?proj/oe*100:0)} %`:'—'}</td><td class="num">${y==null?'—':Math.round(y)+' %'}</td></tr>`; }).join('');
-  return `<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo RLMC</th><th class="num">Eventos</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra). Eventos do objetivo = RLMC ÷ 22,50. Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>`;
+  const cor = p => p>=100?'var(--ok)':p>=90?'#b58900':'var(--red-d)';
+  if (!temObj) return `<p class="muted" style="margin:0">Ainda não há objetivos Vodafone para o ${trimTxt(trim)}.${mst?' Defina-os em Comissionamento › Objetivos Vodafone.':''}</p>`;
+  const L = AG_MET.map(m=>{ const oe=+o[m.id]||0, re=m.nat.reduce((a,n)=>a+(r[n]||0),0), pc=oe?re/oe*100:0, y=ytd(m.id), proj = dec>0&&dec<100 ? re/dec*100 : re; return {m, oe, re, pc, y, pj: oe&&dec<100 ? proj/oe*100 : null}; });
+  const curto = {NM:'Nova Móvel (RLMC 1)', RM:'Ref. Móvel (RLMC 2)', NF:'Nova Fixo (RLMC 3)', RF:'Ref. Fixo (RLMC 4)', SS:'Nova Smart (RLMC 5)'};
+  const gauges = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 8px;margin-bottom:12px">${L.filter(x=>x.oe>0).map(x=>gaugeSVG(x.pc, curto[x.m.id], `${Math.round(x.re)} de ${Math.round(x.oe)} eventos`)).join('')}</div>`;
+  const rows = L.map(x=>`<tr><td><b>${esc(x.m.nome)}</b></td>${mst?`<td class="num">${+eu[x.m.id]?eur(+eu[x.m.id]):'—'}</td>`:''}<td class="num">${x.oe?Math.round(x.oe):'—'}</td><td class="num">${Math.round(x.re)}</td>
+      <td style="min-width:150px"><div style="display:flex;align-items:center;gap:8px"><div class="cm-bar" style="flex:1;min-width:90px;position:relative"><span style="width:${Math.min(100,x.pc)}%;background:${cor(x.pc)}"></span><i style="position:absolute;left:${dec}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${cor(x.pc)};min-width:48px;text-align:right">${x.oe?Math.round(x.pc)+' %':'—'}</b></div></td>
+      <td class="num" title="Ao ritmo atual, no fim do trimestre">${x.pj!=null?`~${Math.round(x.pj)} %`:'—'}</td><td class="num">${x.y==null?'—':Math.round(x.y)+' %'}</td></tr>`).join('');
+  return gauges + `<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th>${mst?'<th class="num">Objetivo RLMC 🔒</th>':''}<th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra). Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>`;
 }
 async function desenharAgente(box, mes){
   try { const t = trimId(mes||mesLocal()), A = await agenteDados(t); box.innerHTML = agenteHTML(A, t); }
@@ -3136,18 +3155,23 @@ let AG_TRIM = null;
 async function cmsAgente(box){
   if (!AG_TRIM) AG_TRIM = trimId(mesLocal());
   box.innerHTML = `<div class="card muted">A carregar…</div>`;
-  const oS = await getDoc(doc(db,'config','agenteObjetivos')); const tri = oS.exists() ? (oS.data().trimestres||{}) : {}, o = tri[AG_TRIM]||{};
+  const fS = isMaster() ? await getDoc(doc(db,'configFin','agenteObjetivos')).catch(()=>null) : null, pS = await getDoc(doc(db,'config','agenteObjetivos'));
+  const tri = fS?.exists() ? (fS.data().trimestres||{}) : {}, evs = pS.exists() ? (pS.data().eventos||{}) : {}, o = tri[AG_TRIM]||{};
   const [y,t] = AG_TRIM.split('-T').map(Number), opts=[]; for (let k=-6;k<=2;k++){ const d=new Date(y,(t-1)*3+k*3,1); const id=trimId(isoL(d).slice(0,7)); if(!opts.includes(id)) opts.push(id); }
   box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">
       <div><label>Trimestre</label><select id="ag-t">${opts.map(x=>`<option value="${x}" ${x===AG_TRIM?'selected':''}>${trimTxt(x)}</option>`).join('')}</select></div>
-      ${AG_MET.map(m=>`<div><label>${esc(m.nome)} (RLMC €)</label><input type="number" step="any" id="ag-${m.id}" value="${o[m.id]??''}" style="width:130px"></div>`).join('')}
-      <button class="btn pri" id="ag-s">Guardar</button><button class="btn" id="ag-r" title="Volta a somar os eventos dos PN deste trimestre">⟳ Recalcular realizado</button></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Objetivos acordados com a Vodafone em RLMC €. Toda a equipa vê este quadro no painel de comissões.</p></div>
+      ${isMaster()?AG_MET.map(m=>`<div><label>${esc(m.nome)} (RLMC €) 🔒</label><input type="number" step="any" id="ag-${m.id}" value="${o[m.id]??''}" style="width:130px"></div>`).join(''):''}
+      ${isMaster()?'<button class="btn pri" id="ag-s">Guardar</button>':''}<button class="btn" id="ag-r" title="Volta a somar os eventos dos PN deste trimestre">⟳ Recalcular realizado</button></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Objetivos acordados com a Vodafone em RLMC € (só o Master os vê). A equipa vê os objetivos convertidos em eventos (RLMC ÷ 22,50) no painel de comissões.</p></div>
     <div class="card"><h2>Performance da Redemóvel · ${trimTxt(AG_TRIM)}</h2><div id="ag-v" class="muted">A calcular…</div></div>`;
   $('#ag-t').onchange = e => { AG_TRIM = e.target.value; cmsAgente(box); };
-  $('#ag-s').onclick = async () => { const n={}; AG_MET.forEach(m=>{ const x=$('#ag-'+m.id).value; if (x!=='') n[m.id]=parseFloat(x)||0; });
+  if ($('#ag-s')) $('#ag-s').onclick = async () => { const n={}; AG_MET.forEach(m=>{ const x=$('#ag-'+m.id).value; if (x!=='') n[m.id]=parseFloat(x)||0; });
     if (!isMaster()) return toast('Só o Master define os objetivos.', true);
-    try { await setDoc(doc(db,'config','agenteObjetivos'), {trimestres:{...tri, [AG_TRIM]:n}, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome}); AG_MEM=null; toast('Objetivos guardados.'); cmsAgente(box); } catch(e){ toast(errTxt(e), true); } };
+    const ev = Object.fromEntries(Object.entries(n).map(([k,x])=>[k, Math.round(x/SCORE_BASE*100)/100]));
+    try { const b=writeBatch(db);
+      b.set(doc(db,'configFin','agenteObjetivos'), {trimestres:{...tri, [AG_TRIM]:n}, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
+      b.set(doc(db,'config','agenteObjetivos'), {eventos:{...evs, [AG_TRIM]:ev}, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
+      await b.commit(); AG_MEM=null; toast('Objetivos guardados.'); cmsAgente(box); } catch(e){ toast(errTxt(e), true); } };
   $('#ag-r').onclick = async () => { try { await agenteRecalcular(AG_TRIM); AG_MEM=null; toast('Realizado recalculado.'); cmsAgente(box); } catch(e){ toast(errTxt(e), true); } };
   desenharAgente($('#ag-v'), trimMeses(AG_TRIM)[0]);
 }
