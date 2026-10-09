@@ -2474,7 +2474,8 @@ function drawComissao(podeEscolher, vends){
   const ev = eventosDe(pnMes), evCurso = eventosDe(CM.dados.curso), evTrim = eventosDe(pnTrim);
   const c = comCalc(v, ev, obj);
   const atual = CM.mes===mesLocal(), hojeS = hojeLocal(), duF = atual ? Math.max(1, diasUteis(CM.mes, hojeS)) : diasUteis(CM.mes), duM = diasUteis(CM.mes);
-  const k = duM/duF, p = comCalc(v, escalarEv(ev,k), obj);
+  // projeção: PN do mês + RPN em curso (devem passar a PN este mês) + o ritmo de PN nos dias úteis que faltam
+  const k = (duM-duF)/duF, p = comCalc(v, somaEv(somaEv(ev, evCurso), escalarEv(ev, k)), obj);
   const cc = comCalc(v, somaEv(ev, evCurso), obj);   // se os RPN em curso passarem a PN este mês
   const duT = T.meses.reduce((a,x)=>a+diasUteis(x),0), duTF = T.meses.filter(x=>x<CM.mes).reduce((a,x)=>a+diasUteis(x),0)+duF;
   const nome = S.users[CM.uid]?.nome || S.me.nome, eu = CM.uid===S.me.uid;
@@ -2521,7 +2522,7 @@ function drawComissao(podeEscolher, vends){
         <div class="cm-lad">${atual?`<div class="p" style="width:${pc(p.pts)}%"></div><div class="c" style="width:${pc(cc.pts)}%"></div>`:''}<div class="f" style="width:${pc(c.pts)}%"></div>
           ${v.escaloes.map((x,i)=>`<span class="t ${i<=c.i?'on':''}" style="left:${pc(x.min)}%" title="Escalão ${escTxt(v,i)} · a partir de ${x.min} eventos">${escNum(i)}</span>`).join('')}</div>
         <div class="cm-leg" style="margin-bottom:6px">${[-1,...v.escaloes.map((x,i)=>i)].map(i=>`<span ${i===c.i?'style="color:var(--ink);font-weight:700"':''}>${escNum(i)} ${esc(escNome(v,i))} <span style="opacity:.7">${i<0?'&lt; '+v.escaloes[0].min:v.escaloes[i].min+'+'}</span></span>`).join('')}</div>
-        <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-c.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção ao ritmo atual</span>`:''}</div>
+        <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-c.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção fim do mês (PN + RPN em curso + ritmo)</span>`:''}</div>
       </div>
       <div class="cm-k">
         <div class="g"><span>${atual?'Comissão atual (prevista)':'Prevista · PN do mês'}</span><b id="cm-eur">${eur(c.total)}</b></div>
@@ -2614,7 +2615,9 @@ function comGrafico(v, ev, obj, c, p, sim){
   let d=''; pts.forEach(([x,y],i)=>{ d+=(i?'L':'M')+X(x).toFixed(1)+' '+Y(y).toFixed(1); });
   const g=[]; for (let y=0; y<=ymax; y+=step) g.push(`<line x1="${L}" x2="${W-R}" y1="${Y(y)}" y2="${Y(y)}" stroke="#e3e3e6"/><text x="${L-8}" y="${Y(y)+4}" text-anchor="end">${y.toLocaleString('pt-PT')} €</text>`);
   const tr=v.escaloes.filter(e=>e.min<=xmax).map(e=>`<line x1="${X(e.min)}" x2="${X(e.min)}" y1="${T}" y2="${H-B}" stroke="#d4d4d8" stroke-dasharray="3 4"/><text x="${X(e.min)}" y="${H-B+18}" text-anchor="middle">${e.min}</text><text x="${X(e.min)+4}" y="${T+10}" style="font-weight:700">${escNum(v.escaloes.indexOf(e))}</text>`);
-  const dot=(x,y,cor,txt,end)=>`<circle cx="${X(x)}" cy="${Y(y)}" r="6" fill="${cor}" stroke="#fff" stroke-width="2"/><text class="lab" x="${X(x)+(end?-10:10)}" y="${Y(y)-10}" text-anchor="${end?'end':'start'}">${txt}</text>`;
+  const usados=[]; // evita etiquetas sobrepostas: se perto de outra, desce
+  const dot=(x,y,cor,txt,end)=>{ let ty=Y(y)-10; while (usados.some(u=>Math.abs(u.x-X(x))<150 && Math.abs(u.y-ty)<16)) ty-=18; usados.push({x:X(x),y:ty});
+    return `<circle cx="${X(x)}" cy="${Y(y)}" r="6" fill="${cor}" stroke="#fff" stroke-width="2"/><text class="lab" x="${X(x)+(end?-10:10)}" y="${ty}" text-anchor="${end?'end':'start'}">${txt}</text>`; };
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Comissão do mês em função dos eventos">${g.join('')}${tr.join('')}
     <path d="${d}L${X(xmax)} ${Y(0)}L${X(0)} ${Y(0)}Z" fill="#fde8e8" opacity=".75"/><path d="${d}" fill="none" stroke="var(--red)" stroke-width="2.5"/>
     ${p?`<line x1="${X(c.pts)}" x2="${X(p.pts)}" y1="${Y(c.total)}" y2="${Y(p.total)}" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="4 4"/>`:''}
