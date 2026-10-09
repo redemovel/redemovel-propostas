@@ -2768,13 +2768,13 @@ async function cmsPlano(box){
     const eurEv = i => ({ref: (+vf.pct[i]||0)/100*(+vf.valorEvento.ref||0), nova: (+vf.pct[i]||0)/100*(+vf.valorEvento.nova||0)});
     box.innerHTML = `
       <div class="card"><h2>Plano em vigor desde ${v.desde.split('-').reverse().join('/')}</h2>
-        <p class="muted" style="font-size:12px;margin-top:0">Ao guardar, os € por evento que os vendedores veem são recalculados a partir da % e do valor de referência por evento. A % e o valor de referência ficam só nesta zona. Versões anteriores: ${vs.map(x=>x.desde.split('-').reverse().join('/')).join(', ')}.</p>
+        <p class="muted" style="font-size:12px;margin-top:0">Ao guardar, os € por evento que os vendedores veem são recalculados a partir da % e da comissão VDF por evento. A % e a comissão VDF ficam só nesta zona. Versões anteriores: ${vs.map(x=>x.desde.split('-').reverse().join('/')).join(', ')}.</p>
         <div class="scroll"><table><thead><tr><th>Escalão</th><th>Nome (o vendedor vê)</th><th>A partir de (eventos)</th><th>% do recebido 🔒</th><th class="num">€/evento Refid</th><th class="num">€/evento Nova</th></tr></thead>
         <tbody><tr><td>1</td><td><input id="pl-nm-0" value="${esc(escNome(v,-1))}" style="width:130px"></td><td class="muted">menos de ${v.escaloes[0].min}</td><td class="muted">0 %</td><td class="num">—</td><td class="num">—</td></tr>
         ${v.escaloes.map((e,i)=>`<tr><td>${escNum(i)}</td><td><input id="pl-nm-${escNum(i)-1}" value="${esc(escNome(v,i))}" style="width:130px"></td><td>${inp('pl-min-'+i,e.min)}</td><td>${inp('pl-pct-'+i,vf.pct[i]??0)} %</td><td class="num" id="pl-er-${i}">${eur(eurEv(i).ref)}</td><td class="num" id="pl-en-${i}">${eur(eurEv(i).nova)}</td></tr>`).join('')}</tbody></table></div>
         <div class="row" style="gap:16px;flex-wrap:wrap;margin-top:10px">
-          <div><label>Valor de referência por evento Refid 🔒 (€)</label>${inp('pl-vr',vf.valorEvento.ref,90)}</div>
-          <div><label>Valor de referência por evento Nova 🔒 (€)</label>${inp('pl-vn',vf.valorEvento.nova,90)}</div>
+          <div><label>Comissão VDF € - 1x evento Refidelização 🔒</label>${inp('pl-vr',vf.valorEvento.ref,90)}</div>
+          <div><label>Valor comissional VDF € - 1x evento NOVA 🔒</label>${inp('pl-vn',vf.valorEvento.nova,90)}</div>
           ${NAT_COM.map(n=>`<div><label>Peso ${esc(n)}</label>${inp('pl-p-'+n.replace(/\W/g,''),v.pesos?.[n]??1,60)}</div>`).join('')}
         </div>
         <div class="row" style="gap:16px;flex-wrap:wrap;margin-top:10px">${v.maj.map((x,i)=>`<div><label>Com ${x.n} objetivos: majoração %</label><input type="hidden" id="pl-mn-${i}" value="${x.n}">${inp('pl-mp-'+i,x.pct)}</div>`).join('')}</div></div>
