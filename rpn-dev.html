@@ -203,6 +203,7 @@ onAuthStateChanged(auth, async user => {
     handlePropostaParam();
     render();
     projetosAoEntrar();   // não bloqueia a entrada
+    if (isStaff()) setTimeout(()=>agenteDados(trimId(mesLocal())).catch(()=>{}), 4000);   // performance do agente: 1×/dia, pela primeira pessoa da staff
   } catch(e){ toast(errTxt(e), true); console.error(e); }
 });
 window.addEventListener('hashchange', () => { if (S.me) render(); });
@@ -2445,7 +2446,7 @@ async function viewComissao(){
   if (!isFin() && perfil()!=='coordenador') CM.uid = S.me.uid;
   if (perfil()==='coordenador' && CM.uid!==S.me.uid) CM.uid = S.me.uid;   // o Coordenador vê o seu painel (os valores de todos vêm no ranking)
   if (perfil()==='backoffice') {   // a BO não vende: vê só o ranking da equipa
-    m.innerHTML = `<div class="card"><h2>Comissões da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div>`; desenharRanking($('#cm-rank')); return; }
+    m.innerHTML = `<div class="card"><h2>Comissões da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div><div class="card"><h2>Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="muted">A carregar…</div></div>`; desenharRanking($('#cm-rank')); desenharAgente($('#cm-ag')); return; }
   m.innerHTML = `<div class="card muted">A calcular a comissão…</div>`;
   try {
     const chave = CM.uid+'|'+CM.mes;
@@ -2561,7 +2562,9 @@ function drawComissao(podeEscolher, vends){
       ${CM.dados.runDet.length ? `<table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Movimentos</th><th class="num">Pago neste RUN</th></tr></thead>
       <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr class="click" data-rid="${esc(p.rpnId)}"><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total pago neste RUN (inclui PN de meses anteriores e charge-backs)</td><td class="num">${eur(CM.dados.pagoRun||0)}</td></tr></tfoot></table>` : `<p class="muted" style="margin:0">Ainda não há comissões apuradas no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
-    <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div>`;
+    <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div>
+    <div class="card"><h2>Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="muted">A carregar…</div></div>`;
+  desenharAgente($('#cm-ag'), CM.mes);
   desenharRanking($('#cm-rank'), CM.mes);
   // simulador (só no browser, sem leituras)
   const simUpd = () => { const extra={}; let tem=false; m.querySelectorAll('[id^="sim-"][data-n]').forEach((el,i)=>{ const x=+el.value||0; m.querySelector('#sim-o-'+i).textContent=f1(x); if (x){ extra[el.dataset.n]=x; tem=true; } });
@@ -2628,7 +2631,7 @@ function comGrafico(v, ev, obj, c, p, sim){
 }
 
 // ===== Menu «Comissionamento» (Master + BO Financeiro) =====
-let CMS_TAB = 'run', CMS_MES = null, CMS_RUN = null;
+let CMS_TAB = 'agente', CMS_MES = null, CMS_RUN = null;
 const RUN_COLS = ['Run','Commission','Contract ID','Office Agg UNE','SFID','Position','NIF','Account','MSISDN','Price Plan','Price Plan Name','Client Type','Business Type','Revenue Type','Duration','Group','Sub Group','Creation Date','Deactivation Date','Qnt','RLMC','Monthly Payment Number','Bundle Fixo %','Bundle Voz %','Bundle Dados %','Value','IncentFlag','Discontinued','Offer Category','ProductCode','RLMCAjustada','NumMensPlano','OpportunityID','SalesCode','ClientPortfolio','TipoProduto','OfferType'];
 // linha guardada (compacta): [código, POS, SFID, NIF, MSISDN, PricePlan, nome do plano, tipo de negócio, duração, grupo, data criação, data desativação, RLMC, valor, oferta, RLMC ajustada, nº mensalidades]
 // descrição do que a Vodafone liquidou numa linha do RUN (sem valores Vodafone): como o PHC põe na comissão paga
@@ -2654,10 +2657,10 @@ const mesDoRun = (run, nomeF) => { const a=String(nomeF||'').match(/Detalhe_(\d{
 function viewComissionamento(){
   const m=$('#main'); if (!CMS_MES) CMS_MES = somaMeses(mesLocal(), -1);
   m.innerHTML = `<div class="card" style="border-left:4px solid var(--red)"><b>Zona confidencial.</b> <span class="muted">Valores recebidos da Vodafone: só o Master e a BO Financeiro têm acesso. Não partilhar capturas de ecrã.</span></div>
-    <div class="tabs">${[['run','RUN Vodafone'],['valid','Validação'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos'],['hist','Histórico PHC']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
+    <div class="tabs">${[['agente','Objetivos Vodafone'],['run','RUN Vodafone'],['valid','Validação'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos'],['hist','Histórico PHC']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
   m.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ CMS_TAB=a.dataset.t; viewComissionamento(); });
   if (['plano','hist'].includes(CMS_TAB) && !isMaster()) CMS_TAB='run';
-  ({run:cmsRun, valid:cmsValid, vend:cmsVend, plano:cmsPlano, hist:cmsHist})[CMS_TAB]($('#cms'));
+  ({agente:cmsAgente, run:cmsRun, valid:cmsValid, vend:cmsVend, plano:cmsPlano, hist:cmsHist})[CMS_TAB]($('#cms'));
 }
 const cmsMesSel = () => `<div><label>Mês do RUN</label><input type="month" id="cms-m" value="${CMS_MES}" max="${mesLocal()}" style="width:160px"></div>`;
 const ligaMes = fn => { const e=$('#cms-m'); if (e) e.onchange = ev => { if (ev.target.value) { CMS_MES=ev.target.value; CMS_RUN=null; fn(); } }; };
@@ -3082,6 +3085,71 @@ function cmsValid(box){
     ligaMes(()=>cmsValid(box));
     $('#vl-d').onchange = e => { VAL_FILTRO = e.target.value; cmsValid(box); };
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
+}
+// ===== Performance do Agente perante a Vodafone (objetivos trimestrais da Redemóvel) =====
+// Objetivos (RLMC €) por trimestre: config/agenteObjetivos (escreve o Master). Realizado (eventos dos PN da equipa, por natureza):
+// agente/{AAAA-Tn}, recalculado no máximo 1 vez por dia pela primeira pessoa da staff que abre o painel (todos os outros só leem 1-2 documentos).
+const AG_MET = [{id:'NM', nome:'Nova RLMC Móvel', nat:['Nova Móvel']},{id:'RM', nome:'Refidelização RLMC Móvel & IoT', nat:['Ref Móvel']},
+  {id:'NF', nome:'Nova RLMC Fixo', nat:['Nova Fixo']},{id:'RF', nome:'Refidelização RLMC Fixo & ICT', nat:['Ref Fixo']},{id:'SS', nome:'Nova RLMC Smart Solutions', nat:['Nova SS']}];
+const trimId = mes => { const [y,m]=mes.split('-').map(Number); return y+'-T'+(Math.floor((m-1)/3)+1); };
+const trimMeses = id => { const [y,t]=id.split('-T').map(Number); return [1,2,3].map(k=>y+'-'+String((t-1)*3+k).padStart(2,'0')); };
+const trimTxt = id => { const [y,t]=id.split('-T'); return `${t}.º trimestre ${y} (${['jan–mar','abr–jun','jul–set','out–dez'][+t-1]})`; };
+let AG_MEM = null;
+async function agenteDados(trim){
+  if (AG_MEM && AG_MEM.trim===trim && Date.now()-AG_MEM.em<300000) return AG_MEM;
+  const [y] = trim.split('-T').map(Number), tAno = [1,2,3,4].map(t=>y+'-T'+t).filter(t=>t<=trim);
+  const [oS, ...rS] = await Promise.all([getDoc(doc(db,'config','agenteObjetivos')), ...tAno.map(t=>getDoc(doc(db,'agente',t)).catch(()=>null))]);
+  const obj = oS.exists() ? (oS.data().trimestres||{}) : {}, real = {};
+  tAno.forEach((t,i)=>{ if (rS[i]?.exists()) real[t]=rS[i].data(); });
+  // staff: recalcula o trimestre em curso (1×/dia) e os anteriores do ano que faltem
+  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && String(r.dia||'') < hojeLocal()) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
+    if (velho) { try { real[t] = await agenteRecalcular(t); } catch(e){ console.warn('agente', e); } } }
+  return (AG_MEM = {trim, obj, real, tAno, em:Date.now()});
+}
+async function agenteRecalcular(t){
+  const meses = trimMeses(t).filter(m=>m<=mesLocal());
+  const sn = await getDocs(query(collection(db,'rpn'), where('mesRef','in',meses)));
+  const ev = eventosDe(sn.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN'));
+  const d = {trim:t, ev, dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
+  await setDoc(doc(db,'agente',t), d); return d;
+}
+function agenteHTML(A, trim){
+  const o = A.obj[trim]||{}, r = A.real[trim]?.ev||{}, temObj = AG_MET.some(m=>+o[m.id]>0);
+  const ytd = id => { let ob=0, re=0; A.tAno.forEach(t=>{ const oo=+(A.obj[t]||{})[id]||0; if (oo>0) { ob+=oo/SCORE_BASE; re+=AG_MET.find(m=>m.id===id).nat.reduce((a,n)=>a+((A.real[t]?.ev||{})[n]||0),0); } }); return ob ? re/ob*100 : null; };
+  const meses = trimMeses(trim), duT = meses.reduce((a,m)=>a+diasUteis(m),0), duF = meses.reduce((a,m)=>a+(m<mesLocal()?diasUteis(m):m===mesLocal()?diasUteis(m,hojeLocal()):0),0);
+  const dec = duT ? Math.min(100, duF/duT*100) : 100;
+  const cor = p => p>=100?'var(--ok)':p>=90?'#65a30d':p>=Math.min(dec,90)*0.9?'var(--warn)':'var(--red-d)';
+  if (!temObj) return `<p class="muted" style="margin:0">Ainda não há objetivos Vodafone para o ${trimTxt(trim)}.${isMaster()?' Defina-os em Comissionamento › Objetivos Vodafone.':''}</p>`;
+  const rows = AG_MET.map(m=>{ const ob=+o[m.id]||0, oe=ob/SCORE_BASE, re=m.nat.reduce((a,n)=>a+(r[n]||0),0), pc=oe?re/oe*100:0, y=ytd(m.id), proj = dec>0&&dec<100 ? re/dec*100 : re;
+    return `<tr><td><b>${esc(m.nome)}</b></td><td class="num">${ob?eur(ob):'—'}</td><td class="num">${ob?Math.round(oe):'—'}</td><td class="num">${Math.round(re)}</td>
+      <td style="min-width:150px"><div style="display:flex;align-items:center;gap:8px"><div class="cm-bar" style="flex:1;position:relative"><span style="width:${Math.min(100,pc)}%;background:${cor(pc)}"></span><i style="position:absolute;left:${dec}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${cor(pc)};min-width:48px;text-align:right">${ob?Math.round(pc)+' %':'—'}</b></div></td>
+      <td class="num" title="Ao ritmo atual, no fim do trimestre">${ob&&dec<100?`~${Math.round(oe?proj/oe*100:0)} %`:'—'}</td><td class="num">${y==null?'—':Math.round(y)+' %'}</td></tr>`; }).join('');
+  return `<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo RLMC</th><th class="num">Eventos</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra). Eventos do objetivo = RLMC ÷ 22,50. Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>`;
+}
+async function desenharAgente(box, mes){
+  try { const t = trimId(mes||mesLocal()), A = await agenteDados(t); box.innerHTML = agenteHTML(A, t); }
+  catch(e){ box.innerHTML = `<p class="muted" style="margin:0">Indisponível (${esc(errTxt(e))}).</p>`; }
+}
+// Comissionamento › Objetivos Vodafone (Master): objetivos RLMC € por trimestre
+let AG_TRIM = null;
+async function cmsAgente(box){
+  if (!AG_TRIM) AG_TRIM = trimId(mesLocal());
+  box.innerHTML = `<div class="card muted">A carregar…</div>`;
+  const oS = await getDoc(doc(db,'config','agenteObjetivos')); const tri = oS.exists() ? (oS.data().trimestres||{}) : {}, o = tri[AG_TRIM]||{};
+  const [y,t] = AG_TRIM.split('-T').map(Number), opts=[]; for (let k=-6;k<=2;k++){ const d=new Date(y,(t-1)*3+k*3,1); const id=trimId(isoL(d).slice(0,7)); if(!opts.includes(id)) opts.push(id); }
+  box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">
+      <div><label>Trimestre</label><select id="ag-t">${opts.map(x=>`<option value="${x}" ${x===AG_TRIM?'selected':''}>${trimTxt(x)}</option>`).join('')}</select></div>
+      ${AG_MET.map(m=>`<div><label>${esc(m.nome)} (RLMC €)</label><input type="number" step="any" id="ag-${m.id}" value="${o[m.id]??''}" style="width:130px"></div>`).join('')}
+      <button class="btn pri" id="ag-s">Guardar</button><button class="btn" id="ag-r" title="Volta a somar os eventos dos PN deste trimestre">⟳ Recalcular realizado</button></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Objetivos acordados com a Vodafone em RLMC €. Toda a equipa vê este quadro no painel de comissões.</p></div>
+    <div class="card"><h2>Performance da Redemóvel · ${trimTxt(AG_TRIM)}</h2><div id="ag-v" class="muted">A calcular…</div></div>`;
+  $('#ag-t').onchange = e => { AG_TRIM = e.target.value; cmsAgente(box); };
+  $('#ag-s').onclick = async () => { const n={}; AG_MET.forEach(m=>{ const x=$('#ag-'+m.id).value; if (x!=='') n[m.id]=parseFloat(x)||0; });
+    if (!isMaster()) return toast('Só o Master define os objetivos.', true);
+    try { await setDoc(doc(db,'config','agenteObjetivos'), {trimestres:{...tri, [AG_TRIM]:n}, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome}); AG_MEM=null; toast('Objetivos guardados.'); cmsAgente(box); } catch(e){ toast(errTxt(e), true); } };
+  $('#ag-r').onclick = async () => { try { await agenteRecalcular(AG_TRIM); AG_MEM=null; toast('Realizado recalculado.'); cmsAgente(box); } catch(e){ toast(errTxt(e), true); } };
+  desenharAgente($('#ag-v'), trimMeses(AG_TRIM)[0]);
 }
 
 // ---------- 10. ADMINISTRAÇÃO (master) ----------
