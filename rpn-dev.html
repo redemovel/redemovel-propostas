@@ -2461,7 +2461,8 @@ async function viewComissao(){
       const runs = []; for (let k=0; k<=6; k++){ const x=somaMeses(CM.mes,k); if (x<=mesLocal()) runs.push(x); }
       const pagS = await getDocs(query(collection(db,'comissoesVend'), where('uid','==',CM.uid), where('mes','in',runs))).catch(()=>null);
       const pagas = {}; (pagS?.docs||[]).forEach(d=>(d.data().detalhe||[]).forEach(p=>{ pagas[p.rpnId]=Math.round(((pagas[p.rpnId]||0)+(+p.valor||0))*100)/100; }));
-      CM.dados = {chave, pns, curso, pagas}; CM.em = Date.now();
+      const runDoc = (pagS?.docs||[]).map(d=>d.data()).find(d=>d.mes===CM.mes);   // o que foi pago no RUN deste mês (todos os PN)
+      CM.dados = {chave, pns, curso, pagas, pagoRun: runDoc ? +runDoc.valor||0 : null, pagoOrigem: runDoc?.origem||''}; CM.em = Date.now();
     }
     drawComissao(podeEscolher, vends);
   } catch(e){ console.error(e); m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; }
@@ -2523,8 +2524,8 @@ function drawComissao(podeEscolher, vends){
         <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-c.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção ao ritmo atual</span>`:''}</div>
       </div>
       <div class="cm-k">
-        <div class="g"><span>Comissão ${atual?'atual':'do mês'}</span><b id="cm-eur">${eur(c.total)}</b></div>
-        ${atual?`<div class="g"><span>Fim do mês</span><b id="cm-peur">~${eur0(p.total)}</b></div>`:`<div><span>Base</span><b>${eur(c.base)}</b></div>`}
+        <div class="g"><span>${atual?'Comissão atual':'Prevista · PN do mês'}</span><b id="cm-eur">${eur(c.total)}</b></div>
+        ${atual?`<div class="g"><span>Fim do mês</span><b id="cm-peur">~${eur0(p.total)}</b></div>`:`<div class="g" title="Valor pago no RUN deste mês, a todos os PN (incluindo PN de meses anteriores, prémios e charge-backs)"><span>Pago no RUN de ${mesTxt(CM.mes).split(' ')[0]}</span><b>${CM.dados.pagoRun!=null?eur(CM.dados.pagoRun):'—'}</b></div>`}
         <div class="r"><span>Escalão</span><b>${escTxt(v,c.i)}</b></div>
         ${atual?`<div><span>Eventos fim do mês</span><b>~${Math.round(p.pts)}</b></div>`:`<div><span>PN do mês</span><b>${pnMes.length}</b></div>`}
         <div><span>Objetivos do mês</span><b style="color:var(--ok);letter-spacing:2px">${'●'.repeat(c.cumpridos)}${'○'.repeat(Math.max(0,v.objetivos.length-c.cumpridos))}</b></div>
@@ -2549,7 +2550,7 @@ function drawComissao(podeEscolher, vends){
       ${porPN.length?(()=>{ const tp=porPN.reduce((a,x)=>a+(CM.dados.pagas?.[x.r.id]||0),0), np=porPN.filter(x=>CM.dados.pagas?.[x.r.id]!=null).length; return `<tfoot><tr class="tot"><td colspan="3">Total · ${np} de ${porPN.length} PN com pagamento</td><td class="num">${f1(c.pts)}</td><td class="num">${eur(c.total)}</td><td class="num">${eur(tp)}</td><td class="num">${eur(c.total-tp)}</td><td>${np===porPN.length?saldoTxt(c.total,tp,true):''}</td></tr></tfoot>`; })():''}</table>
       <p class="muted" style="font-size:12px;margin-bottom:0">Previsão com o escalão e a majoração atuais. A comissão final é apurada quando a Vodafone paga cada linha (normalmente no RUN do mês seguinte) e pode incluir prémios trimestrais ou acertos.</p></div>
     <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div>`;
-  desenharRanking($('#cm-rank'));
+  desenharRanking($('#cm-rank'), CM.mes);
   $('#cm-m').onchange = e => { if (e.target.value) { CM.mes=e.target.value; viewComissao(); } };
   $('#cm-r').onclick = () => { CM.dados=null; viewComissao(); };
   $('#cm-v')?.addEventListener('change', e => { CM.uid=e.target.value; viewComissao(); });
@@ -2606,6 +2607,8 @@ function comGrafico(v, ev, obj, c, p){
 let CMS_TAB = 'run', CMS_MES = null, CMS_RUN = null;
 const RUN_COLS = ['Run','Commission','Contract ID','Office Agg UNE','SFID','Position','NIF','Account','MSISDN','Price Plan','Price Plan Name','Client Type','Business Type','Revenue Type','Duration','Group','Sub Group','Creation Date','Deactivation Date','Qnt','RLMC','Monthly Payment Number','Bundle Fixo %','Bundle Voz %','Bundle Dados %','Value','IncentFlag','Discontinued','Offer Category','ProductCode','RLMCAjustada','NumMensPlano','OpportunityID','SalesCode','ClientPortfolio','TipoProduto','OfferType'];
 // linha guardada (compacta): [código, POS, SFID, NIF, MSISDN, PricePlan, nome do plano, tipo de negócio, duração, grupo, data criação, data desativação, RLMC, valor, oferta, RLMC ajustada, nº mensalidades]
+// descrição do que a Vodafone liquidou numa linha do RUN (sem valores Vodafone): como o PHC põe na comissão paga
+const descVDF = l => [l[RL.neg], l[RL.cod], l[RL.grp], l[RL.pp], l[RL.ppn], l[RL.rlmc]?'RLMC '+String(l[RL.rlmc]).replace('.',','):'', l[RL.tier]?'LINHA '+l[RL.tier]:''].filter(Boolean).join(' ');
 const RL = {cod:0,pos:1,sfid:2,nif:3,msisdn:4,pp:5,ppn:6,neg:7,dur:8,grp:9,cri:10,des:11,rlmc:12,val:13,tier:14,rlmcA:15,mens:16};
 const FAMILIAS = [['up','Upfront'],['pr','Prémio trimestral'],['cb','Charge-back / correções'],['aj','Ajustes'],['ag','Agência (sem POS)'],['nc','Por classificar']];
 function familiaCod(cod, pos){ const c=String(cod||'').toUpperCase();
@@ -2627,10 +2630,10 @@ const mesDoRun = (run, nomeF) => { const a=String(nomeF||'').match(/Detalhe_(\d{
 function viewComissionamento(){
   const m=$('#main'); if (!CMS_MES) CMS_MES = somaMeses(mesLocal(), -1);
   m.innerHTML = `<div class="card" style="border-left:4px solid var(--red)"><b>Zona confidencial.</b> <span class="muted">Valores recebidos da Vodafone: só o Master e a BO Financeiro têm acesso. Não partilhar capturas de ecrã.</span></div>
-    <div class="tabs">${[['run','RUN Vodafone'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos'],['hist','Histórico PHC']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
+    <div class="tabs">${[['run','RUN Vodafone'],['valid','Validação'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos'],['hist','Histórico PHC']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
   m.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ CMS_TAB=a.dataset.t; viewComissionamento(); });
   if (['plano','hist'].includes(CMS_TAB) && !isMaster()) CMS_TAB='run';
-  ({run:cmsRun, vend:cmsVend, plano:cmsPlano, hist:cmsHist})[CMS_TAB]($('#cms'));
+  ({run:cmsRun, valid:cmsValid, vend:cmsVend, plano:cmsPlano, hist:cmsHist})[CMS_TAB]($('#cms'));
 }
 const cmsMesSel = () => `<div><label>Mês do RUN</label><input type="month" id="cms-m" value="${CMS_MES}" max="${mesLocal()}" style="width:160px"></div>`;
 const ligaMes = fn => { const e=$('#cms-m'); if (e) e.onchange = ev => { if (ev.target.value) { CMS_MES=ev.target.value; CMS_RUN=null; fn(); } }; };
@@ -2787,7 +2790,7 @@ async function gravarComissoes(casa, lst){
     b.set(doc(db,'comissoesVend',mes), {mes, ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome});
     lst.forEach(o=>{ const pns={};
       casa.filter(x=>x.uid===o.uid && x.f!=='ag').forEach(x=>{ const p=pns[x.r.id]=pns[x.r.id]||{rpnId:x.r.id, numero:x.r.numero||'', cliente:x.r.cliente?.nome||'', mesPN:x.mesPN, valor:0, linhas:[]};
-        p.valor=Math.round((p.valor+x.com)*100)/100; p.linhas.push({pos:x.l[RL.pos], cod:x.l[RL.cod], msisdn:x.l[RL.msisdn], plano:x.l[RL.ppn], tipo:FAMILIAS.find(f=>f[0]===x.f)[1], ativacao:x.l[RL.cri], valor:x.com}); });
+        p.valor=Math.round((p.valor+x.com)*100)/100; p.linhas.push({pos:x.l[RL.pos], cod:x.l[RL.cod], msisdn:x.l[RL.msisdn], plano:x.l[RL.ppn], tipo:FAMILIAS.find(f=>f[0]===x.f)[1], ativacao:x.l[RL.cri], desc:descVDF(x.l), eventos:x.l[RL.rlmcA]?Math.round(x.l[RL.rlmcA]/SCORE_BASE*1000)/1000:0, valor:x.com}); });
       b.set(doc(db,'comissoesVend',mes+'_'+o.uid), {mes, uid:o.uid, valor:Math.round(o.com*100)/100, pns:Object.keys(pns), detalhe:Object.values(pns), gravadoEm:serverTimestamp()}); });
     b.set(doc(db,'runs',mes), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome}, {merge:true});
     await b.commit(); CMS_RUN=null; toast('Comissões gravadas.');
@@ -2855,9 +2858,13 @@ async function rankingBO(mes){
   return linhas.filter(x=>S.users[x.uid]?.perfil!=='master').map(x=>({uid:x.uid, nome:x.nome, cat:'BackOffice', valor:Math.round((+x.valor||0)*100)/100}));
 }
 // ranking (visível a todos menos valores do Master): lido no painel de cada um
-async function desenharRanking(box){
+// mostra o RUN do mês escolhido; se esse ainda não tem comissões gravadas, o mais recente que tiver
+async function desenharRanking(box, mesPref){
   try {
-    let d=null, mes=mesLocal(); for (let k=1; k<=3 && !d; k++){ mes=somaMeses(mesLocal(),-k); const s=await getDoc(doc(db,'comissoesVend',mes)).catch(()=>null); if (s?.exists()) d=s.data(); }
+    let d=null, mes=mesPref||mesLocal();
+    const tenta = async m => { const s=await getDoc(doc(db,'comissoesVend',m)).catch(()=>null); return s?.exists() ? s.data() : null; };
+    if (mesPref) d = await tenta(mesPref);
+    for (let k=1; k<=3 && !d; k++){ mes=somaMeses(mesLocal(),-k); d=await tenta(mes); }
     if (!d) { box.innerHTML = `<p class="muted" style="margin:0">O ranking aparece quando a BO Financeiro gravar as comissões do primeiro RUN.</p>`; return; }
     const cat = c => (d.ranking||[]).filter(x=>x.cat===c).sort((a,b)=>b.valor-a.valor);
     const bloco = (t, L) => L.length ? `<div style="min-width:0"><div style="font-weight:700;margin-bottom:6px">${t}</div><table><tbody>${L.map((x,i)=>`<tr ${x.uid===S.me.uid?'style="background:#fff4d6"':''}><td style="width:34px">${i===0?'🏆':i+1+'.'}</td><td>${i===0?'<b>':''}${esc(x.nome)}${i===0?'</b>':''}</td><td class="num">${i===0?'<b>':''}${eur(x.valor)}${i===0?'</b>':''}</td></tr>`).join('')}</tbody></table></div>` : '';
@@ -2883,6 +2890,8 @@ async function tabComissao(tc){
     ls.forEach(x=>x.gv=x.g.reduce((a,y)=>a+y.valor,0));
     const usados = new Set(ls.flatMap(x=>x.g)), soltos = ger.filter(g=>!usados.has(g));
     const tPrev = ls.reduce((a,x)=>a+x.prev,0), tGer = ger.reduce((a,x)=>a+x.valor,0);
+    // cada movimento pago, por RUN, por baixo da linha (como no PHC)
+    const movRows = gs => [...gs].sort((a,b)=>a.run.localeCompare(b.run)).map(g=>`<tr style="background:#fafafa;font-size:12px"><td></td><td colspan="5" style="color:var(--mut)"><b style="color:var(--ink)">RUN ${g.run.split('-').reverse().join('/')}</b>${g.ativacao?` · ativação ${fmtD(g.ativacao)}`:''} · ${esc(g.desc || [g.cod, g.plano].filter(Boolean).join(' '))}</td><td class="num" style="${g.valor<0?'color:var(--red-d)':''}">${eur(g.valor)}</td><td></td><td colspan="2">${g.eventos?`${n3(g.eventos)} ev.`:''}</td></tr>`).join('');
     const estado = x => x.g.some(g=>g.valor<0) ? '<span class="badge b-Cancelado">charge-back</span>' : saldoTxt(x.prev, x.gv, x.g.length>0);
     tc.innerHTML = `<div class="card"><div class="cm-k" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
         <div style="border-left:3px solid var(--line);padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Eventos p/ escalão</span><b style="display:block;font-size:21px">${f1(ls.reduce((a,x)=>a+x.pts,0))}</b></div>
@@ -2892,7 +2901,7 @@ async function tabComissao(tc){
         <div style="border-left:3px solid ${ger.length&&Math.abs(tPrev-tGer)<0.01?'var(--ok)':'var(--warn)'};padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Saldo (prevista − paga)</span><b style="display:block;font-size:21px">${eur(tPrev-tGer)}</b><div style="margin-top:4px">${saldoTxt(tPrev, tGer, ger.length>0)}</div></div></div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Comissão de ${esc(r.vendedorNome||'')}. A prevista usa o escalão e a majoração de ${mesTxt(r.mesRef||mesLocal())} até hoje. A paga é a que foi apurada nos RUN da Vodafone (pode incluir prémios trimestrais e charge-backs). Saldo 0,00 € = tudo pago.</p></div>
       <div class="card scroll"><table><thead><tr><th>MSISDN</th><th>Referência</th><th>Natureza</th><th>Contrato VDF</th><th class="num">Eventos</th><th class="num">Prevista</th><th class="num">Paga</th><th class="num">Saldo</th><th>RUN</th><th>Estado</th></tr></thead>
-      <tbody>${ls.map(x=>`<tr><td>${esc(x.l.msisdn||'—')}</td><td><b>${esc(x.l.ref)}</b> <span class="muted" style="font-size:12px">${esc(x.l.designacao||'')}</span></td><td>${esc(x.n)}</td><td style="font-size:12px">${esc(x.l.contratoVDF||'')}</td><td class="num">${n3(x.s)}</td><td class="num">${eur(x.prev)}</td><td class="num">${x.g.length?eur(x.gv):'—'}</td><td class="num">${x.g.length?eur(x.prev-x.gv):'—'}</td><td style="font-size:12px">${[...new Set(x.g.map(g=>g.run.split('-').reverse().join('/')))].join(', ')}</td><td>${estado(x)}</td></tr>`).join('')}</tbody>
+      <tbody>${ls.map(x=>`<tr style="${x.g.length?'border-bottom:0':''}"><td>${esc(x.l.msisdn||'—')}</td><td><b>${esc(x.l.ref)}</b> <span class="muted" style="font-size:12px">${esc(x.l.designacao||'')}</span></td><td>${esc(x.n)}</td><td style="font-size:12px">${esc(x.l.contratoVDF||'')}</td><td class="num">${n3(x.s)}</td><td class="num">${eur(x.prev)}</td><td class="num">${x.g.length?eur(x.gv):'—'}</td><td class="num">${x.g.length?eur(x.prev-x.gv):'—'}</td><td style="font-size:12px">${[...new Set(x.g.map(g=>g.run.split('-').reverse().join('/')))].join(', ')}</td><td>${estado(x)}</td></tr>${movRows(x.g)}`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${n3(ls.reduce((a,x)=>a+x.s,0))}</td><td class="num">${eur(tPrev)}</td><td class="num">${eur(tGer)}</td><td class="num">${eur(tPrev-tGer)}</td><td colspan="2"></td></tr></tfoot></table>
       ${soltos.length?`<p class="muted" style="font-size:12px">Outros movimentos deste PN (prémios/acertos sem linha correspondente): ${soltos.map(g=>`${esc(g.tipo)} ${eur(g.valor)} (RUN ${g.run.split('-').reverse().join('/')})`).join(' · ')}</p>`:''}</div>`;
   } catch(e){ tc.innerHTML = `<div class="card">Não foi possível calcular a comissão: ${esc(errTxt(e))}</div>`; }
@@ -2965,7 +2974,7 @@ function cmsHist(box){
             const val=Math.round((numX(o.valor)+numX(o.valor_trim))*100)/100; v.valor=Math.round((v.valor+val)*100)/100;
             const id=idPHC(o.pnstamp), p=v.pns[id]=v.pns[id]||{rpnId:id, numero:+o.pn_numero||'', cliente:o.cliente||'', mesPN:(o.pn_data||'').slice(0,7), valor:0, linhas:[]};
             p.valor=Math.round((p.valor+val)*100)/100;
-            p.linhas.push({pos:o.pos||'', cod:'', msisdn:String(o.msisdn||'').replace(/\.0+$/,''), plano:o.design||o.ref||'', tipo:numX(o.valor_trim)&&!numX(o.valor)?'Prémio trimestral':(o.tipo||'Upfront'), eventos:numX(o.eventos), valor:val}); });
+            p.linhas.push({pos:o.pos||'', cod:codDaDesc(o.ref||''), msisdn:String(o.msisdn||'').replace(/\.0+$/,''), plano:o.design||o.ref||'', desc:[o.tipo,o.ref,o.design].filter(Boolean).join(' ').slice(0,220), ativacao:'', tipo:numX(o.valor_trim)&&!numX(o.valor)?'Prémio trimestral':(o.tipo||'Upfront'), eventos:numX(o.eventos), valor:val}); });
           const rank = Object.values(pv).filter(v=>S.users[v.uid]?.perfil!=='master').map(v=>({uid:v.uid, nome:v.nome, cat:'Vendedor', valor:v.valor}));
           await put(bb=>bb.set(doc(db,'comissoesVend',m), {mes:m, origem:'PHC', ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome}));
           for (const v of Object.values(pv)) { let det=Object.values(v.pns);
@@ -2977,6 +2986,56 @@ function cmsHist(box){
       } catch(e){ console.error(e); toast(errTxt(e)||e.message, true); }
     };
   };
+}
+// ===== Validação: o que a Vodafone considerou no RUN vs. o que está no PN (natureza, RLMC, prazo, tier, eventos) =====
+let VAL_FILTRO = 'dif';
+function natVDF(l){ const nova = !/REFIDELIZ/i.test(l[RL.neg]||''), c=String(l[RL.cod]||'').toUpperCase(), ss=/_SS/.test(c), fx=/FIXO|_FX/.test(c);
+  return nova ? (ss ? 'Nova SS' : fx ? 'Nova Fixo' : 'Nova Móvel') : (fx ? 'Ref Fixo' : 'Ref Móvel'); }
+function cmsValid(box){
+  box.innerHTML = `<div class="card muted">A ler o RUN e os PN…</div>`;
+  lerRun(CMS_MES).then(async R=>{
+    const topo = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<div><label>Mostrar</label><select id="vl-d">${[['dif','Divergências em PN'],['sem','Linhas sem PN'],['todas','Todas']].map(([k,t])=>`<option value="${k}" ${VAL_FILTRO===k?'selected':''}>${t}</option>`).join('')}</select></div></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Antes de pagar comissões: compara cada linha de upfront do RUN com a linha do PN (pelo POS ou MSISDN). Natureza (Nova/Refidelização, Móvel/Fixo/SS), RLMC, prazo, tier e eventos (RLMC ajustada da Vodafone ÷ 22,50). Corrija o PN quando o erro é nosso; reclame à Vodafone quando o erro é deles.</p></div>`;
+    if (!R.existe) { box.innerHTML = topo+`<div class="card muted">Sem RUN importado para ${mesTxt(CMS_MES)}.</div>`; ligaMes(()=>cmsValid(box)); return; }
+    if (R.origem==='PHC') { box.innerHTML = topo+`<div class="card muted">Este RUN veio do histórico PHC, que não traz prazo, tier nem RLMC ajustada. A validação funciona com os RUN importados do ficheiro da Vodafone (xlsx).</div>`; ligaMes(()=>cmsValid(box)); return; }
+    const {casa} = await conciliarRun(R);
+    const rows = casa.filter(x=>x.f==='up').map(x=>{
+      const pos=x.l[RL.pos], ms=normMsisdn(x.l[RL.msisdn]||'');
+      // bundles: várias linhas do PN com o mesmo POS → a da mesma natureza e, entre essas, a de RLMC mais próxima
+      const vN0=natVDF(x.l), lsP = x.r ? (x.r.linhas||[]) : [];
+      let cand = lsP.filter(l=>String(l.contratoVDF||'').trim().toUpperCase()===pos); if (!cand.length && ms) cand = lsP.filter(l=>normMsisdn(l.msisdn||'')===ms);
+      const mesmaNat = cand.filter(l=>natNorm(l.natureza)===vN0), pool = mesmaNat.length ? mesmaNat : cand;
+      const ln = pool.sort((a,b)=>Math.abs((+a.rlmc||0)-x.l[RL.rlmc])-Math.abs((+b.rlmc||0)-x.l[RL.rlmc]))[0] || null;
+      const o = {x, ln, pn:x.r, dif:[]};
+      const vN=vN0, vR=x.l[RL.rlmc], vP=x.l[RL.dur], vT=String(x.l[RL.tier]||'').toUpperCase(), vE=x.l[RL.rlmcA]?x.l[RL.rlmcA]/SCORE_BASE:null;
+      o.vdf = {nat:vN, rlmc:vR, prazo:vP, tier:vT, ev:vE};
+      if (!x.r) { o.dif.push('sem PN'); return o; }
+      if (!ln) { o.dif.push('linha não encontrada no PN'); return o; }
+      const pN=natNorm(ln.natureza), pR=+ln.rlmc||0, pP=+ln.prazo||0, pT=String(ln.tier||'').toUpperCase(), pE=scoreLinha(ln, x.r);
+      o.pl = {nat:pN, rlmc:pR, prazo:pP, tier:pT, ev:pE};
+      if (pN!==vN) o.dif.push('natureza'); if (Math.abs(pR-vR)>0.01) o.dif.push('RLMC'); if (vP && pP!==vP) o.dif.push('prazo');
+      if (vT && pT && pT!==vT) o.dif.push('tier'); if (vE!=null && Math.abs(pE-vE)>0.005) o.dif.push('eventos');
+      return o; });
+    const comPN = rows.filter(o=>o.pn), sem = rows.filter(o=>!o.pn), nDif = comPN.filter(o=>o.dif.length).length;
+    const L = VAL_FILTRO==='dif' ? comPN.filter(o=>o.dif.length) : VAL_FILTRO==='sem' ? sem : [...comPN.filter(o=>o.dif.length), ...comPN.filter(o=>!o.dif.length), ...sem];
+    const c = (k, a, b, fmt=v=>esc(v)) => `<td class="${k?'':''}" style="${k?'background:#fde8e8;font-weight:600':''}">${a==null?'—':fmt(a)}${b!=null && k?`<div class="muted" style="font-size:11px;font-weight:400">VDF: ${fmt(b)}</div>`:''}</td>`;
+    const evTot = (f) => comPN.reduce((a,o)=>a+(f(o)||0),0);
+    box.innerHTML = topo + `<div class="card"><div class="row" style="gap:24px;flex-wrap:wrap">
+        <div><b style="font-size:22px">${rows.length}</b><div class="muted" style="font-size:12px">linhas de upfront</div></div>
+        <div><b style="font-size:22px">${comPN.length}</b><div class="muted" style="font-size:12px">ligadas a um PN</div></div>
+        <div><b style="font-size:22px;color:${nDif?'var(--red-d)':'var(--ok)'}">${nDif}</b><div class="muted" style="font-size:12px">com divergências</div></div>
+        <div><b style="font-size:22px;color:${sem.length?'var(--warn)':'var(--ok)'}">${sem.length}</b><div class="muted" style="font-size:12px">sem PN na plataforma</div></div>
+        <div><b style="font-size:22px">${n3(evTot(o=>o.pl?.ev))}</b><div class="muted" style="font-size:12px">eventos nos PN (linhas ligadas)</div></div>
+        <div><b style="font-size:22px">${n3(evTot(o=>o.vdf.ev))}</b><div class="muted" style="font-size:12px">eventos considerados pela Vodafone (mesmas linhas)</div></div></div></div>
+      <div class="card scroll"><table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th>Divergência</th></tr></thead>
+      <tbody>${L.slice(0,800).map(o=>{ const d=k=>o.dif.includes(k), p=o.pl||{};
+        return `<tr><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
+        ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier)}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v))}
+        <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}</td></tr>`; }).join('')||'<tr><td colspan="10" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
+      ${L.length>800?`<p class="muted">Mostradas 800 de ${L.length} linhas.</p>`:''}</div>`;
+    ligaMes(()=>cmsValid(box));
+    $('#vl-d').onchange = e => { VAL_FILTRO = e.target.value; cmsValid(box); };
+  }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
 
 // ---------- 10. ADMINISTRAÇÃO (master) ----------
