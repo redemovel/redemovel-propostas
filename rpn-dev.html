@@ -2916,7 +2916,12 @@ function cmsHist(box){
         rl?numX(rl):0, Math.round(numX(o.valor)*100)/100, ((d.match(/LINHA\s+(GOLD|SILVER|BRONZE|ESTANHO)/i)||[])[1]||'').toUpperCase(), 0, 0, String(o.vendedor||''), o.pnstamp||'']); });
     B.forEach(o=>{ const m=runMes(o.run); if (m) (mesesB[m]=mesesB[m]||[]).push(o); });
     const existentes = {}; for (const m of Object.keys(mesesA)) { const s=await getDoc(doc(db,'runs',m)); if (s.exists()) existentes[m]=s.data(); }
-    const porVend={}; Object.entries(S.users).forEach(([uid,u])=>{ if (u.vendedorPHC) porVend[String(u.vendedorPHC)]=uid; });
+    // nº de vendedor PHC → conta: só contas ativas; se houver mais de uma com o mesmo nº, fica a que tem o nome do PHC
+    const nomesPHC={}; B.forEach(o=>{ if (o.vendedor) nomesPHC[String(o.vendedor)]=o.vendedor_nome||''; });
+    const porVend={}; Object.entries(S.users).forEach(([uid,u])=>{ const k=String(u.vendedorPHC||'').trim(); if (!k || u.ativo===false) return;
+      const nm=semAcento(String(u.nome||'')), alvo=semAcento(String(nomesPHC[k]||'')), bate = alvo && (nm===alvo || alvo.includes(nm) || nm.includes(alvo));
+      if (!porVend[k] || (bate && !porVend[k].bate)) porVend[k]={uid, bate}; });
+    Object.keys(porVend).forEach(k=>porVend[k]=porVend[k].uid);
     const todos=[...new Set([...Object.keys(mesesA),...Object.keys(mesesB)])].sort();
     const linhaRes = m => { const a=mesesA[m]||[], b=mesesB[m]||[], ex=existentes[m]; const salta = ex && ex.origem!=='PHC' && !$('#hi-sub').checked;
       return `<tr><td>${m.split('-').reverse().join('/')}</td><td class="num">${a.length}</td><td class="num">${eur(a.reduce((s,l)=>s+l[RL.val],0))}</td><td>${a.length?(salta?'<span class="badge">mantém o RUN xlsx</span>':ex?'substitui':'novo'):'—'}</td>
@@ -2941,6 +2946,9 @@ function cmsHist(box){
             nr++;
           }
           const bl=mesesB[m]||[]; if (!bl.length) continue;
+          // apaga o que estava gravado para este RUN (evita ficarem vendedores de importações anteriores)
+          for (const d of (await getDocs(query(collection(db,'comissoesVend'), where('mes','==',m)))).docs) await put(bb=>bb.delete(d.ref));
+          await commit();
           const pv={};
           bl.forEach(o=>{ const uid=porVend[String(o.vendedor)] || ('phcv_'+(o.vendedor||'0')); const v=pv[uid]=pv[uid]||{uid, nome:(S.users[uid]?.nome)||o.vendedor_nome||('Vendedor '+o.vendedor), valor:0, pns:{}};
             const val=Math.round((numX(o.valor)+numX(o.valor_trim))*100)/100; v.valor=Math.round((v.valor+val)*100)/100;
