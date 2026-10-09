@@ -2617,10 +2617,10 @@ const mesDoRun = (run, nomeF) => { const a=String(nomeF||'').match(/Detalhe_(\d{
 function viewComissionamento(){
   const m=$('#main'); if (!CMS_MES) CMS_MES = somaMeses(mesLocal(), -1);
   m.innerHTML = `<div class="card" style="border-left:4px solid var(--red)"><b>Zona confidencial.</b> <span class="muted">Valores recebidos da Vodafone: só o Master e a BO Financeiro têm acesso. Não partilhar capturas de ecrã.</span></div>
-    <div class="tabs">${[['run','RUN Vodafone'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
+    <div class="tabs">${[['run','RUN Vodafone'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos'],['hist','Histórico PHC']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
   m.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ CMS_TAB=a.dataset.t; viewComissionamento(); });
-  if (CMS_TAB==='plano' && !isMaster()) CMS_TAB='run';
-  ({run:cmsRun, vend:cmsVend, plano:cmsPlano})[CMS_TAB]($('#cms'));
+  if (['plano','hist'].includes(CMS_TAB) && !isMaster()) CMS_TAB='run';
+  ({run:cmsRun, vend:cmsVend, plano:cmsPlano, hist:cmsHist})[CMS_TAB]($('#cms'));
 }
 const cmsMesSel = () => `<div><label>Mês do RUN</label><input type="month" id="cms-m" value="${CMS_MES}" max="${mesLocal()}" style="width:160px"></div>`;
 const ligaMes = fn => { const e=$('#cms-m'); if (e) e.onchange = ev => { if (ev.target.value) { CMS_MES=ev.target.value; CMS_RUN=null; fn(); } }; };
@@ -2642,7 +2642,7 @@ function cmsRun(box){
     const tot = (R.linhas||[]).reduce((a,l)=>a+l[RL.val],0);
     box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}
         <div><label>Importar ficheiro RUN (UNE_VI_Detalhe_AAAAMM_….xlsx)</label><input type="file" id="cms-f" accept=".xlsx,.xls"></div>
-        <span class="sp"></span>${R.existe?`<span class="muted" style="font-size:12px">Importado ${tsTxt(R.importadoEm)} por ${esc(R.por||'')} · ${esc(R.ficheiro||'')}</span>`:''}</div>
+        <span class="sp"></span>${R.existe?`<span class="muted" style="font-size:12px">${R.origem==='PHC'?'<b>Histórico PHC</b> · ':''}Importado ${tsTxt(R.importadoEm)} por ${esc(R.por||'')} · ${esc(R.ficheiro||'')}</span>`:''}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">O mês é lido do nome do ficheiro. Importar de novo o mesmo mês substitui o anterior.</p></div>
       ${R.existe?`<div class="card scroll"><h2>RUN de ${mesTxt(CMS_MES)} · ${(R.linhas||[]).length} linhas · ${eur(tot)}</h2>
         <table><thead><tr><th>Família</th><th class="num">Linhas</th><th class="num">Valor</th></tr></thead><tbody>${FAMILIAS.filter(([k])=>fam[k].n).map(([k,t])=>`<tr><td>${t}</td><td class="num">${fam[k].n}</td><td class="num">${eur(fam[k].v)}</td></tr>`).join('')}</tbody></table></div>
@@ -2715,12 +2715,13 @@ function cmsVend(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e a conciliar com os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
     if (!R.existe) { box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>`; ligaMes(()=>cmsVend(box)); return; }
+    const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
     const {casa} = await conciliarRun(R);
     const pv = {}; casa.forEach(x=>{ if (!x.uid || x.f==='ag') return; const o=pv[x.uid]=pv[x.uid]||{uid:x.uid, rec:0, com:0, n:0, cb:0, meses:{}}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; if (x.l[RL.val]<0) o.cb+=x.com;
       const mm=o.meses[x.mesPN]=o.meses[x.mesPN]||{rec:0,com:0,t:x.t}; mm.rec+=x.l[RL.val]; mm.com+=x.com; });
     const sem = casa.filter(x=>!x.uid && x.f!=='ag'), ag = casa.filter(x=>x.f==='ag'), totRec = casa.reduce((a,x)=>a+x.l[RL.val],0);
     const lst = Object.values(pv).sort((a,b)=>b.com-a.com);
-    box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
+    box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
         ${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()?'':'-->'}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
 ${isMaster()?`      <div class="card scroll"><h2>Comissões a pagar · RUN de ${mesTxt(CMS_MES)}</h2>
@@ -2857,6 +2858,79 @@ async function tabComissao(tc){
       <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${n3(ls.reduce((a,x)=>a+x.s,0))}</td><td class="num">${eur(tPrev)}</td><td class="num">${eur(tGer)}</td><td colspan="2"></td></tr></tfoot></table>
       ${soltos.length?`<p class="muted" style="font-size:12px">Outros movimentos deste PN (prémios/acertos sem linha correspondente): ${soltos.map(g=>`${esc(g.tipo)} ${eur(g.valor)} (RUN ${g.run.split('-').reverse().join('/')})`).join(' · ')}</p>`:''}</div>`;
   } catch(e){ tc.innerHTML = `<div class="card">Não foi possível calcular a comissão: ${esc(errTxt(e))}</div>`; }
+}
+// ===== Histórico do PHC (últimos 36 RUN): recebido por linha → runs/{mes} (origem PHC); pago aos vendedores → comissoesVend =====
+const runMes = r => { const x=String(r||'').replace(/\D/g,''); return x.length>=6 ? x.slice(0,4)+'-'+x.slice(4,6) : ''; };
+const idPHC = st => 'phc_'+String(st||'').trim().replace(/[^A-Za-z0-9]/g,'_');
+function lerTabela(txt){   // texto copiado do SSMS (tabulações) ou CSV com ; ou ,
+  const ls = txt.replace(/\r/g,'').split('\n').filter(l=>l.trim()); if (!ls.length) return [];
+  const sep = ls[0].includes('\t') ? '\t' : (ls[0].split(';').length > ls[0].split(',').length ? ';' : ',');
+  const h = ls[0].split(sep).map(x=>x.trim().replace(/^"|"$/g,'').toLowerCase());
+  return ls.slice(1).map(l=>{ const c=l.split(sep); const o={}; h.forEach((k,i)=>o[k]=String(c[i]??'').trim().replace(/^"|"$/g,'')); return o; });
+}
+const codDaDesc = d => (String(d||'').toUpperCase().match(/\b(CTRA[A-Z_]*|CR_[A-Z_]+|PRM_[A-Z_]+|CT_[A-Z_]+|AJ_[A-Z_]+|IC_[A-Z_]+)\b/)||[])[1] || 'PHC';
+function cmsHist(box){
+  if (!isMaster()) { box.innerHTML='<div class="card muted">Só o Master importa o histórico.</div>'; return; }
+  box.innerHTML = `<div class="card"><h2>Histórico de comissões do PHC (36 RUN)</h2>
+    <p class="muted" style="font-size:13px;margin-top:0">Corra no SQL Server o ficheiro <b>exportar-comissoes-phc.sql</b> e guarde os resultados das consultas A e B como texto. Carregue aqui os dois ficheiros. Importar de novo substitui os mesmos meses, sem duplicar.</p>
+    <div class="row" style="gap:18px;flex-wrap:wrap;align-items:flex-end">
+      <div><label>A · Recebido da Vodafone (comissoes-recebidas.txt) 🔒</label><input type="file" id="hi-a" accept=".txt,.csv,.tsv"></div>
+      <div><label>B · Pago aos vendedores (comissoes-pagas.txt)</label><input type="file" id="hi-b" accept=".txt,.csv,.tsv"></div>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="hi-sub"> Substituir também os meses já importados do ficheiro RUN (xlsx)</label>
+      <button class="btn pri" id="hi-go">Analisar</button></div></div><div id="hi-res"></div>`;
+  $('#hi-go').onclick = async () => {
+    const fa=$('#hi-a').files[0], fb=$('#hi-b').files[0]; if (!fa && !fb) return toast('Escolha pelo menos um ficheiro.', true);
+    const A = fa ? lerTabela(await fa.text()) : [], B = fb ? lerTabela(await fb.text()) : [];
+    if (fa && !(A[0] && 'run' in A[0] && 'valor' in A[0] && 'pos' in A[0])) return toast('O ficheiro A não tem as colunas run, pos, valor… Confirme que é o resultado da consulta A.', true);
+    if (fb && !(B[0] && 'run' in B[0] && 'pnstamp' in B[0] && 'valor' in B[0])) return toast('O ficheiro B não tem as colunas run, pnstamp, valor… Confirme que é o resultado da consulta B.', true);
+    const mesesA = {}, mesesB = {};
+    A.forEach(o=>{ const m=runMes(o.run); if (!m) return; const d=String(o.descricao||''); const rl=(d.match(/RLMC\s+([\d.,]+)/i)||[])[1];
+      (mesesA[m]=mesesA[m]||[]).push([codDaDesc(d), String(o.pos||'').toUpperCase(), '', o.nif||'', String(o.msisdn||'').replace(/\.0+$/,''), '', o.produto||d.slice(0,80), /REFIDELIZ/i.test(d)?'REFIDELIZACAO':/NOVA|ACTIV|ATIV/i.test(d)?'NOVA':'', 0, '', (o.ativacao||'').slice(0,10), '',
+        rl?numX(rl):0, Math.round(numX(o.valor)*100)/100, ((d.match(/LINHA\s+(GOLD|SILVER|BRONZE|ESTANHO)/i)||[])[1]||'').toUpperCase(), 0, 0, String(o.vendedor||''), o.pnstamp||'']); });
+    B.forEach(o=>{ const m=runMes(o.run); if (m) (mesesB[m]=mesesB[m]||[]).push(o); });
+    const existentes = {}; for (const m of Object.keys(mesesA)) { const s=await getDoc(doc(db,'runs',m)); if (s.exists()) existentes[m]=s.data(); }
+    const porVend={}; Object.entries(S.users).forEach(([uid,u])=>{ if (u.vendedorPHC) porVend[String(u.vendedorPHC)]=uid; });
+    const todos=[...new Set([...Object.keys(mesesA),...Object.keys(mesesB)])].sort();
+    const linhaRes = m => { const a=mesesA[m]||[], b=mesesB[m]||[], ex=existentes[m]; const salta = ex && ex.origem!=='PHC' && !$('#hi-sub').checked;
+      return `<tr><td>${m.split('-').reverse().join('/')}</td><td class="num">${a.length}</td><td class="num">${eur(a.reduce((s,l)=>s+l[RL.val],0))}</td><td>${a.length?(salta?'<span class="badge">mantém o RUN xlsx</span>':ex?'substitui':'novo'):'—'}</td>
+        <td class="num">${b.length}</td><td class="num">${eur(b.reduce((s,o)=>s+numX(o.valor)+numX(o.valor_trim),0))}</td><td class="num">${new Set(b.map(o=>o.vendedor)).size}</td></tr>`; };
+    const semConta = [...new Set(B.filter(o=>!porVend[String(o.vendedor)]).map(o=>`${o.vendedor} ${o.vendedor_nome}`))];
+    $('#hi-res').innerHTML = `<div class="card scroll"><h2>Pré-visualização · ${todos.length} meses</h2>
+      <table><thead><tr><th>RUN</th><th class="num">Linhas recebidas</th><th class="num">Recebido 🔒</th><th>RUN na plataforma</th><th class="num">Linhas pagas</th><th class="num">Pago a vendedores</th><th class="num">Vendedores</th></tr></thead><tbody>${todos.map(linhaRes).join('')}</tbody></table>
+      ${semConta.length?`<p class="muted" style="font-size:12px">Vendedores do PHC sem conta na plataforma (entram no histórico e no ranking com o nome do PHC): ${semConta.map(esc).join(' · ')}</p>`:''}
+      <div class="row" style="margin-top:10px"><span class="sp"></span><button class="btn pri" id="hi-ok">Importar</button></div></div>`;
+    $('#hi-ok').onclick = async () => {
+      if (!confirm(`Importar o histórico de ${todos.length} meses?`)) return;
+      try {
+        let b=writeBatch(db), n=0; const commit=async()=>{ if(n){ await b.commit(); b=writeBatch(db); n=0; } }, put=async(f)=>{ f(b); if(++n>=15) await commit(); };
+        let nr=0, nv=0;
+        for (const m of todos) {
+          const a=mesesA[m]||[], ex=existentes[m];
+          if (a.length && !(ex && ex.origem!=='PHC' && !$('#hi-sub').checked)) {
+            const velhos = ex ? (await getDocs(collection(db,'runs',m,'blocos'))).docs : [];
+            for (const d of velhos) await put(bb=>bb.delete(d.ref));
+            for (let k=0; k*500<a.length; k++) await put(bb=>bb.set(doc(db,'runs',m,'blocos',String(k)), {linhas:a.slice(k*500,(k+1)*500).map(x=>JSON.stringify(x))}));
+            await put(bb=>bb.set(doc(db,'runs',m), {mes:m, origem:'PHC', ficheiro:'Histórico PHC', n:a.length, total:Math.round(a.reduce((s,l)=>s+l[RL.val],0)*100)/100, importadoEm:serverTimestamp(), por:S.me.nome, porUid:S.me.uid}));
+            nr++;
+          }
+          const bl=mesesB[m]||[]; if (!bl.length) continue;
+          const pv={};
+          bl.forEach(o=>{ const uid=porVend[String(o.vendedor)] || ('phcv_'+(o.vendedor||'0')); const v=pv[uid]=pv[uid]||{uid, nome:(S.users[uid]?.nome)||o.vendedor_nome||('Vendedor '+o.vendedor), valor:0, pns:{}};
+            const val=Math.round((numX(o.valor)+numX(o.valor_trim))*100)/100; v.valor=Math.round((v.valor+val)*100)/100;
+            const id=idPHC(o.pnstamp), p=v.pns[id]=v.pns[id]||{rpnId:id, numero:+o.pn_numero||'', cliente:o.cliente||'', mesPN:(o.pn_data||'').slice(0,7), valor:0, linhas:[]};
+            p.valor=Math.round((p.valor+val)*100)/100;
+            p.linhas.push({pos:o.pos||'', cod:'', msisdn:String(o.msisdn||'').replace(/\.0+$/,''), plano:o.design||o.ref||'', tipo:numX(o.valor_trim)&&!numX(o.valor)?'Prémio trimestral':(o.tipo||'Upfront'), eventos:numX(o.eventos), valor:val}); });
+          const rank = Object.values(pv).filter(v=>S.users[v.uid]?.perfil!=='master').map(v=>({uid:v.uid, nome:v.nome, cat:'Vendedor', valor:v.valor}));
+          await put(bb=>bb.set(doc(db,'comissoesVend',m), {mes:m, origem:'PHC', ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome}));
+          for (const v of Object.values(pv)) { let det=Object.values(v.pns);
+            if (JSON.stringify(det).length > 850000) det = det.map(p=>({...p, linhas:p.linhas.map(({plano,...r})=>r)}));
+            await put(bb=>bb.set(doc(db,'comissoesVend',m+'_'+v.uid), {mes:m, uid:v.uid, origem:'PHC', valor:v.valor, pns:det.map(p=>p.rpnId), detalhe:det, gravadoEm:serverTimestamp()})); nv++; }
+          if (a.length || ex) await put(bb=>bb.set(doc(db,'runs',m), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome+' (histórico PHC)', comPHC:true}, {merge:true}));
+        }
+        await commit(); CMS_RUN=null; toast(`Histórico importado: ${nr} RUN e ${nv} mapas de vendedor.`); cmsHist(box);
+      } catch(e){ console.error(e); toast(errTxt(e)||e.message, true); }
+    };
+  };
 }
 
 // ---------- 10. ADMINISTRAÇÃO (master) ----------
