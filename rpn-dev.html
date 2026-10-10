@@ -1177,7 +1177,10 @@ function dividir(){
 async function eliminar(){
   const r=S.cur;
   if (r.estado==='Em Elaboração') { if(!confirm(`Eliminar definitivamente o RPN ${r.numero}?`)) return; }
-  else { const t=prompt(`O ${r.estado==='PN'?'PN':'RPN'} ${r.numero} está em «${estTxt(r.estado)}». Vai ser apagado com anexos, mensagens e histórico, e não pode ser recuperado.\n\nPara confirmar, escreva o número ${r.numero}:`); if(t===null) return; if(String(t).trim()!==String(r.numero)) return toast('Número errado. Nada foi apagado.',true); }
+  else { if (!isMaster()) return toast('Só o Master pode eliminar um processo que já não está em elaboração.', true);
+    const mot=prompt(`⚠ ELIMINAR o ${r.estado==='PN'?'PN':'RPN'} ${r.numero} («${estTxt(r.estado)}»)?\n\nÉ uma exceção grave: apaga o processo com anexos, mensagens e histórico, e as comissões e charge-backs futuros deixam de ter PN. Não pode ser recuperado.\n\nEscreva o motivo:`); if(mot===null) return; if(String(mot).trim().length<5) return toast('Escreva o motivo. Nada foi apagado.',true);
+    const t=prompt(`Para confirmar, escreva ELIMINAR ${r.numero}`); if(t===null) return; if(String(t).trim().toUpperCase()!==('ELIMINAR '+r.numero)) return toast('Confirmação errada. Nada foi apagado.',true);
+    try { await logAlt({tipo:'PN eliminado', desde:mesLocal(), resumo:`${r.estado==='PN'?'PN':'RPN'} ${r.numero} (${r.cliente?.nome||''}, ${r.vendedorNome||''}, ${estTxt(r.estado)}): ${String(mot).trim()}`}); } catch(_){} }
   try {
     // anexos (ficheiros + registos), mensagens e histórico: apaga o que as permissões deixarem, antes do próprio RPN
     for (const sub of ['anexos','mensagens','historico']) { try { const sn=await getDocs(collection(db,'rpn',r.id,sub));
@@ -2450,7 +2453,8 @@ function comCalc(v, ev, obj){
 // soma das categorias → patamar inferior (<85 € = 0; 85/165/330/500/660; a partir de 660 € paga o valor, até 1 700 €);
 // objetivos = os do vendedor (júnior/assistente já com os objetivos reduzidos, ex.: 19,5/16,5); o índice (50 %) aplica-se só ao prémio, depois do patamar (como no mapa Excel); 3 prestações iguais.
 const PREMIO_DEF = { valorEvento:20, cats:[{id:'M', nome:'Móvel', obj:'NM', nat:['Nova Móvel'], ref:'RM', natRef:['Ref Móvel']},{id:'F', nome:'Fixo', obj:'NF', nat:['Nova Fixo'], ref:'RF', natRef:['Ref Fixo']}],
-  patamares:[85,165,330,500,660], teto:1700, prestacoes:3, atraso:3, regra:'nova' };
+  patamares:[85,165,330,500,660], teto:1700, prestacoes:3, atraso:3, recibo:2, regra:'nova' };
+// recibo: o RUN do mês M é pago no recibo de M+2 (RUN 07 → recibo de setembro); atraso: a 1.ª prestação do prémio vai no recibo do 3.º mês após o fim do trimestre (1.º trim. → recibos de jun, jul, ago)
 // regra do atingimento: 'nova' = % do objetivo Nova da categoria (mapa Excel); 'minimo' = a % mais baixa entre Nova e Refidelização da categoria (texto do plano)   // atraso: meses entre o fim do trimestre e a 1.ª prestação
 const premioDe = v => { const p = {...PREMIO_DEF, ...(v?.premio||{})}; p.cats = p.cats.map(c=>({...PREMIO_DEF.cats.find(d=>d.id===c.id), ...c})); return p; };
 const indiceDe = (uid, mes) => { const c = cfgVend(uid, mes||mesLocal()), x = c && c.indice!=null && c.indice!=='' ? c.indice : PLANO?.objVend?.[uid]?.indice; return x!=null && x!=='' && !isNaN(+x) ? +x/100 : 1; };
@@ -2474,11 +2478,14 @@ function premioFalta(v, evTrim, obj, ind, alvo, cat){
   if (val(1000) < alvo) return null; let lo=0, hi=1000; for (let i=0;i<40;i++){ const m=(lo+hi)/2; if (val(m)>=alvo) hi=m; else lo=m; } return hi;
 }
 // que trimestre se paga num RUN e qual a prestação (1…n)
+const reciboDe = (mesRun, v) => somaMeses(mesRun, +(premioDe(v||versaoDe((PLANO||{versoes:[PLANO_DEF]}).versoes, mesRun)).recibo ?? 2));
+const reciboTxt = (mesRun, v) => mesTxt(reciboDe(mesRun, v));
 function premioEmPagamento(v, mesRun){
-  const P = premioDe(v);
-  for (let k=0; k<P.prestacoes; k++){ const e = somaMeses(mesRun, -(+P.atraso + k)); if (+e.split('-')[1] % 3 === 0) return {trim: trimId(e), k: k+1, n: P.prestacoes}; }
+  const P = premioDe(v), rec = somaMeses(mesRun, +(P.recibo ?? 2));
+  for (let k=0; k<P.prestacoes; k++){ const e = somaMeses(rec, -(+P.atraso + k)); if (+e.split('-')[1] % 3 === 0) return {trim: trimId(e), k: k+1, n: P.prestacoes}; }
   return null;
 }
+// meses de RECIBO em que se pagam as prestações do prémio de um trimestre
 const runsDoPremio = (v, trim) => { const P=premioDe(v), fim=trimMeses(trim)[2]; return Array.from({length:P.prestacoes}, (_,k)=>somaMeses(fim, +P.atraso+k)); };
 // dias úteis (seg–sex, sem feriados nacionais)
 function pascoa(a){ const b=a%19,c=Math.floor(a/100),d=a%100,e=Math.floor(c/4),f=c%4,g=Math.floor((c+8)/25),h=Math.floor((c-g+1)/3),i=(19*b+c-e-h+15)%30,k=Math.floor(d/4),l=d%4,m=(32+2*f+2*k-i-l)%7,n=Math.floor((b+11*i+22*m)/451),mes=Math.floor((i+m-7*n+114)/31),dia=((i+m-7*n+114)%31)+1; return new Date(a,mes-1,dia); }
@@ -2595,7 +2602,7 @@ function drawComissao(podeEscolher, vends){
       </div>
       <div class="cm-k">
         <div class="g"><span>${atual?'Comissão atual (prevista)':'Prevista · PN do mês'}</span><b id="cm-eur">${eur(c.total)}</b></div>
-        ${atual?`<div class="g"><span>Fim do mês</span><b id="cm-peur">~${eur0(p.total)}</b></div>`:`<div class="g" title="Valor pago no RUN deste mês, a todos os PN (incluindo PN de meses anteriores, prémios e charge-backs)"><span>Pago no RUN de ${mesTxt(CM.mes).split(' ')[0]}</span><b>${CM.dados.pagoRun!=null?eur(CM.dados.pagoRun):'—'}</b></div>`}
+        ${atual?`<div class="g"><span>Fim do mês</span><b id="cm-peur">~${eur0(p.total)}</b></div>`:`<div class="g" title="Valor pago no RUN deste mês, a todos os PN (incluindo PN de meses anteriores, prémios e charge-backs)"><span>Pago no RUN de ${mesTxt(CM.mes).split(' ')[0]} (recibo de ${reciboTxt(CM.mes).split(' ')[0]})</span><b>${CM.dados.pagoRun!=null?eur(CM.dados.pagoRun):'—'}</b></div>`}
         <div class="r"><span>Escalão</span><b>${escTxt(v,c.i)}</b></div>
         ${atual?`<div><span>Eventos fim do mês</span><b>~${Math.round(p.pts)}</b></div>`:`<div><span>PN do mês</span><b>${pnMes.length}</b></div>`}
         <div><span>Objetivos do mês</span><b style="color:var(--ok);letter-spacing:2px">${'●'.repeat(c.cumpridos)}${'○'.repeat(Math.max(0,v.objetivos.length-c.cumpridos))}</b></div>
@@ -2627,7 +2634,7 @@ function drawComissao(podeEscolher, vends){
       <tbody>${porPN.map(x=>{ const pg=CM.dados.pagas?.[x.r.id], tem=pg!=null; return `<tr class="click" data-id="${x.r.id}"><td><b>${x.r.numero||''}</b></td><td>${esc(x.r.cliente?.nome)}</td><td class="num">${x.r.nLinhas||(x.r.linhas||[]).length}</td><td class="num">${f1(x.pts)}</td><td class="num">${eur(x.val)}</td><td class="num">${tem?eur(pg):'—'}</td><td class="num">${tem?eur(x.val-pg):'—'}</td><td>${saldoTxt(x.val, pg||0, tem)}</td></tr>`; }).join('')||'<tr><td colspan="8" class="muted">Ainda sem PN neste mês.</td></tr>'}</tbody>
       ${porPN.length?(()=>{ const tp=porPN.reduce((a,x)=>a+(CM.dados.pagas?.[x.r.id]||0),0), np=porPN.filter(x=>CM.dados.pagas?.[x.r.id]!=null).length; return `<tfoot><tr class="tot"><td colspan="3">Total · ${np} de ${porPN.length} PN com pagamento</td><td class="num">${f1(c.pts)}</td><td class="num">${eur(c.total)}</td><td class="num">${eur(tp)}</td><td class="num">${eur(c.total-tp)}</td><td>${np===porPN.length?saldoTxt(c.total,tp,true):''}</td></tr></tfoot>`; })():''}</table>
       <p class="muted" style="font-size:12px;margin-bottom:0">Previsão com o escalão e a majoração atuais. A comissão final é apurada quando a Vodafone paga cada linha (normalmente no RUN do mês seguinte) e pode incluir prémios trimestrais ou acertos. A coluna «Paga» soma o que estes PN já receberam nos RUN seguintes. Clique num PN para ver todos os pagamentos.</p></div>
-    <div class="card scroll"><h2>Comissões pagas · RUN de ${mesTxt(CM.mes)}${CM.dados.pagoRun!=null?` · ${eur(CM.dados.pagoRun)}`:''}</h2>
+    <div class="card scroll"><h2>Comissões pagas · RUN de ${mesTxt(CM.mes)} · recibo de ${reciboTxt(CM.mes)}${CM.dados.pagoRun!=null?` · ${eur(CM.dados.pagoRun)}`:''}</h2>
       ${CM.dados.runDet.length ? `<table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Movimentos</th><th class="num">Pago neste RUN</th></tr></thead>
       <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr ${p.rpnId?`class="click" data-rid="${esc(p.rpnId)}"`:''}><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total pago neste RUN (inclui PN de meses anteriores e charge-backs)</td><td class="num">${eur(CM.dados.pagoRun||0)}</td></tr></tfoot></table>` : `<p class="muted" style="margin:0">Ainda não há comissões apuradas no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
@@ -2670,11 +2677,11 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
   if (pp) { const vq = versaoDe(PLANO.versoes, trimMeses(pp.trim)[2]);
     const gr = (CM.dados.runDet||[]).filter(x=>x.premio || (x.linhas||[]).some(l=>/prémio trimestral/i.test(l.tipo||'')) && !x.rpnId);
     const qq = pp.pns ? premioCalc(vq, eventosDe(pp.pns), objDe(CM.uid, vq, trimMeses(pp.trim)[2]), indiceDe(CM.uid, trimMeses(pp.trim)[2])) : null, runs = runsDoPremio(vq, pp.trim);
-    pg = `<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Em pagamento no RUN de ${mesTxt(CM.mes)}</div>
+    pg = `<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Em pagamento no recibo de ${reciboTxt(CM.mes)} (RUN de ${mesTxt(CM.mes)})</div>
       <div style="font-size:15px;margin:6px 0 2px">Prémio do <b>${trimTxt(pp.trim)}</b></div>
       ${qq ? `<div class="cm-big" style="font-size:34px">${eur(gr.length ? gr.reduce((a,x)=>a+(+x.valor||0),0) : qq.prest(pp.k))} € <small>prestação ${pp.k} de ${pp.n}</small></div>
         <p class="muted" style="font-size:13px;margin:6px 0 0">Prémio do trimestre: <b>${eur(qq.premio)} €</b> (apurado ${eur(qq.apurado)} €${qq.ind!==1?` · índice ${pctE(qq.ind)}`:''}) · ${qq.cats.map(c=>`Nova ${esc(c.nome)} ${f1(c.ev)} ev. (${pctE(c.at)})`).join(' · ')}.<br>
-        Prestações nos RUN de ${runs.map(m=>mesTxt(m).split(' ')[0]).join(', ')}. ${gr.length?'<b>Já gravado neste RUN.</b>':'Estimativa até a comissão do RUN ser gravada.'}</p>
+        Prestações nos recibos de ${runs.map(m=>mesTxt(m).split(' ')[0]).join(', ')}. ${gr.length?'<b>Já gravado neste RUN.</b>':'Estimativa até a comissão do RUN ser gravada.'}</p>
         ${qq.premio<=0?`<div class="cm-msg"><i aria-hidden="true">ℹ️</i><p>O ${trimTxt(pp.trim)} não chegou ao primeiro patamar (${eur0(pts[0])}).</p></div>`:''}` : `<p class="muted">Não foi possível ler os PN desse trimestre.</p>`}`;
   }
   return `<div class="card"><h2 style="margin-bottom:4px">Prémio trimestral</h2>
@@ -2688,7 +2695,7 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
         ${dica?`<div class="cm-msg ${q.prox?'push':'cel'}"><i aria-hidden="true">${q.prox?'🎯':'🏆'}</i><p>${dica}${cap.length&&q.prox?` Cada evento Nova também sobe o atingimento${cap.length===1?' de '+esc(cap[0].nome):''}, por isso vale a dobrar.`:''}</p></div>`:''}
         ${fim?`<div class="cm-msg"><i aria-hidden="true">📈</i><p>Ao ritmo atual, fecha o trimestre com ~${eur0(fim.apurado)} apurados → prémio de <b>${eur0(fim.premio)}</b>.</p></div>`:''}
       </div>
-      <div>${pg || `<p class="muted">Nenhum prémio trimestral em pagamento no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
+      <div>${pg || `<p class="muted">Nenhum prémio trimestral em pagamento no recibo de ${reciboTxt(CM.mes)}.</p>`}</div>
     </div>
     <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × ${P.regra==='minimo'?'a % mais baixa entre os objetivos Nova e Refidelização da categoria':'% do objetivo trimestral Nova atingido'} (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} sobre o prémio.`:''}</p></div>`;
 }
@@ -2834,6 +2841,8 @@ async function importarRun(file, box){
   } catch(e){ console.error(e); toast(errTxt(e)||e.message, true); }
 }
 // ---- conciliação RUN ↔ PN e comissão de cada vendedor ----
+// prémios da Vodafone à agência (código começa por PRM): ficam no PN para a rentabilidade, mas NÃO dão comissão ao vendedor nem lhe aparecem
+const SEM_COMISSAO = /^PRM/i;
 // Regra (Ricardo, out 2026): cada linha recebida da Vodafone é imputada ao PN (pelo POS) e ao vendedor do PN;
 // o vendedor recebe a % do escalão que atingiu NO MÊS DO PN (+ majoração desse mês). Charge-backs seguem a mesma regra (negativos).
 async function conciliarRun(R){
@@ -2867,7 +2876,9 @@ async function conciliarRun(R){
     const v = versaoDe(PLANO.versoes, mp), vf = fin ? versaoDe(fin.versoes||[FIN_DEF], mp) : {pct:[]};
     Object.entries(porV).forEach(([uid, rs])=>{ const c=comCalc(v, eventosDe(rs), objDe(uid, v, mp)); tier[uid+'|'+mp] = {pts:c.pts, esc:escTxt(v,c.i), pct: c.i>=0 ? (+vf.pct[c.i]||0) : 0, maj:c.maj, cumpridos:c.cumpridos}; });
   }
-  casa.forEach(x=>{ if (x.uid && x.mesPN && x.f!=='ag') { const t=tier[x.uid+'|'+x.mesPN]||{pct:0,maj:0,esc:0}; x.t=t; x.com=Math.round(x.l[RL.val]*t.pct/100*(1+t.maj)*100)/100; } else x.com=0; });
+  casa.forEach(x=>{ x.prm = SEM_COMISSAO.test(String(x.l[RL.cod]||''));
+    if (x.uid && x.mesPN && x.f!=='ag' && !x.prm) { const t=tier[x.uid+'|'+x.mesPN]||{pct:0,maj:0,esc:0}; x.t=t; x.com=Math.round(x.l[RL.val]*t.pct/100*(1+t.maj)*100)/100; }
+    else { x.com=0; if (x.uid && x.mesPN) x.t=tier[x.uid+'|'+x.mesPN]||null; } });
   return {casa, tier};
 }
 const CMS_RUN_RANK = (snap, uid) => { const r=snap.docs.find(d=>!d.data().uid)?.data()?.ranking||[]; return (r.find(x=>x.uid===uid)||{}).nome||''; };
@@ -2900,7 +2911,19 @@ function cmsVend(box){
       box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
       ligaMes(()=>cmsVend(box)); return; }
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
-    const {casa} = (R.fechado && R.calcN) ? await casaDoFecho(R) : await conciliarRun(R);
+    let casa;
+    if (R.fechado && R.calcN) casa = (await casaDoFecho(R)).casa;
+    else if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R) casa = CMS_CASA.casa;
+    else if (CMS_CONC===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; }
+    else { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
+      box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span><button class="btn pri" id="cms-conc">Conciliar RUN com os PN</button></div>
+        <p class="muted" style="font-size:13px;margin-bottom:0">RUN de ${mesTxt(CMS_MES)}: ${R.linhas.length} linhas, ${eur(R.linhas.reduce((a,l)=>a+l[RL.val],0))} €. Para obter o cálculo por vendedor, as linhas por imputar, as diferenças com o PHC e o botão «Fechar RUN», carregue em <b>«Conciliar RUN com os PN»</b> (lê os PN da plataforma).</p></div>
+        ${cardGrav}<div id="cms-mapa"></div><div id="cms-pt"></div>`;
+      $('#cms-conc').onclick = () => { CMS_CONC = CMS_MES; cmsVend(box); };
+      ligaMes(()=>cmsVend(box)); desenharPremios($('#cms-pt'));
+      box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
+      cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
+      return; }
     const pv = {}; casa.forEach(x=>{ if (!x.uid || x.f==='ag') return; const o=pv[x.uid]=pv[x.uid]||{uid:x.uid, rec:0, com:0, n:0, cb:0, meses:{}}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; if (x.l[RL.val]<0) o.cb+=x.com;
       const mm=o.meses[x.mesPN]=o.meses[x.mesPN]||{rec:0,com:0,t:x.t}; mm.rec+=x.l[RL.val]; mm.com+=x.com; });
     const semTudo = casa.filter(x=>!x.uid && x.f!=='ag'), sem = semTudo.filter(x=>!x.r), semVend = semTudo.filter(x=>x.r), ag = casa.filter(x=>x.f==='ag'), totRec = casa.reduce((a,x)=>a+x.l[RL.val],0);
@@ -2958,17 +2981,22 @@ async function premiosRun(mesRun, trimForcado){
     .filter(x=>x.q.cats.some(c=>c.ev>0 || c.evR>0)).sort((a,b)=>b.q.apurado-a.q.apurado);
   return {...pg, vq, lista, porV, runs: runsDoPremio(vq, pg.trim)};
 }
-let PT_TRIM = null;
+let PT_TRIM = null, PT_ON = false, CMS_CONC = null, CMS_CASA = null, VAL_CONC = null;
 async function desenharPremios(box){
   const pg = premioEmPagamento(versaoDe((await lerPlano()).versoes, CMS_MES), CMS_MES);
   const lista = Array.from({length:8},(_,k)=>trimId(somaMeses(mesLocal(), -3*k)));
   if (!PT_TRIM || !lista.includes(PT_TRIM)) PT_TRIM = pg?.trim || lista[1];
+  if (!PT_ON) { box.innerHTML = `<div class="card"><div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Prémio trimestral</h2><span class="sp"></span>
+      <div><label>Trimestre</label><select id="pt-t">${lista.map(t=>`<option value="${t}" ${t===PT_TRIM?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div><button class="btn pri" id="pt-go">Calcular prémio</button></div>
+      <p class="muted" style="font-size:13px;margin-bottom:0">Para obter os dados, carregue em «Calcular prémio» (lê os PN do trimestre).</p></div>`;
+    box.querySelector('#pt-t').onchange = e => { PT_TRIM = e.target.value; };
+    box.querySelector('#pt-go').onclick = () => { PT_ON = true; desenharPremios(box); }; return; }
   box.innerHTML = `<div class="card muted">A calcular o prémio trimestral…</div>`;
   try { const PR = await premiosRun(CMS_MES, PT_TRIM), emPag = pg && pg.trim===PT_TRIM;
     const pctE = x => Math.round(x*100)+' %', P = premioDe(PR.vq), cats = P.cats, mn = P.regra==='minimo';
     box.innerHTML = `<div class="card scroll"><div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Prémio trimestral</h2><span class="sp"></span>
       <div><label>Trimestre</label><select id="pt-t">${lista.map(t=>`<option value="${t}" ${t===PT_TRIM?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div></div>
-    <p class="muted" style="font-size:12px">Pago nos RUN de ${PR.runs.map(m=>mesTxt(m)).join(', ')}${emPag?` · <b>neste RUN: prestação ${pg.k} de ${pg.n}</b>`:''}. Eventos Nova pela data do PN, calculados pela plataforma a partir da RLMC das linhas; objetivos e índice de cada vendedor (Plano e objetivos). Regra do atingimento: <b>${mn?'a % mais baixa entre Nova e Refidelização da categoria (plano escrito)':'só o objetivo Nova da categoria (mapa Excel)'}</b>.</p>
+    <p class="muted" style="font-size:12px">Pago nos recibos de ${PR.runs.map(m=>mesTxt(m)).join(', ')} (RUN de ${PR.runs.map(m=>mesTxt(somaMeses(m,-(+premioDe(PR.vq).recibo||2))).split(' ')[0]).join(', ')})${emPag?` · <b>neste RUN (recibo de ${reciboTxt(CMS_MES)}): prestação ${pg.k} de ${pg.n}</b>`:''}. Eventos Nova pela data do PN, calculados pela plataforma a partir da RLMC das linhas; objetivos e índice de cada vendedor (Plano e objetivos). Regra do atingimento: <b>${mn?'a % mais baixa entre Nova e Refidelização da categoria (plano escrito)':'só o objetivo Nova da categoria (mapa Excel)'}</b>.</p>
     <table><thead><tr><th>Vendedor</th>${cats.map(c=>`<th class="num">Nova ${esc(c.nome)}</th><th class="num">Obj.</th><th class="num">% Nova</th>${mn?`<th class="num">% Ref</th>`:''}<th class="num">€</th>`).join('')}<th class="num">Apurado</th><th class="num">Patamar</th><th class="num">Índice</th><th class="num">Prémio</th><th class="num">/mês</th>${emPag?'<th class="num">Este RUN</th>':''}</tr></thead>
     <tbody>${PR.lista.map(x=>`<tr class="click" data-pv="${x.uid}" title="Ver os PN e os eventos Nova" style="${x.inativo?'opacity:.6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Inativo: não recebe prestações (os incentivos cessam com o fim do vínculo)">inativo</span>':''}</td>${x.q.cats.map(c=>`<td class="num">${n3(c.ev)}</td><td class="num">${f1(c.ob)}</td><td class="num">${pctE(c.atN)}</td>${mn?`<td class="num">${pctE(c.atR)}</td>`:''}<td class="num">${eur(c.val)}</td>`).join('')}<td class="num">${eur(x.q.apurado)}</td><td class="num">${x.q.patamar?eur(x.q.patamar):'—'}</td><td class="num">${pctE(x.q.ind)}</td><td class="num"><b>${x.q.premio?eur(x.q.premio):'—'}</b></td><td class="num">${x.q.premio?eur(x.q.prest(1)):'—'}</td>${emPag?`<td class="num"><b>${x.prest?eur(x.prest):'—'}</b></td>`:''}</tr>`).join('')||`<tr><td colspan="20" class="muted">Sem eventos Nova no trimestre.</td></tr>`}</tbody>
     <tfoot><tr class="tot"><td colspan="${1+cats.length*(mn?5:4)+3}">Total</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.premio,0))}</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.prest(1),0))}</td>${emPag?`<td class="num">${eur(PR.lista.reduce((a,x)=>a+x.prest,0))}</td>`:''}</tr></tfoot></table>
@@ -3014,7 +3042,8 @@ function atribuirLinha(x, R, depois){
         box.querySelectorAll('[data-pos]').forEach(b=>b.onclick=async()=>{ const r=rs.find(y=>y.id===b.dataset.pos);
           try { await associarAoPN(r, {pos:l[RL.pos]}, `linha do RUN de ${mesTxt(R.mes)} (${l[RL.cod]})`); close(); toast(`POS ${l[RL.pos]} associado ao PN ${r.numero}.`); CMS_RUN=null; depois(); } catch(e){ toast(errTxt(e), true); } });
       } catch(e){ box.innerHTML=`<p>Erro: ${esc(errTxt(e))}</p>`; } };
-    m.querySelector('#ap-go').onclick = ir; m.querySelector('#ap-v').onkeydown = e => { if (e.key==='Enter') ir(); }; ir();
+    m.querySelector('#ap-go').onclick = ir; m.querySelector('#ap-v').onkeydown = e => { if (e.key==='Enter') ir(); };
+    m.querySelector('#ap-r').innerHTML = '<p class="muted">Escolha o critério e carregue em «Procurar».</p>';
   });
 }
 // junta um POS/MSISDN antigo ou adicional ao PN (fica para o matching do RUN e no histórico do PN)
@@ -3061,6 +3090,11 @@ async function fecharRun(mes, fechar, casa){
     const L = casa.map(x=>JSON.stringify([x.i, x.r?.id||'', x.r?.numero||'', x.r?.cliente?.nome||'', x.uid||'', x.mesPN||'', x.com||0, x.t?.esc||'', x.t?.maj||0, x.r?.vendedorNome||'', x.r?.vendedorPHC||'', x.manual?1:0, x.porMsisdn?1:0]));
     for (let k=0; k*1500<L.length; k++) b.set(doc(db,'runs',mes,'calc',String(k)), {linhas:L.slice(k*1500,(k+1)*1500)});
     b.set(doc(db,'runs',mes), {fechado:{em:new Date().toISOString(), por:S.me.nome}, calcN:L.length, calcEm:new Date().toISOString()}, {merge:true});
+    await b.commit(); b = writeBatch(db);
+    // rentabilidade de cada PN (confidencial: comissoes/pn_<id>, só Master e BO Financeiro): tudo o que a Vodafone pagou, incluindo PRM
+    const porPN = {}; casa.filter(x=>x.r?.id).forEach(x=>{ const o=porPN[x.r.id]=porPN[x.r.id]||{rec:0, prm:0, com:0, linhas:[]}; const v=x.l[RL.val]||0;
+      o.rec=r2(o.rec+v); if (x.prm) o.prm=r2(o.prm+v); o.com=r2(o.com+(x.com||0)); o.linhas.push([x.l[RL.cod], x.l[RL.pos], x.l[RL.msisdn], v, x.com||0, descVDF(x.l)]); });
+    let n=0; for (const [id,o] of Object.entries(porPN)) { b.set(doc(db,'comissoes','pn_'+id), {rpnId:id, runs:{[mes]:o}}, {merge:true}); if (++n>=400) { await b.commit(); b=writeBatch(db); n=0; } }
   } else b.set(doc(db,'runs',mes), {fechado:null, calcN:null, calcEm:null}, {merge:true});
   await b.commit();
   await logAlt({tipo: fechar?'RUN fechado':'RUN reaberto', desde:mes, resumo:`RUN de ${mesTxt(mes)}${fechar&&casa?' (cálculo guardado)':''}`}); CMS_RUN=null; return true;
@@ -3071,7 +3105,7 @@ async function casaDoFecho(R){
   Object.entries(S.users).forEach(([uid,u])=>{ if (u.sfid) sfidUid[String(u.sfid).trim()]=uid; });
   const linhas = sn.docs.sort((a,b)=>(+a.id)-(+b.id)).flatMap(d=>d.data().linhas.map(x=>JSON.parse(x)));
   const casa = linhas.map(([i, id, numero, cliente, uid, mesPN, com, e, maj, vn, vp, man, pm])=>{ const l=R.linhas[i]||[], val=l[RL.val]||0;
-    return {i, l, f:familiaCod(l[RL.cod], l[RL.pos]), r: id?{id, numero, cliente:{nome:cliente}, mesRef:mesPN, vendedorNome:vn, vendedorPHC:vp}:null, uid:uid||null, mesPN:mesPN||null, com,
+    return {i, l, prm: SEM_COMISSAO.test(String(l[RL.cod]||'')), f:familiaCod(l[RL.cod], l[RL.pos]), r: id?{id, numero, cliente:{nome:cliente}, mesRef:mesPN, vendedorNome:vn, vendedorPHC:vp}:null, uid:uid||null, mesPN:mesPN||null, com,
       t: uid&&mesPN ? {esc:e, maj, pct: val ? Math.round(com/(val*(1+maj))*1000)/10 : 0} : null, manual: man?{}:null, porMsisdn:!!pm, sfidUid: sfidUid[l[RL.sfid]]||null}; });
   // o % de cada mês: o mesmo para todas as linhas desse vendedor/mês → usa a linha de maior valor (menos arredondamento)
   const best = {}; casa.forEach(x=>{ if (!x.t) return; const k=x.uid+'|'+x.mesPN; if (!best[k] || Math.abs(x.l[RL.val])>Math.abs(best[k].l[RL.val])) best[k]=x; });
@@ -3081,7 +3115,7 @@ async function casaDoFecho(R){
 // diferenças plataforma × PHC (ou o que foi gravado) para um vendedor num RUN, PN a PN
 function compararPHC(uid, casa, g, mes){
   const nome = userNome(uid) || uid, mst = isMaster();
-  const P = {}; casa.filter(x=>x.uid===uid).forEach(x=>{ const id=x.r?.id||'?'; const o=P[id]=P[id]||{id, numero:x.r?.numero||'', cliente:x.r?.cliente?.nome||'', mesPN:x.mesPN||'', rec:0, com:0, n:0, t:x.t}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; });
+  const P = {}; casa.filter(x=>x.uid===uid && !x.prm).forEach(x=>{ const id=x.r?.id||'?'; const o=P[id]=P[id]||{id, numero:x.r?.numero||'', cliente:x.r?.cliente?.nome||'', mesPN:x.mesPN||'', rec:0, com:0, n:0, t:x.t}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; });
   const G = {}; (g?.detalhe||[]).forEach(p=>{ const id=p.rpnId||('·'+(p.numero||p.cliente)); const o=G[id]=G[id]||{id, numero:p.numero||'', cliente:p.cliente||'', mesPN:p.mesPN||'', pago:0, linhas:0, premio:!!p.premio}; o.pago+=+p.valor||0; o.linhas+=(p.linhas||[]).length; });
   const outro = {}; casa.forEach(x=>{ if (x.r?.id && x.uid!==uid) outro[x.r.id] = x.uid ? (userNome(x.uid)||x.uid) : 'por imputar / sem vendedor'; });
   const ids = [...new Set([...Object.keys(P), ...Object.keys(G)])];
@@ -3120,18 +3154,18 @@ async function mapaPagamentos(mes){
 }
 async function cardMapa(mes, R){
   const L = await mapaPagamentos(mes); if (!L.length) return '';
-  return `<div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Mapa de pagamentos · RUN de ${mesTxt(mes)}</h2>${R?.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(R.fechado.por||'')}</span>`:'<span class="badge">por fechar</span>'}<span class="sp"></span><button class="btn sm" id="mp-x">Descarregar Excel</button></div>
+  return `<div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Mapa de pagamentos · recibo de ${reciboTxt(mes)} (RUN de ${mesTxt(mes)})</h2>${R?.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(R.fechado.por||'')}</span>`:'<span class="badge">por fechar</span>'}<span class="sp"></span><button class="btn sm" id="mp-x">Descarregar Excel</button></div>
     <table style="margin-top:8px"><thead><tr><th>Colaborador</th><th>Nº PHC</th><th>Tipo</th><th>Categoria</th><th class="num">Comissão do RUN</th><th class="num">Prémio trimestral</th><th class="num">Total a pagar</th></tr></thead>
     <tbody>${L.map(x=>`<tr style="${x.inativo?'background:#fff4d6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Utilizador inativo: os incentivos cessam com o fim do vínculo">inativo</span>':''}</td><td>${esc(x.phc)}</td><td>${x.cat}</td><td>${esc(x.categoria)}</td><td class="num">${eur(x.com)}</td><td class="num">${x.premio?eur(x.premio):'—'}</td><td class="num"><b>${eur(x.total)}</b></td></tr>`).join('')}</tbody>
     <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${eur(L.reduce((a,x)=>a+x.com,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.premio,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.total,0))}</td></tr></tfoot></table>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Valores gravados para o RUN de ${mesTxt(mes)} (comissões dos vendedores com charge-backs, prestação do prémio trimestral e parte de cada BO na Produção BO). Valores negativos = a descontar.</p></div>`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">A pagar no recibo de ${reciboTxt(mes)}. Valores gravados para o RUN de ${mesTxt(mes)} (comissões dos vendedores com charge-backs, prestação do prémio trimestral e parte de cada BO na Produção BO). Valores negativos = a descontar.</p></div>`;
 }
 async function descarregarMapa(mes){
   const L = await mapaPagamentos(mes), X = await carregarXLSX();
-  const ws = X.utils.aoa_to_sheet([[`Mapa de pagamentos de comissões · RUN de ${mesTxt(mes)}`],[],['Colaborador','Nº PHC','Tipo','Categoria','Comissão do RUN (€)','Prémio trimestral (€)','Total a pagar (€)'],
+  const ws = X.utils.aoa_to_sheet([[`Mapa de pagamentos de comissões · recibo de ${reciboTxt(mes)} · RUN de ${mesTxt(mes)}`],[],['Colaborador','Nº PHC','Tipo','Categoria','Comissão do RUN (€)','Prémio trimestral (€)','Total a pagar (€)'],
     ...L.map(x=>[x.nome+(x.inativo?' (inativo)':''), x.phc, x.cat, x.categoria, x.com, x.premio, x.total]), [], ['Total','','','', r2(L.reduce((a,x)=>a+x.com,0)), r2(L.reduce((a,x)=>a+x.premio,0)), r2(L.reduce((a,x)=>a+x.total,0))]]);
   ws['!cols'] = [{wch:28},{wch:9},{wch:12},{wch:16},{wch:18},{wch:20},{wch:18}];
-  const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Pagamentos'); X.writeFile(wb, `Comissoes-RUN-${mes}.xlsx`);
+  const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Pagamentos'); X.writeFile(wb, `Comissoes-recibo-${reciboDe(mes)}-RUN-${mes}.xlsx`);
 }
 // ---- manual do comissionamento (só Master e BO Financeiro: está dentro do menu Comissionamento) ----
 function cmsManual(box){
@@ -3151,10 +3185,10 @@ function cmsManual(box){
       <li><b>Associar o POS ao PN</b> — é o antigo «inserir o POS novo no PN e recalcular»: o POS fica no PN e esta linha e as seguintes passam a ir para lá sozinhas.</li>
       <li>As atribuições aparecem em <i>Atribuições manuais deste RUN</i> e podem ser desfeitas. Linhas de agência (sem POS: IC_, CT_PL_) não são de vendedores.</li></ul></li>
     <li><b>Conferir o cálculo (Master).</b> Em <i>Cálculo da plataforma</i>: escalão, % e majoração de cada vendedor no mês de cada PN, charge-backs e margem. Um RUN atrasado é sempre calculado com as condições do mês do PN (plano e vendedores em vigor nessa altura).</li>
-    <li><b>Prémio trimestral.</b> Se este RUN paga uma prestação (${P.prestacoes} prestações, a 1.ª ${P.atraso} meses depois do fim do trimestre), confira o quadro <i>Prémio trimestral</i> no mesmo separador.</li>
+    <li><b>Prémio trimestral.</b> Se este RUN paga uma prestação (${P.prestacoes} prestações; o 1.º trimestre paga-se nos recibos de junho, julho e agosto, ou seja, com os RUN de abril, maio e junho), confira o quadro <i>Prémio trimestral</i> no mesmo separador.</li>
     <li><b>Gravar (Master).</b> <i>Gravar comissões do mês</i>: grava o ranking (visível a todos), o detalhe por PN de cada vendedor e a prestação do prémio trimestral.</li>
     <li><b>Mapa de pagamentos.</b> Confira o <i>Mapa de pagamentos</i> (vendedores: comissão do RUN + prémio; BackOffice: parte da Produção BO). Os incentivos cessam com o fim do vínculo do colaborador: quem já saiu não deve ser pago.</li>
-    <li><b>Fechar o RUN (Master)</b> e <b>Descarregar Excel</b> do mapa para enviar à contabilidade. Depois de fechado não se reimporta, regrava nem atribui; só o Master pode reabrir.</li>
+    <li><b>Fechar o RUN (Master)</b> e <b>Descarregar Excel</b> do mapa para enviar à contabilidade. O RUN de um mês é pago no recibo de dois meses depois (RUN de julho → recibo de setembro); o mapa já traz o mês do recibo. Depois de fechado não se reimporta, regrava nem atribui; só o Master pode reabrir.</li>
   </ol>
   <h3>Todos os trimestres</h3>
   <ol>
@@ -3187,6 +3221,17 @@ function premioDetalhe(PR, uid){
     m.style.maxWidth='1100px'; m.style.width='96vw'; m.querySelector('#pd-c').onclick=close;
     m.querySelectorAll('[data-pn]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.pn)); });
 }
+async function rentabilidadePN(r, box){
+  box.innerHTML = '<p class="muted">A ler…</p>';
+  try { const sn = await getDoc(doc(db,'comissoes','pn_'+r.id)), runs = sn.exists() ? (sn.data().runs||{}) : {}, ms = Object.keys(runs).sort();
+    if (!ms.length) { box.innerHTML = '<p class="muted" style="font-size:13px">Ainda sem dados: a rentabilidade é guardada quando um RUN é fechado (Comissões por vendedor › Fechar RUN).</p>'; return; }
+    const T = k => r2(ms.reduce((a,m)=>a+(+runs[m][k]||0),0));
+    box.innerHTML = `<table style="margin-top:6px"><thead><tr><th>RUN</th><th class="num">Recebido Vodafone</th><th class="num">dos quais PRM</th><th class="num">Comissão vendedor</th><th class="num">Margem</th></tr></thead>
+      <tbody>${ms.map(m=>{ const o=runs[m]; return `<tr><td><b>${mesTxt(m)}</b><details style="font-size:11px"><summary class="muted" style="cursor:pointer">${(o.linhas||[]).length} movimentos</summary>${(o.linhas||[]).map(l=>`<div>${esc(l[0])} · ${esc(l[1]||'')} · ${esc(l[2]||'')} · <b>${eur(l[3])}</b>${l[4]?' → vend. '+eur(l[4]):''} <span class="muted">${esc(l[5]||'')}</span></div>`).join('')}</details></td><td class="num">${eur(o.rec)}</td><td class="num">${o.prm?eur(o.prm):'—'}</td><td class="num">${eur(o.com)}</td><td class="num"><b>${eur(o.rec-o.com)}</b></td></tr>`; }).join('')}</tbody>
+      <tfoot><tr class="tot"><td>Total</td><td class="num">${eur(T('rec'))}</td><td class="num">${eur(T('prm'))}</td><td class="num">${eur(T('com'))}</td><td class="num">${eur(T('rec')-T('com'))}</td></tr></tfoot></table>
+      <p class="muted" style="font-size:11px;margin:4px 0 0">Dos RUN já fechados. A comissão do vendedor é a calculada pela plataforma no fecho.</p>`;
+  } catch(e){ box.innerHTML = `<p>Erro: ${esc(errTxt(e))}</p>`; }
+}
 // grava o que os vendedores podem ver: só € de comissão (nunca o recebido nem a %)
 async function gravarComissoes(casa, lst){
   if (CMS_RUN?.fechado) return toast('Este RUN está fechado.', true);
@@ -3202,7 +3247,7 @@ async function gravarComissoes(casa, lst){
     const rank = [...lst.map(o=>({uid:o.uid, nome:userNome(o.uid), cat:'Vendedor', valor:Math.round(o.com*100)/100})).filter(x=>S.users[x.uid]?.perfil!=='master'), ...await rankingBO(mes)];
     b.set(doc(db,'comissoesVend',mes), {mes, ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome});
     lst.forEach(o=>{ const pns={};
-      casa.filter(x=>x.uid===o.uid && x.f!=='ag').forEach(x=>{ const p=pns[x.r.id]=pns[x.r.id]||{rpnId:x.r.id, numero:x.r.numero||'', cliente:x.r.cliente?.nome||'', mesPN:x.mesPN, valor:0, linhas:[]};
+      casa.filter(x=>x.uid===o.uid && x.f!=='ag' && !x.prm).forEach(x=>{ const p=pns[x.r.id]=pns[x.r.id]||{rpnId:x.r.id, numero:x.r.numero||'', cliente:x.r.cliente?.nome||'', mesPN:x.mesPN, valor:0, linhas:[]};
         p.valor=Math.round((p.valor+x.com)*100)/100; p.linhas.push({pos:x.l[RL.pos], cod:x.l[RL.cod], msisdn:x.l[RL.msisdn], plano:x.l[RL.ppn], tipo:FAMILIAS.find(f=>f[0]===x.f)[1], ativacao:x.l[RL.cri], desc:descVDF(x.l), eventos:x.l[RL.rlmcA]?Math.round(x.l[RL.rlmcA]/SCORE_BASE*1000)/1000:0, valor:x.com}); });
       b.set(doc(db,'comissoesVend',mes+'_'+o.uid), {mes, uid:o.uid, valor:Math.round(o.com*100)/100, pns:Object.keys(pns), detalhe:[...Object.values(pns), ...(prem[o.uid]?[prem[o.uid]]:[])], gravadoEm:serverTimestamp()}); });
     b.set(doc(db,'runs',mes), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome}, {merge:true});
@@ -3237,10 +3282,11 @@ async function cmsPlano(box){
           ${PR0.patamares.map((x,i)=>`<div><label>Patamar ${i+1} (€)</label>${inp('pr-pt-'+i,x,80)}</div>`).join('')}
           <div><label>Teto (€)</label>${inp('pr-teto',PR0.teto,80)}</div>
           <div><label>Prestações</label>${inp('pr-n',PR0.prestacoes,60,'1')}</div>
-          <div><label>1.ª prestação: meses após o fim do trimestre</label>${inp('pr-at',PR0.atraso,60,'1')}</div>
+          <div><label>Recibo: meses depois do RUN</label>${inp('pr-rc',PR0.recibo??2,60,'1')}</div>
+          <div><label>Prémio: 1.º recibo, meses após o fim do trimestre</label>${inp('pr-at',PR0.atraso,60,'1')}</div>
           <div><label>Atingimento de cada categoria</label><select id="pr-rg"><option value="nova" ${PR0.regra!=='minimo'?'selected':''}>Só o objetivo Nova (como no Excel)</option><option value="minimo" ${PR0.regra==='minimo'?'selected':''}>O mais baixo entre Nova e Refidelização (plano escrito)</option></select></div>
         </div>
-        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % de atingimento da categoria (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Com ${PR0.atraso} meses, o prémio do 1.º trimestre paga-se nos RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}. Júnior/assistente: escreva os objetivos dele (ex.: 19,5 / 16,5) e índice 50 % no separador «Vendedores»; o índice reduz só o prémio, depois do patamar.</p></div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % de atingimento da categoria (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Comissão mensal: o RUN de um mês é pago no recibo ${PR0.recibo??2} meses depois (RUN de julho → recibo de ${mesTxt(somaMeses('2026-07',+(PR0.recibo??2))).split(' ')[0]}). Prémio: o do 1.º trimestre paga-se nos recibos de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}, juntamente com os RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(somaMeses(m,-(+(PR0.recibo??2)))).split(' ')[0]).join(', ')}. Júnior/assistente: escreva os objetivos dele (ex.: 19,5 / 16,5) e índice 50 % no separador «Vendedores»; o índice reduz só o prémio, depois do patamar.</p></div>
       <div class="card scroll"><h2>Objetivos trimestrais padrão</h2>
         <table><thead><tr><th></th>${v.objetivos.map(o=>`<th class="num">${esc(o.nome)}</th>`).join('')}</tr></thead>
         <tbody><tr class="tot"><td>Padrão (todos)</td>${v.objetivos.map(o=>`<td class="num">${inp('ob-d-'+o.id,o.trim)}</td>`).join('')}</tr></tbody></table>
@@ -3256,7 +3302,7 @@ async function cmsPlano(box){
       nv.pesos = Object.fromEntries(NAT_COM.map(n=>[n, num('pl-p-'+n.replace(/\W/g,''))]));
       nv.maj = v.maj.map((x,i)=>({n:+$('#pl-mn-'+i).value, pct:num('pl-mp-'+i)}));
       nv.objetivos = v.objetivos.map(o=>({...o, trim:num('ob-d-'+o.id)}));
-      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at'))), regra:$('#pr-rg').value};
+      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at'))), recibo:Math.max(0,Math.round(num('pr-rc'))), regra:$('#pr-rg').value};
       const ov = PLANO.objVend||{};
       return {nv, nf, ov};
     };
@@ -3370,11 +3416,13 @@ async function cmsVendedores(box){
       PLANO=null; CM.dados=null; TIER_MEM_LIMPAR(); toast('Objetivos do trimestre guardados.'); cmsVendedores(box); } catch(e){ toast(errTxt(e), true); } };
   desenhar(); contar();
   $('#vd-rel').onclick = () => religarPNPHC($('#vd-rel-tudo').checked, $('#vd-rel-log'));
-  // histórico
+  // histórico (só quando se pede)
+  $('#vd-log').innerHTML = '<button class="btn sm" id="vd-log-go">Ver histórico de alterações</button>';
+  $('#vd-log-go').onclick = async () => { $('#vd-log').textContent='A carregar…';
   try { const sn = await getDocs(query(collection(db,'comissoes','log','alteracoes'), orderBy('quando','desc'), limit(80)));
     const L = sn.docs.map(d=>d.data());
     $('#vd-log').innerHTML = L.length ? `<table><thead><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Em vigor desde</th><th>Alteração</th></tr></thead><tbody>${L.map(l=>`<tr><td style="white-space:nowrap">${esc(String(l.quando||'').slice(0,16).replace('T',' '))}</td><td>${esc(l.por||'')}</td><td>${esc(l.tipo||'')}${l.nome?` · <b>${esc(l.nome)}</b>`:''}</td><td>${l.desde?mesTxt(l.desde):''}</td><td style="font-size:12px">${esc(l.resumo||'')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">Ainda sem alterações registadas.</p>';
-  } catch(e){ $('#vd-log').textContent = 'Histórico indisponível ('+errTxt(e)+').'; }
+  } catch(e){ $('#vd-log').textContent = 'Histórico indisponível ('+errTxt(e)+').'; } };
 }
 const gravarPlanoCampos = async d => { const ref=doc(db,'config','planoVendedor');
   try { await updateDoc(ref, d); } catch(e){ if (e?.code==='not-found' || /no document/i.test(e?.message||'')) await setDoc(ref, d, {merge:true}); else throw e; } };
@@ -3481,12 +3529,14 @@ async function renderComPN(tc, r){
         <div style="border-left:3px solid var(--ok);padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Comissão paga</span><b style="display:block;font-size:21px">${eur(tGer)}</b></div>
         <div style="border-left:3px solid ${ger.length&&Math.abs(tPrev-tGer)<0.01?'var(--ok)':'var(--warn)'};padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Saldo (prevista − paga)</span><b style="display:block;font-size:21px">${eur(tPrev-tGer)}</b><div style="margin-top:4px">${saldoTxt(tPrev, tGer, ger.length>0)}</div></div></div>
       ${isFin()?`<div class="row" style="margin-top:10px"><button class="btn sm" id="cp-go">Corrigir contrato VDF / MSISDN</button>${(r.contratosAntigos||[]).length||(r.msisdnsAntigos||[]).length?`<span class="muted" style="font-size:12px">Associados: ${esc([...(r.contratosAntigos||[]),...(r.msisdnsAntigos||[])].join(', '))}</span>`:''}</div>`:''}
+      ${isFin()?`<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px"><div class="row" style="gap:10px;align-items:center"><b>🔒 Rentabilidade</b><span class="muted" style="font-size:12px">Só Master e BO Financeiro: tudo o que a Vodafone pagou por este PN (incluindo prémios PRM, que não vão para o vendedor).</span><span class="sp"></span><button class="btn sm" id="rent-go">Ver rentabilidade</button></div><div id="rent-b"></div></div>`:''}
       <p class="muted" style="font-size:12px;margin-bottom:0">Comissão de ${esc(r.vendedorNome||'')}. A prevista usa o escalão e a majoração de ${mesTxt(r.mesRef||mesLocal())} até hoje. A paga é a que foi apurada nos RUN da Vodafone (pode incluir prémios trimestrais e charge-backs). Saldo 0,00 € = tudo pago.</p></div>
       <div class="card scroll"><table><thead><tr><th>MSISDN</th><th>Referência</th><th>Natureza</th><th>Contrato VDF</th><th class="num">Eventos</th><th class="num">Prevista</th><th class="num">Paga</th><th class="num">Saldo</th><th>RUN</th><th>Estado</th></tr></thead>
       <tbody>${ls.map(x=>`<tr style="${x.g.length?'border-bottom:0':''}"><td>${esc(x.l.msisdn||'—')}</td><td><b>${esc(x.l.ref)}</b> <span class="muted" style="font-size:12px">${esc(x.l.designacao||'')}</span></td><td>${esc(x.n)}</td><td style="font-size:12px">${esc(x.l.contratoVDF||'')}</td><td class="num">${n3(x.s)}</td><td class="num">${eur(x.prev)}</td><td class="num">${x.g.length?eur(x.gv):'—'}</td><td class="num">${x.g.length?eur(x.prev-x.gv):'—'}</td><td style="font-size:12px">${[...new Set(x.g.map(g=>g.run.split('-').reverse().join('/')))].join(', ')}</td><td>${estado(x)}</td></tr>${movRows(x.g)}`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${n3(ls.reduce((a,x)=>a+x.s,0))}</td><td class="num">${eur(tPrev)}</td><td class="num">${eur(tGer)}</td><td class="num">${eur(tPrev-tGer)}</td><td colspan="2"></td></tr></tfoot></table>
       ${soltos.length?`<p class="muted" style="font-size:12px">Outros movimentos deste PN (prémios/acertos sem linha correspondente): ${soltos.map(g=>`${esc(g.tipo)} ${eur(g.valor)} (RUN ${g.run.split('-').reverse().join('/')})`).join(' · ')}</p>`:''}</div>`;
     tc.querySelector('#cp-go')?.addEventListener('click', ()=>corrigirPN(r, ()=>{ delete CVPN_MEM[r.id]; renderComPN(tc, r); }));
+    tc.querySelector('#rent-go')?.addEventListener('click', ()=>rentabilidadePN(r, tc.querySelector('#rent-b')));
   } catch(e){ tc.innerHTML = `<div class="card">Não foi possível calcular a comissão: ${esc(errTxt(e))}</div>`; }
 }
 // ===== Histórico do PHC (últimos 36 RUN): recebido por linha → runs/{mes} (origem PHC); pago aos vendedores → comissoesVend =====
@@ -3581,7 +3631,11 @@ function cmsValid(box){
       <p class="muted" style="font-size:12px;margin-bottom:0">Antes de pagar comissões: compara cada linha de upfront do RUN com a linha do PN (pelo POS ou MSISDN). Natureza (Nova/Refidelização, Móvel/Fixo/SS), RLMC, prazo, tier e eventos (RLMC ajustada da Vodafone ÷ 22,50). Corrija o PN quando o erro é nosso; reclame à Vodafone quando o erro é deles.</p></div>`;
     if (!R.existe) { box.innerHTML = topo+`<div class="card muted">Sem RUN importado para ${mesTxt(CMS_MES)}.</div>`; ligaMes(()=>cmsValid(box)); return; }
     if (R.origem==='PHC') { box.innerHTML = topo+`<div class="card muted">Este RUN veio do histórico PHC, que não traz prazo, tier nem RLMC ajustada. A validação funciona com os RUN importados do ficheiro da Vodafone (xlsx).</div>`; ligaMes(()=>cmsValid(box)); return; }
-    const {casa} = await conciliarRun(R);
+    let casa;
+    if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R) casa = CMS_CASA.casa;
+    else if (VAL_CONC===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; }
+    else { box.innerHTML = topo+`<div class="card"><p class="muted" style="margin-top:0">Para obter as divergências, carregue em «Validar» (lê os PN da plataforma).</p><button class="btn pri" id="vl-go">Validar RUN de ${mesTxt(CMS_MES)}</button></div>`;
+      $('#vl-go').onclick = () => { VAL_CONC = CMS_MES; cmsValid(box); }; ligaMes(()=>cmsValid(box)); return; }
     const rows = casa.filter(x=>x.f==='up').map(x=>{
       const pos=x.l[RL.pos], ms=normMsisdn(x.l[RL.msisdn]||'');
       // bundles: várias linhas do PN com o mesmo POS → a da mesma natureza e, entre essas, a de RLMC mais próxima
