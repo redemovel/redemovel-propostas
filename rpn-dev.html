@@ -3252,6 +3252,10 @@ async function cmsVendedores(box){
       <div><label>Trimestre</label><select id="ot-t">${OT_LISTA.map(t=>`<option value="${t}" ${t===VD.otT?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div><button class="btn" id="ot-s">Guardar objetivos do trimestre</button></div>
       <div id="ot-b" style="margin-top:8px"></div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Só para exceções num trimestre (ex.: objetivo ajustado a meio do ano). Valem só nesse trimestre, para o escalão, a majoração e o prémio trimestral. Vazio = usa os objetivos da tabela de cima.</p></div>
+    <div class="card"><h2>Dono dos PN importados do PHC</h2>
+      <p class="muted" style="font-size:12px;margin-top:0">Cada PN do PHC fica do utilizador que tem o nº de vendedor PHC desse PN. Se mudou números na Administração (ex.: tirou o nº a um utilizador de teste) ou criou um vendedor que já saiu, use este botão: volta a ligar os PN ao utilizador certo, sem precisar do ficheiro do PHC. Os PN novos do PHC continuam a precisar da importação (Administração › Importar PN do PHC: a consulta SQL está lá, com botão «Copiar»).</p>
+      <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap"><button class="btn pri" id="vd-rel">Atualizar o dono dos PN do PHC</button><label style="font-size:13px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="vd-rel-tudo"> verificar todos os PN (mais lento)</label></div>
+      <div id="vd-rel-log" class="muted" style="font-size:13px;margin-top:8px"></div></div>
     <div class="card scroll"><h2>Histórico de alterações</h2><div id="vd-log" class="muted">A carregar…</div></div>`;
   const campo = (k) => ['indice',...objs.map(o=>o.id)].includes(k);
   const desenhar = () => {
@@ -3298,6 +3302,7 @@ async function cmsVendedores(box){
       if (antes!==depois) await logAlt({tipo:'Objetivos do trimestre', desde:trimMeses(VD.otT)[0], resumo:`${trimTxt(VD.otT)}: ${Object.entries(VD.ot[VD.otT]||{}).map(([u,o])=>`${userNome(u)||u} ${Object.entries(o).map(([k,x])=>k+' '+x).join(', ')}`).join(' · ')||'sem exceções'}`});
       PLANO=null; CM.dados=null; TIER_MEM_LIMPAR(); toast('Objetivos do trimestre guardados.'); cmsVendedores(box); } catch(e){ toast(errTxt(e), true); } };
   desenhar(); contar();
+  $('#vd-rel').onclick = () => religarPNPHC($('#vd-rel-tudo').checked, $('#vd-rel-log'));
   // histórico
   try { const sn = await getDocs(query(collection(db,'comissoes','log','alteracoes'), orderBy('quando','desc'), limit(80)));
     const L = sn.docs.map(d=>d.data());
@@ -3306,6 +3311,35 @@ async function cmsVendedores(box){
 }
 const gravarPlanoCampos = async d => { const ref=doc(db,'config','planoVendedor');
   try { await updateDoc(ref, d); } catch(e){ if (e?.code==='not-found' || /no document/i.test(e?.message||'')) await setDoc(ref, d, {merge:true}); else throw e; } };
+// volta a ligar os PN do PHC ao utilizador que tem hoje o nº de vendedor PHC do PN (sem ficheiro)
+async function religarPNPHC(tudo, out){
+  const log = t => { out.innerHTML += esc(t)+'<br>'; };
+  out.innerHTML = ''; const bt = $('#vd-rel'); bt.disabled = true;
+  try {
+    const nrm = v => String(v||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ');
+    const porNum = {}; Object.entries(S.users).forEach(([uid,u])=>{ const n=String(u.vendedorPHC||'').trim(); if (n) (porNum[n]=porNum[n]||[]).push({uid,u}); });
+    const dono = r => { const c = porNum[String(r.vendedorPHC||'').trim()]||[]; if (c.length<=1) return c[0]?.uid||null;
+      return (c.find(x=>nrm(x.u.nome)===nrm(r.vendedorNome)) || c.find(x=>x.u.ativo!==false) || c[0]).uid; };
+    const col = collection(db,'rpn'), qs = [];
+    if (tudo) qs.push(query(col, where('origem','==','PHC')));
+    else { qs.push(query(col, where('vendedorUid','==',null)));   // PN de vendedores sem utilizador
+      Object.entries(S.users).filter(([uid,u])=>!String(u.vendedorPHC||'').trim()).forEach(([uid])=>qs.push(query(col, where('vendedorUid','==',uid)))); }   // PN em nome de quem não tem nº PHC
+    log(`A ler os PN… (${tudo?'todos os do PHC':'só os suspeitos'})`);
+    const mp = {}; for (const q of qs) (await getDocs(q)).docs.forEach(d=>{ const r=d.data(); if (r.origem==='PHC') mp[d.id]=r; });
+    const mud = Object.entries(mp).map(([id,r])=>({id, r, novo:dono(r)})).filter(x=>x.r.vendedorPHC && x.novo !== (x.r.vendedorUid||null));
+    log(`${Object.keys(mp).length} PN verificados · ${mud.length} a mudar de dono.`);
+    if (!mud.length) { log('Nada a corrigir.'); return; }
+    const resumo = {}; mud.forEach(x=>{ const k=`${userNome(x.r.vendedorUid)||'(sem utilizador)'} → ${userNome(x.novo)||'(sem utilizador)'} · vendedor PHC ${x.r.vendedorPHC} ${x.r.vendedorNome||''}`; resumo[k]=(resumo[k]||0)+1; });
+    Object.entries(resumo).forEach(([k,n])=>log(`${n} PN: ${k}`));
+    if (!confirm(`Mudar o dono de ${mud.length} PN do PHC?\n\n${Object.entries(resumo).map(([k,n])=>n+' PN: '+k).join('\n')}`)) { log('Cancelado.'); return; }
+    for (let i=0; i<mud.length; i+=400) { const b = writeBatch(db);
+      mud.slice(i,i+400).forEach(x=>b.update(doc(db,'rpn',x.id), {vendedorUid:x.novo, ...(x.novo?{vendedorNome:userNome(x.novo)}:{})}));
+      await b.commit(); log(`gravados ${Math.min(i+400, mud.length)} / ${mud.length}`); }
+    await logAlt({tipo:'PN do PHC religados', desde:mesLocal(), resumo:Object.entries(resumo).map(([k,n])=>n+' PN: '+k).join('; ')});
+    Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); CM.dados=null; CMS_RUN=null; AG_MEM=null;
+    log('Feito. Reabra «Comissões por vendedor» para ver o RUN com os donos certos.'); toast('PN atualizados.');
+  } catch(e){ log('ERRO: '+errTxt(e)); } finally { bt.disabled = false; }
+}
 const TIER_MEM_LIMPAR = () => { Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); };
 // BO no ranking: a parte de cada BO no bolo da Produção BO do mês (mesma conta do menu Produção BO)
 async function rankingBO(mes){
