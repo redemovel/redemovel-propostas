@@ -44,6 +44,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#eee;white-space:nowrap}
 .b-Em-Elaboração{background:#eee;color:#444}
 .b-Submetido{background:#e7f0fb;color:var(--info)}
+.b-Agendada{background:#fff4d6;color:#8a5a00}
 .b-Em-Implementação{background:#e8e4fb;color:#4b2fb0}
 .b-Pendente-Comercial,.b-Pendente-Documentos{background:#fff3df;color:var(--warn)}
 .b-Concluído,.b-PN{background:#e6f4ea;color:var(--ok)}
@@ -203,6 +204,7 @@ onAuthStateChanged(auth, async user => {
     handlePropostaParam();
     render();
     projetosAoEntrar();   // não bloqueia a entrada
+    setTimeout(()=>atAgendadasDistribuir(), 2500);   // Atividades agendadas que chegaram à data → BackOffice
     if (isStaff()) setTimeout(()=>agenteDados(trimId(mesLocal())).catch(()=>{}), 4000);   // performance do agente: 1×/dia, pela primeira pessoa da staff
   } catch(e){ toast(errTxt(e), true); console.error(e); }
 });
@@ -688,10 +690,9 @@ function tabOutros(tc, dis){
       ${fld('Morada','cliente.morada1',dis)}${fld('Morada (cont.)','cliente.morada2',dis)}${fld('Localidade','cliente.localidade',dis)}${fld('Código postal','cliente.codPostal',dis)}
     </div></div>
     <div class="card"><h2>Contacto e prazos</h2><div class="grid g4">
-      ${fld('Interlocutor','cliente.interlocutor',dis)}${fld('Telefone','cliente.telefone',dis)}${sel('Loja','loja',LOJAS,dis)}${sel('Prazo permanência (meses)','prazoPermanencia',PRAZOS,dis)}
+      ${fld('Interlocutor','cliente.interlocutor',dis)}${fld('Telefone','cliente.telefone',dis)}${sel('Loja','loja',LOJAS,dis)}
       ${fld('Data ativação','dtAtivacao',dis,'date')}${fld('Data fim equipamento','dtFimEquip',dis,'date')}${fld('Classificação cliente','classificacao',dis,'text','placeholder="Prospect, Cliente…"')}
     </div></div>`;
-  tc.querySelector('[data-f="prazoPermanencia"]').addEventListener('change',e=>S.cur.prazoPermanencia=+e.target.value);
 }
 function tabCond(tc, dis){
   tc.innerHTML = `<div class="card"><h2>Condições comerciais</h2><div class="grid g4">
@@ -940,8 +941,8 @@ async function guardar(opts={}){
     S.cicloMudou = false;
     if (FECHADOS.includes(data.estado) && !data.fechadoEm) { data.fechadoEm=new Date().toISOString(); data.fechadoMes=mesLocal(); }
     data.mesRef = FECHADOS.includes(data.estado) ? (data.fechadoMes||mesLocal()) : null;   // mês em que aparece na lista dos fechados
-    data.contratos = [...new Set((data.linhas||[]).map(l=>String(l.contratoVDF||'').trim()).filter(Boolean))];
-    data.msisdns = listaMsisdn(data.linhas);
+    data.contratos = [...new Set([...(data.linhas||[]).map(l=>String(l.contratoVDF||'').trim()), ...(data.contratosAntigos||[])].filter(Boolean))];
+    data.msisdns = [...new Set([...listaMsisdn(data.linhas), ...(data.msisdnsAntigos||[])])];
     if (!FECHADOS.includes(data.estado)) { data.fechadoEm=null; data.fechadoMes=null; }
     let old=null, boEscolhida=null;
     await runTransaction(db, async tx => {
@@ -1016,7 +1017,7 @@ async function irmaos(r){
 }
 function totais(r){ r.linhas.forEach(l=>l.score=scoreLinha(l,r)); r.nLinhas=r.linhas.length;
   r.totRLMC=Math.round(r.linhas.reduce((a,l)=>a+(+l.rlmc||0),0)*100)/100; r.totScore=Math.round(r.linhas.reduce((a,l)=>a+scoreLinha(l,r),0)*1000)/1000;
-  r.contratos=[...new Set(r.linhas.map(l=>String(l.contratoVDF||'').trim()).filter(Boolean))]; r.msisdns=listaMsisdn(r.linhas); return r; }
+  r.contratos=[...new Set([...r.linhas.map(l=>String(l.contratoVDF||'').trim()), ...(r.contratosAntigos||[])].filter(Boolean))]; r.msisdns=[...new Set([...listaMsisdn(r.linhas), ...(r.msisdnsAntigos||[])])]; return r; }
 async function desenharGrupo(){
   const el=$('#grp'), r=S.cur; if(!el || !r?.grupoId || !r.id) return;
   if (S.grupo?.de!==r.id) { try { S.grupo={de:r.id, lista:await irmaos(r)}; } catch(e){ return; } }
@@ -1703,12 +1704,12 @@ function desenharCliente(){
 
 // ---------- 9e. ATIVIDADES: pedidos dos vendedores à BackOffice sem negócio associado (desativações, 2.ªs vias, créditos, alterações…) ----------
 // Coleção atividades/{id} (+ anexos, mensagens, historico). Mesma filosofia do RPN, sem linhas nem Score: a BO trata e fecha (não há conferência).
-const AT_ESTADOS = ['Em Elaboração','Submetido','Em tratamento','Pendente Comercial','A aguardar','Concluído','Cancelado','Recusado'];
-const AT_CURSO   = ['Em Elaboração','Submetido','Em tratamento','Pendente Comercial','A aguardar'];
+const AT_ESTADOS = ['Em Elaboração','Agendada','Submetido','Em tratamento','Pendente Comercial','A aguardar','Concluído','Cancelado','Recusado'];
+const AT_CURSO   = ['Em Elaboração','Agendada','Submetido','Em tratamento','Pendente Comercial','A aguardar'];
 const AT_ABERTAS = ['Submetido','Em tratamento','Pendente Comercial','A aguardar'];   // contam 1 para a carga da BO
 const AT_FECHADAS = ['Concluído','Cancelado','Recusado'];
 const AT_PONTUAM = ['Concluído','Recusado'];   // contam para a Produção BO (a BO tratou o pedido)
-const AT_EDIT_COM = ['Em Elaboração','Pendente Comercial'];
+const AT_EDIT_COM = ['Em Elaboração','Agendada','Pendente Comercial'];
 const AT_ASSUNTOS = ['Aprovação','Implementação','Correcção Implementação'];
 const AT_SUBS = ['Alteração','Desativação','Desconto','Tarifário','Créditos','Faturação','Equipamentos','Outros'];
 const AT_GUIA = {   // texto-guia: entra na descrição quando ela está vazia, para o pedido chegar completo à BO
@@ -1816,7 +1817,8 @@ function atFicha(){
   const tabs=[['pedido','Pedido'],['anexos','Anexos'],['msg','Mensagens'+(msgPorLer(r)?' ● nova':'')],['hist','Histórico']];
   const acts=[];
   if (ed) acts.push(`<button class="btn" id="t-save">Guardar</button><button class="btn" id="t-canc" title="${r.id?'Repõe o que estava gravado':'Sai sem criar a Atividade'}">Cancelar</button>`);
-  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="t-sub">Submeter à BackOffice</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="t-sub">${String(r.dataEfetiva||'')>hojeLocal()?'Agendar para '+fmtD(r.dataEfetiva):'Submeter à BackOffice'}</button>`);
+  if ((p.own||isBO()) && r.estado==='Agendada') acts.push(`<button class="btn pri" id="t-subja" title="Não esperar pela data: entregar já a uma BackOffice">Enviar já à BackOffice</button>`);
   if (p.own && r.estado==='Pendente Comercial') acts.push(`<button class="btn pri" id="t-res">Resolvido · devolver à BO</button>`);
   if (isBO() && r.id && AT_ABERTAS.includes(r.estado)) {
     if (r.estado!=='Em tratamento') acts.push(`<button class="btn" id="t-tra">Em tratamento</button>`);
@@ -1874,6 +1876,7 @@ function atFicha(){
   on('#t-save',()=>atGuardar());
   on('#t-canc',()=>{ if (S.dirty && !confirm('Descartar as alterações que não foram guardadas?')) return; S.dirty=false; if (r.id) atAbrir(r.id); else location.hash='#/atividades'; });
   on('#t-sub',()=>atGuardar('submeter'));
+  on('#t-subja',()=>atGuardar('submeterJa'));
   on('#t-res',()=>atGuardar('resolvido'));
   on('#t-tra',()=>atGuardar('tratar'));
   on('#t-ok',()=>atGuardar('concluir'));
@@ -1913,8 +1916,10 @@ async function atGuardar(acao, arg){
         if (!isBO() && !AT_EDIT_COM.includes(old.estado)) throw new Error('Esta Atividade já está com a BackOffice e não pode ser alterada.');
       }
       const agora=new Date().toISOString(), de=old?.estado||'Em Elaboração';
-      if (acao==='submeter') { if(de!=='Em Elaboração') throw new Error('Esta Atividade já foi submetida.'); data.estado='Submetido'; data.submetidoEm=agora;
-        if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus); data.boUid=b.uid; data.boNome=b.nome; } }
+      if (acao==='submeter' || acao==='submeterJa') { if(!(de==='Em Elaboração' || (de==='Agendada' && acao==='submeterJa'))) throw new Error('Esta Atividade já foi submetida.');
+        if (acao==='submeter' && String(data.dataEfetiva||'') > hojeLocal()) { data.estado='Agendada'; data.agendadaEm=agora; data.boUid=null; data.boNome=''; }
+        else { data.estado='Submetido'; data.submetidoEm=agora;
+          if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus); data.boUid=b.uid; data.boNome=b.nome; } } }
       else if (acao==='resolvido') { if(de!=='Pendente Comercial') throw new Error('Esta Atividade já não está pendente.'); data.estado='Em tratamento'; data.motivo=''; }
       else if (acao==='tratar') { data.estado='Em tratamento'; data.motivo=''; }
       else if (acao==='pendente') { data.estado='Pendente Comercial'; data.motivo=arg||''; }
@@ -1922,7 +1927,7 @@ async function atGuardar(acao, arg){
       else if (acao==='concluir' || acao==='recusar' || acao==='cancelar') { data.estado={concluir:'Concluído',recusar:'Recusado',cancelar:'Cancelado'}[acao]; data.motivo=acao==='concluir'?'':(arg||'');
         data.fechadoEm=agora; data.fechadoMes=mesLocal(); data.mesRef=mesLocal(); data.fechadoPorUid=S.me.uid; data.fechadoPorNome=S.me.nome; }
       else if (acao==='reabrir') { data.estado='Em tratamento'; data.fechadoEm=null; data.fechadoMes=null; data.mesRef=null; data.motivo=''; }
-      if (acao && !['submeter','resolvido'].includes(acao) && !isBO()) throw new Error('Sem permissão para esta operação.');
+      if (acao && !['submeter','submeterJa','resolvido'].includes(acao) && !isBO()) throw new Error('Sem permissão para esta operação.');
       const oc=old?.cargaContada||0, nc=(AT_ABERTAS.includes(data.estado)&&data.boUid)?1:0;
       if (old?.boUid && oc) carga[old.boUid]=Math.max(0,(carga[old.boUid]||0)-oc);
       if (data.boUid && nc) carga[data.boUid]=(carga[data.boUid]||0)+nc;
@@ -1935,16 +1940,32 @@ async function atGuardar(acao, arg){
     const msg=r.msgUlt, lido=r.msgLido; AT.cur={...data, id:ref.id, msgUlt:msg, msgLido:lido}; delete AT.cur.atualizadoEm; delete AT.cur.criadoEm; S.dirty=false;
     const de=old?.estado||'';
     if (isNew) await atHist(ref.id,'Criada','');
-    if (acao==='submeter') await atHist(ref.id,'Submetida',`Atribuída a ${data.boNome} (distribuição automática)`);
+    if (acao==='submeter' && data.estado==='Agendada') await atHist(ref.id,'Agendada',`Data efetiva ${fmtD(data.dataEfetiva)}: entregue automaticamente a uma BackOffice nesse dia`);
+    else if (acao==='submeter' || acao==='submeterJa') await atHist(ref.id,'Submetida',`Atribuída a ${data.boNome} (distribuição automática${acao==='submeterJa'?', antes da data agendada':''})`);
     else if (acao) await atHist(ref.id,{resolvido:'Devolvida à BO',tratar:'Em tratamento',pendente:'Pendente Comercial',aguardar:'A aguardar',concluir:'Concluída',recusar:'Recusada',cancelar:'Cancelada',reabrir:'Reaberta'}[acao], arg||(acao==='reabrir'?`De ${de}`:''));
     else if (old) { const ch=[['assunto','Assunto'],['subAssunto','Sub-assunto'],['conta','Conta'],['msisdns','Números'],['dataEfetiva','Data efetiva'],['pnNumero','PN relacionado'],['valor','Valor'],['refVDF','Ref.ª Vodafone'],['boNome','BO'],['vendedorNome','Vendedor']].filter(([k])=>String(old[k]??'')!==String(data[k]??'')).map(([k,t])=>`${t}: ${old[k]||'—'} → ${data[k]||'—'}`);
       if (String(old.descricao||'')!==String(data.descricao||'')) ch.push('Descrição alterada'); if (String(old.resposta||'')!==String(data.resposta||'')) ch.push('Relatório BackOffice alterado');
       if (ch.length) await atHist(ref.id,'Alterada',ch.join('; ')); }
     if (old || acao) await atAviso(ref.id, data, de||'Em Elaboração', data.estado);
-    toast(acao==='submeter'?`Atividade ${atNum(data)} submetida · BackOffice: ${data.boNome}`:acao==='concluir'?'Atividade concluída.':'Guardado.');
+    toast(data.estado==='Agendada'&&acao==='submeter'?`Atividade ${atNum(data)} agendada para ${fmtD(data.dataEfetiva)}: nesse dia vai para uma BackOffice`:(acao==='submeter'||acao==='submeterJa')?`Atividade ${atNum(data)} submetida · BackOffice: ${data.boNome}`:acao==='concluir'?'Atividade concluída.':'Guardado.');
     if (isNew) { history.replaceState(null,'','#/atividades/'+ref.id); }
     atFicha(); return true;
   } catch(e){ toast(errTxt(e),true); atFicha(); return false; }
+}
+async function atAgendadasDistribuir(){
+  try {
+    const col=collection(db,'atividades'), q = isBO() ? query(col, where('estado','==','Agendada')) : query(col, where('vendedorUid','==',S.me.uid), where('estado','==','Agendada'));
+    const sn = await getDocs(q), hj = hojeLocal(), prontas = sn.docs.filter(d=>String(d.data().dataEfetiva||'') <= hj);
+    for (const d of prontas) { let bo='';
+      try { await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',d.id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef);
+          if (!s.exists() || s.data().estado!=='Agendada') return; const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, b=escolherBO(carga, cd.ausentes||{});
+          carga[b.uid]=(carga[b.uid]||0)+1; bo=b.nome;
+          tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+          tx.update(ref,{estado:'Submetido', submetidoEm:new Date().toISOString(), boUid:b.uid, boNome:b.nome, cargaContada:1, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
+        if (bo) { await atHist(d.id,'Submetida',`Chegou a data agendada (${fmtD(d.data().dataEfetiva)}): atribuída a ${bo} (distribuição automática)`); await atAviso(d.id, {...d.data(), boNome:bo}, 'Agendada', 'Submetido'); }
+      } catch(e){ console.warn('agendada', d.id, e); } }
+    if (prontas.length) { AT.lista=null; }
+  } catch(e){ console.warn('atAgendadasDistribuir', e); }
 }
 async function atEliminar(){
   const r=AT.cur; if(!r?.id) return;
@@ -2391,7 +2412,7 @@ let PLANO = null, PLANO_EM = 0;
 async function lerPlano(forcar){
   if (PLANO && !forcar && Date.now()-PLANO_EM < 300000) return PLANO;
   const s = await getDoc(doc(db,'config','planoVendedor'));
-  PLANO = s.exists() ? s.data() : {}; if (!PLANO.versoes?.length) PLANO.versoes=[PLANO_DEF]; PLANO.objVend=PLANO.objVend||{}; PLANO.objTrim=PLANO.objTrim||{}; PLANO_EM=Date.now();
+  PLANO = s.exists() ? s.data() : {}; if (!PLANO.versoes?.length) PLANO.versoes=[PLANO_DEF]; PLANO.objVend=PLANO.objVend||{}; PLANO.objTrim=PLANO.objTrim||{}; PLANO.vendCfg=PLANO.vendCfg||{}; PLANO_EM=Date.now();
   return PLANO;
 }
 const versaoDe = (vs, mes) => [...vs].sort((a,b)=>a.desde<b.desde?-1:1).filter(v=>v.desde<=mes).pop() || [...vs].sort((a,b)=>a.desde<b.desde?-1:1)[0];
@@ -2402,8 +2423,11 @@ const escNome = (v, i) => (v?.nomes || NOMES_ESC)[escNum(i)-1] || '';
 const escTxt = (v, i) => `${escNum(i)} · ${escNome(v, i)}`;
 const escIdx = (v, x) => v.escaloes.indexOf(x);
 // objetivo trimestral do vendedor: 1.º o definido para esse trimestre (objTrim), 2.º o individual (objVend), 3.º o padrão do plano
-const objDe = (uid, v, mes) => { const t = mes ? (PLANO.objTrim?.[trimId(mes)]?.[uid]||{}) : {}, o=PLANO.objVend?.[uid]||{}, ok = x => x!=null && x!=='' && !isNaN(+x);
-  return Object.fromEntries(v.objetivos.map(x=>[x.id, ok(t[x.id]) ? +t[x.id] : ok(o[x.id]) ? +o[x.id] : +x.trim||0])); };
+// configuração de cada vendedor com versões («em vigor desde»): o RUN de um mês usa a versão que estava em vigor nesse mês
+const CATS_VEND = ['Sénior','Júnior','Assistente de loja'];
+function cfgVend(uid, mes){ const vs=[...(PLANO?.vendCfg?.[uid]||[])].sort((a,b)=>a.desde<b.desde?-1:1); return vs.filter(x=>!mes || x.desde<=mes).pop() || null; }
+const objDe = (uid, v, mes) => { const t = mes ? (PLANO.objTrim?.[trimId(mes)]?.[uid]||{}) : {}, c = cfgVend(uid, mes||mesLocal())||{}, o=PLANO.objVend?.[uid]||{}, ok = x => x!=null && x!=='' && !isNaN(+x);
+  return Object.fromEntries(v.objetivos.map(x=>[x.id, ok(t[x.id]) ? +t[x.id] : ok(c[x.id]) ? +c[x.id] : ok(o[x.id]) ? +o[x.id] : +x.trim||0])); };
 function natNorm(n){ n=String(n||''); const nova=/nova/i.test(n);
   if (nova && /\bss\b|smart/i.test(n)) return 'Nova SS'; if (/fix/i.test(n)) return nova?'Nova Fixo':'Ref Fixo'; return nova?'Nova Móvel':'Ref Móvel'; }
 const r3 = x => Math.round((+x||0)*1000)/1000;
@@ -2425,15 +2449,18 @@ function comCalc(v, ev, obj){
 // por categoria (Móvel, Fixo): eventos Nova × 20 € × % de atingimento do objetivo Nova da categoria (máx. 100 %);
 // soma das categorias → patamar inferior (<85 € = 0; 85/165/330/500/660; a partir de 660 € paga o valor, até 1 700 €);
 // índice do vendedor (júnior/assistente 50 %) aplica-se aos objetivos e ao prémio; pago em 3 prestações iguais.
-const PREMIO_DEF = { valorEvento:20, cats:[{id:'M', nome:'Móvel', obj:'NM', nat:['Nova Móvel']},{id:'F', nome:'Fixo', obj:'NF', nat:['Nova Fixo']}],
-  patamares:[85,165,330,500,660], teto:1700, prestacoes:3, atraso:3 };   // atraso: meses entre o fim do trimestre e a 1.ª prestação
-const premioDe = v => ({...PREMIO_DEF, ...(v?.premio||{})});
-const indiceDe = uid => { const x = PLANO?.objVend?.[uid]?.indice; return x!=null && x!=='' && !isNaN(+x) ? +x/100 : 1; };
+const PREMIO_DEF = { valorEvento:20, cats:[{id:'M', nome:'Móvel', obj:'NM', nat:['Nova Móvel'], ref:'RM', natRef:['Ref Móvel']},{id:'F', nome:'Fixo', obj:'NF', nat:['Nova Fixo'], ref:'RF', natRef:['Ref Fixo']}],
+  patamares:[85,165,330,500,660], teto:1700, prestacoes:3, atraso:3, regra:'nova' };
+// regra do atingimento: 'nova' = % do objetivo Nova da categoria (mapa Excel); 'minimo' = a % mais baixa entre Nova e Refidelização da categoria (texto do plano)   // atraso: meses entre o fim do trimestre e a 1.ª prestação
+const premioDe = v => { const p = {...PREMIO_DEF, ...(v?.premio||{})}; p.cats = p.cats.map(c=>({...PREMIO_DEF.cats.find(d=>d.id===c.id), ...c})); return p; };
+const indiceDe = (uid, mes) => { const c = cfgVend(uid, mes||mesLocal()), x = c && c.indice!=null && c.indice!=='' ? c.indice : PLANO?.objVend?.[uid]?.indice; return x!=null && x!=='' && !isNaN(+x) ? +x/100 : 1; };
 const r2 = x => Math.round((+x||0)*100)/100;
 function premioCalc(v, evTrim, obj, ind){
   const P = premioDe(v); ind = ind ?? 1;
-  const cats = P.cats.map(c=>{ const ev=c.nat.reduce((a,n)=>a+(evTrim[n]||0),0), ob=(+obj[c.obj]||0)*ind, at=ob>0?Math.min(1, ev/ob):0;
-    return {...c, ev, ob, at, val: ev*P.valorEvento*at}; });
+  const cats = P.cats.map(c=>{ const ev=c.nat.reduce((a,n)=>a+(evTrim[n]||0),0), ob=(+obj[c.obj]||0)*ind, atN=ob>0?Math.min(1, ev/ob):0;
+    const evR=(c.natRef||[]).reduce((a,n)=>a+(evTrim[n]||0),0), obR=(+obj[c.ref]||0)*ind, atR=obR>0?Math.min(1, evR/obR):0;
+    const at = P.regra==='minimo' ? Math.min(atN, atR) : atN;
+    return {...c, ev, ob, atN, evR, obR, atR, at, val: ev*P.valorEvento*at}; });
   const apurado = cats.reduce((a,c)=>a+c.val,0), pt = [...P.patamares].map(Number).sort((a,b)=>a-b), topo = pt.at(-1);
   const patamar = apurado >= topo-1e-9 ? Math.min(+P.teto||Infinity, apurado) : (pt.filter(x=>apurado>=x-1e-9).pop()||0);
   const prox = apurado >= topo-1e-9 ? null : pt.find(x=>apurado<x-1e-9);
@@ -2526,6 +2553,9 @@ function drawComissao(podeEscolher, vends){
   m.innerHTML = `
     <style>
       .cm-hero{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}@media(max-width:820px){.cm-hero,.cm-two{grid-template-columns:1fr!important}}
+      .cm-pan{font-size:13.5px}.cm-pan .card{padding:14px 16px;margin-bottom:12px}.cm-pan h2{font-size:15.5px}.cm-pan table th,.cm-pan table td{padding:5px 8px;font-size:12.5px}
+      .cm-pan .cm-msg{padding:8px 11px;margin-top:6px;font-size:13px}.cm-pan .cm-msg i{font-size:15px}.cm-pan .cm-big{font-size:30px!important}.cm-pan .cm-big small{font-size:14px}
+      .cm-pan .cm-k b{font-size:17px}.cm-pan .cm-agc svg{max-width:150px!important}.cm-pan .cm-agc>div:first-child{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important;margin-bottom:4px!important}.cm-pan .cm-lad{height:11px;margin:26px 0 12px}.cm-pan .cm-ch svg{max-height:260px}
       .cm-big{font-size:42px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}.cm-big small{font-size:17px;color:var(--mut);font-weight:600}
       .cm-lad{position:relative;height:14px;background:#ece9ea;border-radius:7px;margin:30px 0 14px}
       .cm-lad .f{position:absolute;inset:0 auto 0 0;background:var(--red);border-radius:7px}
@@ -2543,7 +2573,7 @@ function drawComissao(podeEscolher, vends){
       .cm-ch svg{display:block;width:100%;min-width:520px;height:auto}.cm-ch text{font-size:12px;fill:var(--mut)}.cm-ch .lab{font-size:13px;font-weight:600;fill:var(--ink);paint-order:stroke;stroke:#fff;stroke-width:5px;stroke-linejoin:round}
       .cm-festa{background:linear-gradient(90deg,#e5f4ea,#fff4d6);border:1px solid #b7e1c4;animation:cmPop .6s ease-out}@keyframes cmPop{from{transform:scale(.96);opacity:.3}to{transform:none;opacity:1}}
       @media (prefers-reduced-motion:reduce){.cm-festa{animation:none}}
-    </style>
+    </style><div class="cm-pan">
     <div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">
       <div><h2 style="margin:0">${eu?'A minha comissão':'Comissão de '+esc(nome)} · ${mesTxt(CM.mes)}</h2>
         <div class="muted" style="font-size:13px">${atual?`Produção (PN) até hoje · ${duF} de ${duM} dias úteis decorridos`:'Mês fechado'} · conta a data do PN</div></div>
@@ -2552,6 +2582,7 @@ function drawComissao(podeEscolher, vends){
       <div><label>Mês</label><input type="month" id="cm-m" value="${CM.mes}" max="${mesLocal()}" style="width:160px"></div>
       <button class="btn sm" id="cm-r" title="Voltar a ler os PN">⟳ Atualizar</button>
     </div></div>
+    <div class="card"><h2 style="margin-bottom:6px">Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="cm-agc muted">A carregar…</div></div>
     ${festa?`<div class="card cm-festa"><b style="font-size:18px">🎉 Subiste para o escalão ${escTxt(v,c.i)}!</b><div>Todos os eventos de ${mesTxt(CM.mes).split(' ')[0]} passam a valer ${eur(c.e.ref)} (Refid) e ${eur(c.e.nova)} (Nova). Continua!</div></div>`:''}
     <div class="card cm-hero">
       <div>
@@ -2600,9 +2631,8 @@ function drawComissao(podeEscolher, vends){
       ${CM.dados.runDet.length ? `<table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Movimentos</th><th class="num">Pago neste RUN</th></tr></thead>
       <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr ${p.rpnId?`class="click" data-rid="${esc(p.rpnId)}"`:''}><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td></tr>`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total pago neste RUN (inclui PN de meses anteriores e charge-backs)</td><td class="num">${eur(CM.dados.pagoRun||0)}</td></tr></tfoot></table>` : `<p class="muted" style="margin:0">Ainda não há comissões apuradas no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
-    <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div>
-    <div class="card"><h2>Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="muted">A carregar…</div></div>`;
-  desenharAgente($('#cm-ag'), CM.mes);
+    <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div></div>`;
+  desenharAgente($('#cm-ag'), CM.mes, true);
   desenharRanking($('#cm-rank'), CM.mes);
   // simulador (só no browser, sem leituras)
   const simUpd = () => { const extra={}; let tem=false; m.querySelectorAll('[id^="sim-"][data-n]').forEach((el,i)=>{ const x=+el.value||0; m.querySelector('#sim-o-'+i).textContent=f1(x); if (x){ extra[el.dataset.n]=x; tem=true; } });
@@ -2620,7 +2650,7 @@ function drawComissao(podeEscolher, vends){
 }
 // cartão «Prémio trimestral» do painel: trimestre em construção + prestação em pagamento neste RUN
 function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
-  const ind = indiceDe(CM.uid), q = premioCalc(v, evTrim, obj, ind), P = q.P, tId = trimId(CM.mes), fechado = !atual || T.meses[2] < mesLocal();
+  const ind = indiceDe(CM.uid, CM.mes), q = premioCalc(v, evTrim, obj, ind), P = q.P, tId = trimId(CM.mes), fechado = !atual || T.meses[2] < mesLocal();
   const pctE = x => Math.round(x*100)+' %';
   const fim = !fechado && duTF>0 && duTF<duT && duTF/duT>=0.2 ? premioCalc(v, escalarEv(evTrim, duT/duTF), obj, ind) : null;
   const pts = [...P.patamares].map(Number).sort((a,b)=>a-b);
@@ -2639,7 +2669,7 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
   const pp = CM.dados.premioPg;
   if (pp) { const vq = versaoDe(PLANO.versoes, trimMeses(pp.trim)[2]);
     const gr = (CM.dados.runDet||[]).filter(x=>x.premio || (x.linhas||[]).some(l=>/prémio trimestral/i.test(l.tipo||'')) && !x.rpnId);
-    const qq = pp.pns ? premioCalc(vq, eventosDe(pp.pns), objDe(CM.uid, vq, trimMeses(pp.trim)[2]), ind) : null, runs = runsDoPremio(vq, pp.trim);
+    const qq = pp.pns ? premioCalc(vq, eventosDe(pp.pns), objDe(CM.uid, vq, trimMeses(pp.trim)[2]), indiceDe(CM.uid, trimMeses(pp.trim)[2])) : null, runs = runsDoPremio(vq, pp.trim);
     pg = `<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Em pagamento no RUN de ${mesTxt(CM.mes)}</div>
       <div style="font-size:15px;margin:6px 0 2px">Prémio do <b>${trimTxt(pp.trim)}</b></div>
       ${qq ? `<div class="cm-big" style="font-size:34px">${eur(gr.length ? gr.reduce((a,x)=>a+(+x.valor||0),0) : qq.prest(pp.k))} € <small>prestação ${pp.k} de ${pp.n}</small></div>
@@ -2660,7 +2690,7 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
       </div>
       <div>${pg || `<p class="muted">Nenhum prémio trimestral em pagamento no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
     </div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × % do objetivo trimestral Nova atingido (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} nos objetivos e no prémio.`:''}</p></div>`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × ${P.regra==='minimo'?'a % mais baixa entre os objetivos Nova e Refidelização da categoria':'% do objetivo trimestral Nova atingido'} (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} nos objetivos e no prémio.`:''}</p></div>`;
 }
 // mensagens do «treinador»: só regras e números do próprio vendedor (nada de valores Vodafone)
 function comCoach(o){
@@ -2739,10 +2769,11 @@ const mesDoRun = (run, nomeF) => { const a=String(nomeF||'').match(/Detalhe_(\d{
 function viewComissionamento(){
   const m=$('#main'); if (!CMS_MES) CMS_MES = somaMeses(mesLocal(), -1);
   m.innerHTML = `<div class="card" style="border-left:4px solid var(--red)"><b>Zona confidencial.</b> <span class="muted">Valores recebidos da Vodafone: só o Master e a BO Financeiro têm acesso. Não partilhar capturas de ecrã.</span></div>
-    <div class="tabs">${[['agente','Objetivos Vodafone'],['run','RUN Vodafone'],['valid','Validação'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['plano','Plano e objetivos'],['hist','Histórico PHC']]:[])].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
+    <div id="cms-aviso"></div><div class="tabs">${[['agente','Objetivos Vodafone'],['run','RUN Vodafone'],['valid','Validação'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['vendedores','Vendedores'],['plano','Plano e objetivos'],['hist','Histórico PHC']]:[]),['manual','📘 Manual']].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
   m.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ CMS_TAB=a.dataset.t; viewComissionamento(); });
-  if (['plano','hist'].includes(CMS_TAB) && !isMaster()) CMS_TAB='run';
-  ({agente:cmsAgente, run:cmsRun, valid:cmsValid, vend:cmsVend, plano:cmsPlano, hist:cmsHist})[CMS_TAB]($('#cms'));
+  if (['plano','hist','vendedores'].includes(CMS_TAB) && !isMaster()) CMS_TAB='run';
+  ({agente:cmsAgente, run:cmsRun, valid:cmsValid, vend:cmsVend, plano:cmsPlano, hist:cmsHist, vendedores:cmsVendedores, manual:cmsManual})[CMS_TAB]($('#cms'));
+  if (isMaster()) avisoPorConfigurar();
 }
 const cmsMesSel = () => `<div><label>Mês do RUN</label><input type="month" id="cms-m" value="${CMS_MES}" max="${mesLocal()}" style="width:160px"></div>`;
 const ligaMes = fn => { const e=$('#cms-m'); if (e) e.onchange = ev => { if (ev.target.value) { CMS_MES=ev.target.value; CMS_RUN=null; fn(); } }; };
@@ -2790,13 +2821,14 @@ async function importarRun(file, box){
       s(g(r,'Price Plan')), s(g(r,'Price Plan Name')), s(g(r,'Business Type')), +numX(g(r,'Duration'))||0, s(g(r,'Group')), dIso(g(r,'Creation Date')), dIso(g(r,'Deactivation Date')),
       Math.round(numX(g(r,'RLMC'))*100)/100, Math.round(numX(g(r,'Value'))*100)/100, s(g(r,'Offer Category')), Math.round(numX(g(r,'RLMCAjustada'))*100)/100, numX(g(r,'NumMensPlano')) ]);
     const tot = linhas.reduce((a,l)=>a+l[RL.val],0);
-    const existe = (await getDoc(doc(db,'runs',mes))).exists();
+    const hS = await getDoc(doc(db,'runs',mes)), existe = hS.exists(), antigo = existe ? hS.data() : {};
+    if (antigo.fechado) return toast(`O RUN de ${mesTxt(mes)} está fechado. Para o substituir, o Master tem de o reabrir em «Comissões por vendedor».`, true);
     if (!confirm(`RUN de ${mesTxt(mes)}: ${linhas.length} linhas, total ${eur(tot)}.${existe?'\n\nJá existe um RUN deste mês: vai ser substituído.':''}\n\nImportar?`)) return;
     const velhos = existe ? (await getDocs(collection(db,'runs',mes,'blocos'))).docs : [];
     let b = writeBatch(db), n=0; const commit = async()=>{ await b.commit(); b=writeBatch(db); n=0; };
     for (const d of velhos) { b.delete(d.ref); if (++n>=400) await commit(); }
     for (let k=0; k*500<linhas.length; k++) { b.set(doc(db,'runs',mes,'blocos',String(k)), {linhas: linhas.slice(k*500,(k+1)*500).map(x=>JSON.stringify(x))}); if (++n>=20) await commit(); }
-    b.set(doc(db,'runs',mes), {mes, ficheiro:file.name, n:linhas.length, total:Math.round(tot*100)/100, importadoEm:serverTimestamp(), por:S.me.nome, porUid:S.me.uid});
+    b.set(doc(db,'runs',mes), {mes, ficheiro:file.name, n:linhas.length, total:Math.round(tot*100)/100, importadoEm:serverTimestamp(), por:S.me.nome, porUid:S.me.uid, manual:antigo.manual||{}});
     await commit();
     CMS_MES = mes; CMS_RUN = null; toast(`RUN de ${mesTxt(mes)} importado: ${linhas.length} linhas.`); cmsRun(box);
   } catch(e){ console.error(e); toast(errTxt(e)||e.message, true); }
@@ -2811,17 +2843,22 @@ async function conciliarRun(R){
   const poss = [...new Set(linhas.map(x=>x.l[RL.pos]).filter(Boolean))], porPos = {}, col = collection(db,'rpn');
   const blocos = (arr, n) => { const o=[]; for (let k=0; k<arr.length; k+=n) o.push(arr.slice(k,k+n)); return o; };
   const emLotes = async (qs, fn) => { for (const lote of blocos(qs, 8)) (await Promise.all(lote.map(q=>getDocs(q)))).forEach(sn=>sn.docs.forEach(d=>fn({id:d.id,...d.data()}))); };
-  await emLotes(blocos(poss,30).map(b=>query(col, where('contratos','array-contains-any', b))), r=>{
+  await emLotes([...blocos(poss,30).map(b=>query(col, where('contratos','array-contains-any', b))), ...blocos(poss,30).map(b=>query(col, where('contratosAntigos','array-contains-any', b)))], r=>{
     [...(r.contratos||[]), ...(r.contratosAntigos||[])].map(p=>String(p).trim().toUpperCase()).forEach(p=>{ if (!porPos[p] || (r.estado==='PN' && porPos[p].estado!=='PN')) porPos[p]=r; }); });
   // segunda tentativa, para POS não encontrado: pelo MSISDN (mesmo NIF), preferindo o PN mais recente
   const porMs = {}, faltaMs = [...new Set(linhas.filter(x=>x.l[RL.pos] && !porPos[x.l[RL.pos]] && x.l[RL.msisdn]).map(x=>normMsisdn(x.l[RL.msisdn])).filter(Boolean))];
-  await emLotes(blocos(faltaMs,30).map(b=>query(col, where('msisdns','array-contains-any', b))), r=>{ if (r.estado!=='PN') return;
-    (r.msisdns||[]).forEach(ms=>{ (porMs[ms]=porMs[ms]||[]).push(r); }); });
+  const vistos = new Set();
+  await emLotes([...blocos(faltaMs,30).map(b=>query(col, where('msisdns','array-contains-any', b))), ...blocos(faltaMs,30).map(b=>query(col, where('msisdnsAntigos','array-contains-any', b)))], r=>{ if (r.estado!=='PN' || vistos.has(r.id)) return; vistos.add(r.id);
+    [...new Set([...(r.msisdns||[]), ...(r.msisdnsAntigos||[])])].forEach(ms=>{ (porMs[ms]=porMs[ms]||[]).push(r); }); });
   linhas.forEach(x=>{ const p=x.l[RL.pos]; if (!p || porPos[p] || !x.l[RL.msisdn]) return;
     const c=(porMs[normMsisdn(x.l[RL.msisdn])]||[]).filter(r=>String(r.cliente?.nif||'')===String(x.l[RL.nif])).sort((a,b)=>String(b.mesRef||'').localeCompare(String(a.mesRef||'')))[0];
     if (c) { porPos[p]=c; x.porMsisdn=true; } });
+  // atribuições manuais deste RUN (linha → PN), feitas em «Linhas por imputar»
+  const man = R.manual||{}, chaves = chavesLinhas(R.linhas), manIds = [...new Set(Object.values(man).map(m=>m.rpnId).filter(Boolean))], manR = {};
+  (await Promise.all(manIds.map(id=>getDoc(doc(db,'rpn',id)).catch(()=>null)))).forEach(sn=>{ if (sn?.exists()) manR[sn.id]={id:sn.id, ...sn.data()}; });
+  linhas.forEach(x=>{ const m=man[chaves[x.i]]; if (m && manR[m.rpnId]) { x.manualR=manR[m.rpnId]; x.manual=m; } });
   const sfidUid = {}; Object.entries(S.users).forEach(([uid,u])=>{ if (u.sfid) sfidUid[String(u.sfid).trim()]=uid; });
-  const casa = linhas.map(x=>{ const r=porPos[x.l[RL.pos]]; return {...x, r, uid: r?.vendedorUid || null, mesPN: r?.mesRef || null, sfidUid: sfidUid[x.l[RL.sfid]]||null}; });
+  const casa = linhas.map(x=>{ const r=x.manualR || porPos[x.l[RL.pos]]; return {...x, r, uid: r?.vendedorUid || null, mesPN: r?.mesRef || null, sfidUid: sfidUid[x.l[RL.sfid]]||null}; });
   // escalão de cada vendedor em cada mês de PN envolvido
   const mesesPN = [...new Set(casa.filter(x=>x.mesPN).map(x=>x.mesPN))], tier = {};
   for (const mp of mesesPN) {
@@ -2858,7 +2895,8 @@ function cmsVend(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e a conciliar com os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
     if (!R.existe) { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
-      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>${cardGrav}${premiosHTML(await premiosRun(CMS_MES).catch(()=>null))}`;
+      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>${cardGrav}<div id="cms-mapa"></div><div id="cms-pt"></div>`; desenharPremios($('#cms-pt'));
+      cardMapa(CMS_MES, null).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
       box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
       ligaMes(()=>cmsVend(box)); return; }
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
@@ -2868,12 +2906,12 @@ function cmsVend(box){
     const sem = casa.filter(x=>!x.uid && x.f!=='ag'), ag = casa.filter(x=>x.f==='ag'), totRec = casa.reduce((a,x)=>a+x.l[RL.val],0);
     const lst = Object.values(pv).sort((a,b)=>b.com-a.com);
     const {grav, gravPor, nomeV, cardGrav} = await cardGravado(CMS_MES);
-    const PR = await premiosRun(CMS_MES).catch(e=>{ console.warn('prémio', e); return null; });
     box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
-        ${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()?'':'-->'}</div>
+        ${R.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">🔒 RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))}</span>${isMaster()?'<button class="btn" id="cms-reab">Reabrir RUN</button>':''}`
+          : `${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()&&CMS_RUN.gravadoEm?'<button class="btn" id="cms-fecha" title="Depois de conferido: bloqueia alterações a este RUN">Fechar RUN</button>':''}${isMaster()?'':'-->'}`}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
       ${cardGrav}
-      ${premiosHTML(PR, gravPor)}
+      <div id="cms-pt"></div>
 ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN de ${mesTxt(CMS_MES)}</h2>
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão · %</th><th class="num">Linhas</th><th class="num">Recebido</th><th class="num">Charge-backs</th><th class="num">Comissão calculada</th><th class="num">Gravado</th><th class="num">Margem</th></tr></thead>
       <tbody>${lst.map(o=>`<tr><td><b>${esc(userNome(o.uid)||o.uid)}</b></td><td style="font-size:12px">${Object.entries(o.meses).sort().map(([mp,x])=>`${mp.split('-').reverse().join('/')} · ${x.t?.esc||'—'} · ${String(x.t?.pct||0).replace('.',',')} %${x.t?.maj?` +${Math.round(x.t.maj*100)} %`:''}`).join('<br>')}</td>
@@ -2884,37 +2922,203 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão</th><th class="num">Linhas imputadas</th></tr></thead>
       <tbody>${lst.map(o=>`<tr><td><b>${esc(userNome(o.uid)||o.uid)}</b></td><td style="font-size:12px">${Object.entries(o.meses).sort().map(([mp,x])=>`${mp.split('-').reverse().join('/')} · ${esc(x.t?.esc||'—')}`).join('<br>')}</td><td class="num">${o.n}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">Nenhuma linha imputada.</td></tr>'}</tbody></table>
       <p class="muted" style="font-size:12px;margin-bottom:0">As comissões são calculadas e gravadas pelo Master.</p></div>
-`}      <div class="card scroll"><h2>Linhas por imputar (${sem.length})</h2><p class="muted" style="font-size:12px;margin-top:0">POS que não existe em nenhum RPN/PN da plataforma. Corrija o contrato VDF no PN (ou importe o histórico do PHC) e volte a abrir este separador.</p>
-      <table><thead><tr><th>Código</th><th>POS</th><th>NIF</th><th>MSISDN</th><th>Plano</th><th>Ativação</th><th>SFID → vendedor</th><th class="num">Valor</th></tr></thead>
-      <tbody>${sem.sort((a,b)=>Math.abs(b.l[RL.val])-Math.abs(a.l[RL.val])).slice(0,300).map(x=>`<tr><td>${esc(x.l[RL.cod])}</td><td>${esc(x.l[RL.pos])}</td><td>${esc(x.l[RL.nif])}</td><td>${esc(x.l[RL.msisdn])}</td><td>${esc(x.l[RL.ppn])}</td><td>${fmtD(x.l[RL.cri])}</td><td>${esc(x.l[RL.sfid])}${x.sfidUid?' → '+esc(userNome(x.sfidUid)):''}</td><td class="num">${eur(x.l[RL.val])}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Tudo imputado.</td></tr>'}</tbody></table></div>`;
-    ligaMes(()=>cmsVend(box));
+`}      <div class="card scroll"><h2>Linhas por imputar (${sem.length})</h2><p class="muted" style="font-size:12px;margin-top:0">POS que não existe em nenhum PN da plataforma. Use «Atribuir» para procurar o PN certo (por NIF, MSISDN, contrato VDF ou nº do PN) e atribuir a linha ou associar o POS ao PN.</p>
+      <input id="lpi-f" placeholder="Filtrar por código, POS, NIF, MSISDN, plano, SFID…" style="width:100%;max-width:420px;margin-bottom:8px">
+      <table><thead><tr><th>Código</th><th>POS</th><th>NIF</th><th>MSISDN</th><th>Plano</th><th>Ativação</th><th>SFID → vendedor</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody>${sem.sort((a,b)=>Math.abs(b.l[RL.val])-Math.abs(a.l[RL.val])).slice(0,1500).map(x=>`<tr><td>${esc(x.l[RL.cod])}</td><td>${esc(x.l[RL.pos])}</td><td>${esc(x.l[RL.nif])}</td><td>${esc(x.l[RL.msisdn])}</td><td>${esc(x.l[RL.ppn])}</td><td>${fmtD(x.l[RL.cri])}</td><td>${esc(x.l[RL.sfid])}${x.sfidUid?' → '+esc(userNome(x.sfidUid)):''}</td><td class="num">${eur(x.l[RL.val])}</td><td>${R.fechado?'':`<button class="btn sm" data-at="${x.i}">Atribuir</button>`}</td></tr>`).join('')||'<tr><td colspan="9" class="muted">Tudo imputado.</td></tr>'}</tbody></table></div>
+      ${(()=>{ const man=R.manual||{}, ks=Object.keys(man); if (!ks.length) return ''; const ch=chavesLinhas(R.linhas);
+        return `<div class="card scroll"><h2>Atribuições manuais deste RUN (${ks.length})</h2><table><thead><tr><th>Código</th><th>POS</th><th>MSISDN</th><th class="num">Valor</th><th>PN</th><th>Por</th><th></th></tr></thead><tbody>${ks.map(k=>{ const i=ch.indexOf(k), l=R.linhas[i]||[]; return `<tr><td>${esc(l[RL.cod]||k.split('|')[0])}</td><td>${esc(l[RL.pos]||'')}</td><td>${esc(l[RL.msisdn]||'')}</td><td class="num">${l.length?eur(l[RL.val]):'—'}</td><td><b>${esc(man[k].numero||'')}</b>${i<0?' <span class="muted">(linha já não existe no RUN)</span>':''}</td><td style="font-size:12px">${esc(man[k].por||'')} ${esc(String(man[k].em||'').slice(0,10).split('-').reverse().join('/'))}</td><td>${R.fechado?'':`<button class="btn sm" data-desf="${esc(k)}">Desfazer</button>`}</td></tr>`; }).join('')}</tbody></table></div>`; })()}
+      <div id="cms-mapa"></div>`;
+    ligaMes(()=>cmsVend(box)); desenharPremios($('#cms-pt'));
     box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
     if ($('#cms-g')) $('#cms-g').onclick = () => gravarComissoes(casa, lst).then(()=>cmsVend(box));
+    $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, true)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    $('#cms-reab')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, false)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'); tr.style.display = !t || tr.textContent.toLowerCase().includes(t) ? '' : 'none'; }); });
+    box.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>atribuirLinha(casa.find(x=>x.i===+b.dataset.at), R, ()=>cmsVend(box)));
+    box.querySelectorAll('[data-desf]').forEach(b=>b.onclick=async()=>{ const man={...(R.manual||{})}; delete man[b.dataset.desf];
+      try { await updateDoc(doc(db,'runs',CMS_MES), {manual:man}); await logAlt({tipo:'Atribuição manual desfeita', desde:CMS_MES, resumo:b.dataset.desf.split('#')[0]}); CMS_RUN=null; cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
 // prémio trimestral de toda a equipa para um RUN (BO Financeiro / Master): uma leitura dos PN do trimestre
-async function premiosRun(mesRun){
-  await lerPlano(); const pg = premioEmPagamento(versaoDe(PLANO.versoes, mesRun), mesRun); if (!pg) return null;
+async function premiosRun(mesRun, trimForcado){
+  await lerPlano(); const pg = trimForcado ? {trim:trimForcado, k:null, n:premioDe(versaoDe(PLANO.versoes, trimMeses(trimForcado)[2])).prestacoes} : premioEmPagamento(versaoDe(PLANO.versoes, mesRun), mesRun); if (!pg) return null;
   const mq = trimMeses(pg.trim), vq = versaoDe(PLANO.versoes, mq[2]);
   const sn = await getDocs(query(collection(db,'rpn'), where('mesRef','in',mq)));
   const porV = {}; sn.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN' && r.vendedorUid).forEach(r=>(porV[r.vendedorUid]=porV[r.vendedorUid]||[]).push(r));
   const uids = [...new Set([...vendedoresProj().map(x=>x.uid), ...Object.keys(porV)])].filter(u=>!['master','backoffice'].includes(S.users[u]?.perfil));
-  const lista = uids.map(uid=>{ const q=premioCalc(vq, eventosDe(porV[uid]||[]), objDe(uid, vq, mq[2]), indiceDe(uid)); return {uid, nome:userNome(uid)||uid, q, prest:q.prest(pg.k)}; })
-    .filter(x=>x.q.apurado>0 || x.q.premio>0).sort((a,b)=>b.q.apurado-a.q.apurado);
+  const lista = uids.map(uid=>{ const q=premioCalc(vq, eventosDe(porV[uid]||[]), objDe(uid, vq, mq[2]), indiceDe(uid, mq[2])); return {uid, nome:userNome(uid)||uid, q, prest: pg.k ? q.prest(pg.k) : 0}; })
+    .filter(x=>x.q.cats.some(c=>c.ev>0 || c.evR>0)).sort((a,b)=>b.q.apurado-a.q.apurado);
   return {...pg, vq, lista, runs: runsDoPremio(vq, pg.trim)};
 }
-function premiosHTML(PR, gravPor){
-  if (!PR) return '';
-  const pctE = x => Math.round(x*100)+' %', cats = premioDe(PR.vq).cats;
-  return `<div class="card scroll"><h2>Prémio trimestral · ${trimTxt(PR.trim)} · prestação ${PR.k} de ${PR.n}</h2>
-    <p class="muted" style="font-size:12px;margin-top:0">Pago nos RUN de ${PR.runs.map(m=>mesTxt(m)).join(', ')}. Eventos Nova pela data do PN; objetivos e índice de cada vendedor (Plano e objetivos).</p>
-    <table><thead><tr><th>Vendedor</th>${cats.map(c=>`<th class="num">Nova ${esc(c.nome)}</th><th class="num">% obj.</th><th class="num">€</th>`).join('')}<th class="num">Apurado</th><th class="num">Patamar</th><th class="num">Índice</th><th class="num">Prémio</th><th class="num">Este RUN</th></tr></thead>
-    <tbody>${PR.lista.map(x=>`<tr><td><b>${esc(x.nome)}</b></td>${x.q.cats.map(c=>`<td class="num">${f1(c.ev)}</td><td class="num">${pctE(c.at)}</td><td class="num">${eur(c.val)}</td>`).join('')}<td class="num">${eur(x.q.apurado)}</td><td class="num">${x.q.patamar?eur(x.q.patamar):'—'}</td><td class="num">${pctE(x.q.ind)}</td><td class="num"><b>${x.q.premio?eur(x.q.premio):'—'}</b></td><td class="num"><b>${x.prest?eur(x.prest):'—'}</b></td></tr>`).join('')||`<tr><td colspan="${5+cats.length*3}" class="muted">Sem eventos Nova no trimestre.</td></tr>`}</tbody>
-    <tfoot><tr class="tot"><td colspan="${1+cats.length*3+3}">Total</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.premio,0))}</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.prest,0))}</td></tr></tfoot></table>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Ao gravar as comissões do mês, a prestação entra no valor de cada vendedor como uma linha «Prémio trimestral».</p></div>`;
+let PT_TRIM = null;
+async function desenharPremios(box){
+  const pg = premioEmPagamento(versaoDe((await lerPlano()).versoes, CMS_MES), CMS_MES);
+  const lista = Array.from({length:8},(_,k)=>trimId(somaMeses(mesLocal(), -3*k)));
+  if (!PT_TRIM || !lista.includes(PT_TRIM)) PT_TRIM = pg?.trim || lista[1];
+  box.innerHTML = `<div class="card muted">A calcular o prémio trimestral…</div>`;
+  try { const PR = await premiosRun(CMS_MES, PT_TRIM), emPag = pg && pg.trim===PT_TRIM;
+    const pctE = x => Math.round(x*100)+' %', P = premioDe(PR.vq), cats = P.cats, mn = P.regra==='minimo';
+    box.innerHTML = `<div class="card scroll"><div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Prémio trimestral</h2><span class="sp"></span>
+      <div><label>Trimestre</label><select id="pt-t">${lista.map(t=>`<option value="${t}" ${t===PT_TRIM?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div></div>
+    <p class="muted" style="font-size:12px">Pago nos RUN de ${PR.runs.map(m=>mesTxt(m)).join(', ')}${emPag?` · <b>neste RUN: prestação ${pg.k} de ${pg.n}</b>`:''}. Eventos Nova pela data do PN, calculados pela plataforma a partir da RLMC das linhas; objetivos e índice de cada vendedor (Plano e objetivos). Regra do atingimento: <b>${mn?'a % mais baixa entre Nova e Refidelização da categoria (plano escrito)':'só o objetivo Nova da categoria (mapa Excel)'}</b>.</p>
+    <table><thead><tr><th>Vendedor</th>${cats.map(c=>`<th class="num">Nova ${esc(c.nome)}</th><th class="num">Obj.</th><th class="num">% Nova</th>${mn?`<th class="num">% Ref</th>`:''}<th class="num">€</th>`).join('')}<th class="num">Apurado</th><th class="num">Patamar</th><th class="num">Índice</th><th class="num">Prémio</th><th class="num">/mês</th>${emPag?'<th class="num">Este RUN</th>':''}</tr></thead>
+    <tbody>${PR.lista.map(x=>`<tr><td><b>${esc(x.nome)}</b></td>${x.q.cats.map(c=>`<td class="num">${n3(c.ev)}</td><td class="num">${f1(c.ob)}</td><td class="num">${pctE(c.atN)}</td>${mn?`<td class="num">${pctE(c.atR)}</td>`:''}<td class="num">${eur(c.val)}</td>`).join('')}<td class="num">${eur(x.q.apurado)}</td><td class="num">${x.q.patamar?eur(x.q.patamar):'—'}</td><td class="num">${pctE(x.q.ind)}</td><td class="num"><b>${x.q.premio?eur(x.q.premio):'—'}</b></td><td class="num">${x.q.premio?eur(x.q.prest(1)):'—'}</td>${emPag?`<td class="num"><b>${x.prest?eur(x.prest):'—'}</b></td>`:''}</tr>`).join('')||`<tr><td colspan="20" class="muted">Sem eventos Nova no trimestre.</td></tr>`}</tbody>
+    <tfoot><tr class="tot"><td colspan="${1+cats.length*(mn?5:4)+3}">Total</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.premio,0))}</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.prest(1),0))}</td>${emPag?`<td class="num">${eur(PR.lista.reduce((a,x)=>a+x.prest,0))}</td>`:''}</tr></tfoot></table>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Ao gravar as comissões de um RUN, a prestação do trimestre que se paga nesse RUN entra no valor de cada vendedor como uma linha «Prémio trimestral».</p></div>`;
+    box.querySelector('#pt-t').onchange = e => { PT_TRIM = e.target.value; desenharPremios(box); };
+  } catch(e){ console.error(e); box.innerHTML = `<div class="card">Prémio trimestral indisponível: ${esc(errTxt(e))}</div>`; }
+}
+// ---- ferramentas do RUN: atribuição manual, correção do PN, fecho e mapa de pagamentos ----
+// chave estável de cada linha do RUN (sobrevive a uma nova importação do mesmo ficheiro): código|POS|MSISDN|valor|data + nº da repetição
+function chavesLinhas(ls){ const n={}; return ls.map(l=>{ const k=[l[RL.cod],l[RL.pos],l[RL.msisdn],l[RL.val],l[RL.cri]].join('|'); n[k]=(n[k]||0)+1; return k+'#'+n[k]; }); }
+async function procurarPN(tipo, v){
+  v = String(v||'').trim(); if (!v) return []; const col = collection(db,'rpn'), qs = [];
+  if (tipo==='nif') { qs.push(query(col, where('cliente.nif','==',v))); if (/^\d+$/.test(v)) qs.push(query(col, where('cliente.nif','==',v.replace(/^0+/,'')))); }
+  if (tipo==='msisdn') qs.push(query(col, where('msisdns','array-contains', normMsisdn(v))));
+  if (tipo==='pos') qs.push(query(col, where('contratos','array-contains', v.toUpperCase())));
+  if (tipo==='pn') { const n = +String(v).split('/').pop().replace(/\D/g,''); if (n) qs.push(query(col, where('numero','==', n))); }   // aceita «2026/49869»
+  const mp = {}; (await Promise.all(qs.map(q=>getDocs(q).catch(()=>null)))).forEach(sn=>(sn?.docs||[]).forEach(d=>mp[d.id]={id:d.id, ...d.data()}));
+  return Object.values(mp).sort((a,b)=>String(b.mesRef||'').localeCompare(String(a.mesRef||'')));
+}
+function atribuirLinha(x, R, depois){
+  const l = x.l, chave = chavesLinhas(R.linhas)[x.i], fechado = !!R.fechado;
+  modal(`<h2>Atribuir linha do RUN de ${mesTxt(R.mes)}</h2>
+    <div class="card" style="background:#fafafa;font-size:13px"><b>${esc(l[RL.cod])}</b> · POS <b>${esc(l[RL.pos]||'—')}</b> · NIF <b>${esc(l[RL.nif])}</b> · MSISDN <b>${esc(l[RL.msisdn]||'—')}</b><br>${esc(descVDF(l))} · ativação ${fmtD(l[RL.cri])} · SFID ${esc(l[RL.sfid])}${x.sfidUid?' ('+esc(userNome(x.sfidUid))+')':''} · <b>${eur(l[RL.val])} €</b></div>
+    <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap"><div><label>Procurar PN por</label><select id="ap-t"><option value="nif">NIF</option><option value="msisdn">MSISDN</option><option value="pos">Contrato VDF (POS)</option><option value="pn">Nº do PN</option></select></div>
+      <div style="flex:1;min-width:200px"><label>&nbsp;</label><input id="ap-v" value="${esc(l[RL.nif])}" style="width:100%"></div><button class="btn" id="ap-go">Procurar</button></div>
+    <div id="ap-r" class="scroll" style="max-height:48vh;margin-top:10px"></div>
+    <p class="muted" style="font-size:12px">«Só esta linha»: a linha fica no PN escolhido apenas neste RUN. «Associar o POS ao PN»: o POS ${esc(l[RL.pos]||'')} fica registado no PN (contrato VDF antigo/adicional) e esta e as próximas linhas com esse POS passam a ir para lá sozinhas.</p>
+    <div class="row"><span class="sp"></span><button class="btn" id="ap-c">Fechar</button></div>`, (m, close) => {
+    m.style.maxWidth='980px'; m.style.width='96vw'; m.querySelector('#ap-c').onclick=close;
+    const ir = async () => { const box=m.querySelector('#ap-r'); box.innerHTML='<p class="muted">A procurar…</p>';
+      try { const rs = await procurarPN(m.querySelector('#ap-t').value, m.querySelector('#ap-v').value), ms = normMsisdn(l[RL.msisdn]||'');
+        box.innerHTML = rs.length ? `<table><thead><tr><th>PN</th><th>Estado</th><th>Mês</th><th>Cliente</th><th>Vendedor</th><th>Linhas (MSISDN · contrato VDF · natureza)</th><th></th></tr></thead><tbody>${rs.map(r=>`<tr><td><b>${esc(r.numero||'')}</b></td><td>${esc(r.estado||'')}</td><td>${r.mesRef?r.mesRef.split('-').reverse().join('/'):''}</td><td>${esc(r.cliente?.nome||'')}<br><span class="muted" style="font-size:11px">${esc(r.cliente?.nif||'')}</span></td><td>${esc(r.vendedorNome||'')}</td>
+          <td style="font-size:12px">${(r.linhas||[]).slice(0,12).map(y=>`<div style="${ms && normMsisdn(y.msisdn||'')===ms?'background:#fff4d6;font-weight:600':''}">${esc(y.msisdn||'—')} · ${esc(y.contratoVDF||'—')} · ${esc(y.natureza||'')}</div>`).join('')}${(r.contratosAntigos||[]).length?`<div class="muted">POS associados: ${esc(r.contratosAntigos.join(', '))}</div>`:''}</td>
+          <td style="white-space:nowrap">${fechado?'<span class="muted">RUN fechado</span>':`<button class="btn sm" data-so="${r.id}">Só esta linha</button><br>${l[RL.pos]?`<button class="btn sm" data-pos="${r.id}" style="margin-top:4px">Associar o POS ao PN</button>`:''}`}</td></tr>`).join('')}</tbody></table>`
+          : `<p class="muted">Nenhum PN encontrado na plataforma. Experimente outro critério (MSISDN, contrato VDF ou nº do PN, ex.: 49869).</p>
+             <div class="warnbox">Se o PN existe no PHC mas não aparece aqui por nenhum critério, ainda não foi trazido para a plataforma: os PN feitos no PHC depois da última importação não entram sozinhos. Repita Administração › <b>Importar PN do PHC</b> (não duplica e não apaga as correções feitas aqui) e volte a abrir este separador.</div>`;
+        box.querySelectorAll('[data-so]').forEach(b=>b.onclick=async()=>{ const r=rs.find(y=>y.id===b.dataset.so);
+          try { await setDoc(doc(db,'runs',R.mes), {manual:{[chave]:{rpnId:r.id, numero:r.numero||'', por:S.me.nome, em:new Date().toISOString()}}}, {merge:true});
+            await logAlt({tipo:'Atribuição manual', desde:R.mes, resumo:`RUN ${mesTxt(R.mes)}: ${l[RL.cod]} POS ${l[RL.pos]||'—'} MSISDN ${l[RL.msisdn]||'—'} → PN ${r.numero} (${r.vendedorNome||''})`});
+            await hist('Comissão atribuída manualmente', `RUN ${mesTxt(R.mes)}: ${l[RL.cod]} POS ${l[RL.pos]||'—'} MSISDN ${l[RL.msisdn]||'—'}`, r.id);
+            close(); toast(`Linha atribuída ao PN ${r.numero}.`); CMS_RUN=null; depois(); } catch(e){ toast(errTxt(e), true); } });
+        box.querySelectorAll('[data-pos]').forEach(b=>b.onclick=async()=>{ const r=rs.find(y=>y.id===b.dataset.pos);
+          try { await associarAoPN(r, {pos:l[RL.pos]}, `linha do RUN de ${mesTxt(R.mes)} (${l[RL.cod]})`); close(); toast(`POS ${l[RL.pos]} associado ao PN ${r.numero}.`); CMS_RUN=null; depois(); } catch(e){ toast(errTxt(e), true); } });
+      } catch(e){ box.innerHTML=`<p>Erro: ${esc(errTxt(e))}</p>`; } };
+    m.querySelector('#ap-go').onclick = ir; m.querySelector('#ap-v').onkeydown = e => { if (e.key==='Enter') ir(); }; ir();
+  });
+}
+// junta um POS/MSISDN antigo ou adicional ao PN (fica para o matching do RUN e no histórico do PN)
+async function associarAoPN(r, {pos, msisdn}, motivo){
+  const sn = await getDoc(doc(db,'rpn',r.id)); const d = sn.data()||{};
+  const ca = [...new Set([...(d.contratosAntigos||[]), ...(pos?[String(pos).trim().toUpperCase()]:[])])], ma = [...new Set([...(d.msisdnsAntigos||[]), ...(msisdn?[normMsisdn(msisdn)]:[])])];
+  await updateDoc(doc(db,'rpn',r.id), {contratosAntigos:ca, msisdnsAntigos:ma, contratos:[...new Set([...(d.contratos||[]), ...ca])], msisdns:[...new Set([...(d.msisdns||[]), ...ma])], atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
+  await hist('Contrato VDF / MSISDN associado', [pos?'POS '+pos:'', msisdn?'MSISDN '+msisdn:''].filter(Boolean).join(' · ')+(motivo?' — '+motivo:''), r.id);
+  await logAlt({tipo:'PN corrigido', desde:mesLocal(), resumo:`PN ${r.numero}: associado ${[pos?'POS '+pos:'', msisdn?'MSISDN '+msisdn:''].filter(Boolean).join(' e ')}${motivo?' ('+motivo+')':''}`});
+}
+// correção do contrato VDF / MSISDN das linhas de um PN (BO Financeiro / Master): o valor antigo fica guardado e continua a contar para o RUN
+function corrigirPN(r, depois){
+  modal(`<h2>Corrigir contrato VDF / MSISDN · PN ${esc(r.numero||'')}</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Quando a Vodafone reabre o processo e dá um POS novo, ou o número muda: escreva o valor novo na linha. O antigo fica guardado no PN e continua a ser reconhecido nos RUN (comissões e charge-backs atrasados).</p>
+    <div class="scroll"><table><thead><tr><th>Referência</th><th>Natureza</th><th>Contrato VDF</th><th>Novo contrato VDF</th><th>MSISDN</th><th>Novo MSISDN</th></tr></thead><tbody>
+    ${(r.linhas||[]).map((y,i)=>`<tr><td>${esc(y.ref||'')} <span class="muted" style="font-size:11px">${esc(y.designacao||'')}</span></td><td>${esc(y.natureza||'')}</td><td>${esc(y.contratoVDF||'—')}</td><td><input data-cp="${i}" style="width:170px"></td><td>${esc(y.msisdn||'—')}</td><td><input data-cm="${i}" style="width:110px"></td></tr>`).join('')}</tbody></table></div>
+    <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px"><div><label>Associar outro POS (sem mudar as linhas)</label><input id="cp-xp" style="width:190px"></div><div><label>Associar outro MSISDN</label><input id="cp-xm" style="width:130px"></div>
+      <div style="flex:1;min-width:220px"><label>Motivo</label><input id="cp-mot" placeholder="Ex.: processo reaberto pela Vodafone, POS novo" style="width:100%"></div></div>
+    ${(r.contratosAntigos||[]).length||(r.msisdnsAntigos||[]).length?`<p class="muted" style="font-size:12px">Já associados: ${esc([...(r.contratosAntigos||[]), ...(r.msisdnsAntigos||[])].join(', '))}</p>`:''}
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="cp-c">Cancelar</button><button class="btn pri" id="cp-s">Guardar</button></div>`, (m, close) => {
+    m.style.maxWidth='1000px'; m.style.width='96vw'; m.querySelector('#cp-c').onclick=close;
+    m.querySelector('#cp-s').onclick = async () => {
+      const mot = m.querySelector('#cp-mot').value.trim(); if (mot.length<3) return toast('Escreva o motivo.', true);
+      try { const sn = await getDoc(doc(db,'rpn',r.id)), d = sn.data(), ls = JSON.parse(JSON.stringify(d.linhas||[])), ca = new Set(d.contratosAntigos||[]), ma = new Set(d.msisdnsAntigos||[]), txt = [];
+        m.querySelectorAll('[data-cp]').forEach(e=>{ const v=e.value.trim().toUpperCase(), y=ls[+e.dataset.cp]; if (v && v!==String(y.contratoVDF||'').toUpperCase()) { if (y.contratoVDF) ca.add(String(y.contratoVDF).trim().toUpperCase()); txt.push(`linha ${y.msisdn||y.ref}: POS ${y.contratoVDF||'—'} → ${v}`); y.contratoVDF=v; } });
+        m.querySelectorAll('[data-cm]').forEach(e=>{ const v=normMsisdn(e.value), y=ls[+e.dataset.cm]; if (v && v!==normMsisdn(y.msisdn||'')) { if (y.msisdn) ma.add(normMsisdn(y.msisdn)); txt.push(`MSISDN ${y.msisdn||'—'} → ${v}`); y.msisdn=v; } });
+        const xp = m.querySelector('#cp-xp').value.trim().toUpperCase(), xm = normMsisdn(m.querySelector('#cp-xm').value); if (xp) { ca.add(xp); txt.push('POS associado '+xp); } if (xm) { ma.add(xm); txt.push('MSISDN associado '+xm); }
+        if (!txt.length) return toast('Não alterou nada.', true);
+        const CA=[...ca], MA=[...ma];
+        await updateDoc(doc(db,'rpn',r.id), {linhas:ls, contratosAntigos:CA, msisdnsAntigos:MA, contratos:[...new Set([...ls.map(y=>String(y.contratoVDF||'').trim()).filter(Boolean), ...CA])], msisdns:[...new Set([...listaMsisdn(ls), ...MA])], atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
+        await hist('Contrato VDF / MSISDN corrigido', txt.join('; ')+' — '+mot, r.id);
+        await logAlt({tipo:'PN corrigido', desde:mesLocal(), resumo:`PN ${r.numero}: ${txt.join('; ')} (${mot})`});
+        Object.assign(r, {linhas:ls, contratosAntigos:CA, msisdnsAntigos:MA}); close(); toast('PN corrigido. Os RUN passam a reconhecer o contrato novo e o antigo.'); CMS_RUN=null; depois&&depois();
+      } catch(e){ toast(errTxt(e), true); } };
+  });
+}
+// fecho do RUN (Master): depois de gravado e conferido; bloqueia nova importação, regravação e atribuições
+async function fecharRun(mes, fechar){
+  const txt = fechar ? `Fechar o RUN de ${mesTxt(mes)}?\n\nDepois de fechado não se pode reimportar, regravar nem atribuir linhas (o Master pode reabrir).` : `Reabrir o RUN de ${mesTxt(mes)}?`;
+  if (!confirm(txt)) return false;
+  await setDoc(doc(db,'runs',mes), {fechado: fechar ? {em:new Date().toISOString(), por:S.me.nome} : null}, {merge:true});
+  await logAlt({tipo: fechar?'RUN fechado':'RUN reaberto', desde:mes, resumo:`RUN de ${mesTxt(mes)}`}); CMS_RUN=null; return true;
+}
+// mapa de pagamentos do RUN (o que foi gravado): para a contabilidade
+async function mapaPagamentos(mes){
+  const sn = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
+  const rank = sn.docs.find(d=>!d.data().uid)?.data()?.ranking||[], det = sn.docs.filter(d=>d.data().uid).map(d=>d.data());
+  const linhas = det.map(g=>{ const pr = (g.detalhe||[]).filter(p=>p.premio || (!p.rpnId && (p.linhas||[]).some(l=>/prémio trimestral/i.test(l.tipo||'')))).reduce((a,p)=>a+(+p.valor||0),0), u=S.users[g.uid]||{};
+    return {nome: userNome(g.uid) || rank.find(x=>x.uid===g.uid)?.nome || g.uid, phc:u.vendedorPHC||'', cat:'Vendedor', categoria: cfgVend(g.uid, mes)?.cat||'', com: r2((+g.valor||0)-pr), premio: r2(pr), total: r2(+g.valor||0), origem:g.origem||'Plataforma'}; });
+  rank.filter(x=>x.cat==='BackOffice').forEach(x=>linhas.push({nome:x.nome, phc:S.users[x.uid]?.vendedorPHC||'', cat:'BackOffice', categoria:'', com:r2(x.valor), premio:0, total:r2(x.valor), origem:'Produção BO'}));
+  return linhas.sort((a,b)=>a.cat.localeCompare(b.cat)||a.nome.localeCompare(b.nome,'pt'));
+}
+async function cardMapa(mes, R){
+  const L = await mapaPagamentos(mes); if (!L.length) return '';
+  return `<div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Mapa de pagamentos · RUN de ${mesTxt(mes)}</h2>${R?.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(R.fechado.por||'')}</span>`:'<span class="badge">por fechar</span>'}<span class="sp"></span><button class="btn sm" id="mp-x">Descarregar Excel</button></div>
+    <table style="margin-top:8px"><thead><tr><th>Colaborador</th><th>Nº PHC</th><th>Tipo</th><th>Categoria</th><th class="num">Comissão do RUN</th><th class="num">Prémio trimestral</th><th class="num">Total a pagar</th></tr></thead>
+    <tbody>${L.map(x=>`<tr><td><b>${esc(x.nome)}</b></td><td>${esc(x.phc)}</td><td>${x.cat}</td><td>${esc(x.categoria)}</td><td class="num">${eur(x.com)}</td><td class="num">${x.premio?eur(x.premio):'—'}</td><td class="num"><b>${eur(x.total)}</b></td></tr>`).join('')}</tbody>
+    <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${eur(L.reduce((a,x)=>a+x.com,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.premio,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.total,0))}</td></tr></tfoot></table>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Valores gravados para o RUN de ${mesTxt(mes)} (comissões dos vendedores com charge-backs, prestação do prémio trimestral e parte de cada BO na Produção BO). Valores negativos = a descontar.</p></div>`;
+}
+async function descarregarMapa(mes){
+  const L = await mapaPagamentos(mes), X = await carregarXLSX();
+  const ws = X.utils.aoa_to_sheet([[`Mapa de pagamentos de comissões · RUN de ${mesTxt(mes)}`],[],['Colaborador','Nº PHC','Tipo','Categoria','Comissão do RUN (€)','Prémio trimestral (€)','Total a pagar (€)'],
+    ...L.map(x=>[x.nome, x.phc, x.cat, x.categoria, x.com, x.premio, x.total]), [], ['Total','','','', r2(L.reduce((a,x)=>a+x.com,0)), r2(L.reduce((a,x)=>a+x.premio,0)), r2(L.reduce((a,x)=>a+x.total,0))]]);
+  ws['!cols'] = [{wch:28},{wch:9},{wch:12},{wch:16},{wch:18},{wch:20},{wch:18}];
+  const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Pagamentos'); X.writeFile(wb, `Comissoes-RUN-${mes}.xlsx`);
+}
+// ---- manual do comissionamento (só Master e BO Financeiro: está dentro do menu Comissionamento) ----
+function cmsManual(box){
+  const P = premioDe(versaoDe((PLANO||{versoes:[PLANO_DEF]}).versoes, mesLocal())), tab = (t,n) => `<a href="#" data-ir="${t}">${n}</a>`;
+  box.innerHTML = `<div class="card" style="line-height:1.55;max-width:980px">
+  <h2>Manual do comissionamento</h2>
+  <p class="muted">Para o Master e a BO Financeiro. Passos de cada mês e de cada trimestre, do RUN da Vodafone até ao mapa para a contabilidade. ⚠ Zona confidencial: o que a Vodafone paga, a % de cada escalão e a margem não podem sair daqui.</p>
+  <h3>Todos os meses</h3>
+  <ol>
+    <li><b>Durante o mês — PN corretos.</b> Quando a Vodafone reabre um processo e dá um POS novo, ou muda o MSISDN, abra o PN › separador <i>Comissão</i> › <b>Corrigir contrato VDF / MSISDN</b>. O valor antigo fica guardado no PN e continua a ser reconhecido nos RUN (comissões e charge-backs que cheguem mais tarde).</li>
+    <li><b>Trazer os PN novos do PHC</b> (enquanto os PN ainda forem feitos no PHC): Administração › <i>Importar PN do PHC</i>, com a consulta de sempre. Sem isto, as linhas do RUN de PN feitos no PHC depois da última importação ficam «por imputar». Não duplica nem apaga correções.</li>
+    <li><b>Obter o RUN.</b> A Vodafone disponibiliza todos os meses o ficheiro <code>UNE_VI_Detalhe_AAAAMM_….xlsx</code> (ex.: o RUN de agosto chegou a 14/09). Descarregue-o como hoje e não o altere.</li>
+    <li><b>Importar.</b> ${tab('run','RUN Vodafone')} › escolher o ficheiro. Confira o total e as famílias (upfront, prémios, charge-backs, ajustes, agência) com o que a Vodafone comunicou. Se vier um ficheiro corrigido, importe-o de novo (substitui; as atribuições manuais mantêm-se).</li>
+    <li><b>Validar.</b> ${tab('valid','Validação')}: compara cada linha do RUN com o PN (natureza, RLMC, prazo, tier, eventos). Erro nosso → corrigir o PN. Erro da Vodafone → pedido de esclarecimento.</li>
+    <li><b>Imputar o que falta.</b> ${tab('vend','Comissões por vendedor')} › <i>Linhas por imputar</i> › <b>Atribuir</b>: procure o PN por NIF, MSISDN, contrato VDF ou nº do PN.
+      <ul><li><b>Só esta linha</b> — é a antiga «Atribuição Manual» do PHC: a comissão vai para esse PN apenas neste RUN.</li>
+      <li><b>Associar o POS ao PN</b> — é o antigo «inserir o POS novo no PN e recalcular»: o POS fica no PN e esta linha e as seguintes passam a ir para lá sozinhas.</li>
+      <li>As atribuições aparecem em <i>Atribuições manuais deste RUN</i> e podem ser desfeitas. Linhas de agência (sem POS: IC_, CT_PL_) não são de vendedores.</li></ul></li>
+    <li><b>Conferir o cálculo (Master).</b> Em <i>Cálculo da plataforma</i>: escalão, % e majoração de cada vendedor no mês de cada PN, charge-backs e margem. Um RUN atrasado é sempre calculado com as condições do mês do PN (plano e vendedores em vigor nessa altura).</li>
+    <li><b>Prémio trimestral.</b> Se este RUN paga uma prestação (${P.prestacoes} prestações, a 1.ª ${P.atraso} meses depois do fim do trimestre), confira o quadro <i>Prémio trimestral</i> no mesmo separador.</li>
+    <li><b>Gravar (Master).</b> <i>Gravar comissões do mês</i>: grava o ranking (visível a todos), o detalhe por PN de cada vendedor e a prestação do prémio trimestral.</li>
+    <li><b>Mapa de pagamentos.</b> Confira o <i>Mapa de pagamentos</i> (vendedores: comissão do RUN + prémio; BackOffice: parte da Produção BO). Os incentivos cessam com o fim do vínculo do colaborador: quem já saiu não deve ser pago.</li>
+    <li><b>Fechar o RUN (Master)</b> e <b>Descarregar Excel</b> do mapa para enviar à contabilidade. Depois de fechado não se reimporta, regrava nem atribui; só o Master pode reabrir.</li>
+  </ol>
+  <h3>Todos os trimestres</h3>
+  <ol>
+    <li><b>No início:</b> objetivos da Vodafone para a Redemóvel em ${tab('agente','Objetivos Vodafone')} (RLMC €; a equipa só vê eventos).</li>
+    <li><b>Objetivos dos vendedores:</b> se algum vendedor tem objetivos diferentes nesse trimestre, ${tab('vendedores','Vendedores')} › <i>Objetivos de um trimestre</i>.</li>
+    <li><b>No fim:</b> ${tab('vend','Comissões por vendedor')} › <i>Prémio trimestral</i> › escolher o trimestre e conferir. As prestações entram sozinhas nos RUN seguintes quando grava.</li>
+  </ol>
+  <h3>Alterações às condições (sem perder o histórico)</h3>
+  <ul>
+    <li><b>Plano</b> (${tab('plano','Plano e objetivos')}): <i>Guardar</i> corrige a versão em vigor; <i>Guardar como nova versão</i> cria condições a partir de um mês — os meses anteriores ficam com as antigas.</li>
+    <li><b>Vendedores</b> (${tab('vendedores','Vendedores')}): escolha «As alterações valem a partir de» antes de guardar. Cada alteração cria uma versão; «Ver o que estava em vigor em» mostra as condições de qualquer mês.</li>
+    <li>Tudo fica no <i>Histórico de alterações</i> (quem, quando, de quê para quê), incluindo atribuições manuais, correções de PN e fecho de RUN.</li>
+  </ul>
+  <h3>Vendedor novo</h3>
+  <ol><li>Administração › criar o utilizador (perfil Comercial, nº de vendedor PHC, SFID).</li>
+    <li>${tab('vendedores','Vendedores')}: filtre pela categoria de um colega igual (ex.: Júnior), copie categoria, índice e objetivos para a linha nova, «valem a partir de» = mês de entrada, guardar. Enquanto não estiver configurado aparece o aviso ⚠ no topo do Comissionamento.</li></ol>
+  </div>`;
+  box.querySelectorAll('[data-ir]').forEach(a=>a.onclick=e=>{ e.preventDefault(); CMS_TAB=a.dataset.ir; viewComissionamento(); });
 }
 // grava o que os vendedores podem ver: só € de comissão (nunca o recebido nem a %)
 async function gravarComissoes(casa, lst){
+  if (CMS_RUN?.fechado) return toast('Este RUN está fechado.', true);
   if (!confirm(`Gravar as comissões do RUN de ${mesTxt(CMS_MES)}?\n\nO ranking fica visível a toda a equipa e cada vendedor passa a ver a comissão de cada linha dos seus PN.\nInclui a prestação do prémio trimestral que se paga neste RUN.`)) return;
   try {
     const b = writeBatch(db), mes = CMS_MES;
@@ -2942,8 +3146,6 @@ async function cmsPlano(box){
     const FIN = fs.exists() && fs.data().versoes?.length ? fs.data() : {versoes:[FIN_DEF]};
     const vs = [...PLANO.versoes].sort((a,b)=>a.desde<b.desde?-1:1), v = JSON.parse(JSON.stringify(vs.at(-1)));
     const vf = JSON.parse(JSON.stringify(versaoDe(FIN.versoes, v.desde)));
-    const OT = JSON.parse(JSON.stringify(PLANO.objTrim||{})), OT_LISTA = Array.from({length:10},(_,k)=>trimId(somaMeses(mesLocal(), 3-3*k)));
-    let OT_T = trimId(mesLocal());
     const PR0 = premioDe(v), vend = vendedoresProj(), inp=(id,val,w=70,step='any')=>`<input type="number" step="${step}" id="${id}" value="${val}" style="width:${w}px">`;
     const eurEv = i => ({ref: (+vf.pct[i]||0)/100*(+vf.valorEvento.ref||0), nova: (+vf.pct[i]||0)/100*(+vf.valorEvento.nova||0)});
     box.innerHTML = `
@@ -2965,24 +3167,16 @@ async function cmsPlano(box){
           <div><label>Teto (€)</label>${inp('pr-teto',PR0.teto,80)}</div>
           <div><label>Prestações</label>${inp('pr-n',PR0.prestacoes,60,'1')}</div>
           <div><label>1.ª prestação: meses após o fim do trimestre</label>${inp('pr-at',PR0.atraso,60,'1')}</div>
+          <div><label>Atingimento de cada categoria</label><select id="pr-rg"><option value="nova" ${PR0.regra!=='minimo'?'selected':''}>Só o objetivo Nova (como no Excel)</option><option value="minimo" ${PR0.regra==='minimo'?'selected':''}>O mais baixo entre Nova e Refidelização (plano escrito)</option></select></div>
         </div>
-        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % do objetivo Nova atingido (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Com ${PR0.atraso} meses, o prémio do 1.º trimestre paga-se nos RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}. O índice de cada vendedor (júnior/assistente 50 %) está na tabela de objetivos.</p></div>
-      <div class="card scroll"><h2>Objetivos trimestrais</h2>
-        <table><thead><tr><th>Vendedor</th>${v.objetivos.map(o=>`<th class="num">${esc(o.nome)}</th>`).join('')}<th class="num" title="Júnior / assistente de loja: 50 %. Aplica-se aos objetivos e ao valor do prémio trimestral">Índice prémio %</th></tr></thead>
-        <tbody><tr class="tot"><td>Padrão (todos)</td>${v.objetivos.map(o=>`<td class="num">${inp('ob-d-'+o.id,o.trim)}</td>`).join('')}<td class="num muted">100</td></tr>
-        ${vend.map(x=>`<tr><td>${esc(x.nome)}</td>${v.objetivos.map(o=>`<td class="num"><input type="number" step="any" data-ov="${x.uid}|${o.id}" value="${PLANO.objVend?.[x.uid]?.[o.id]??''}" placeholder="${o.trim}" style="width:70px"></td>`).join('')}<td class="num"><input type="number" step="any" data-ov="${x.uid}|indice" value="${PLANO.objVend?.[x.uid]?.indice??''}" placeholder="100" style="width:70px"></td></tr>`).join('')}</tbody></table>
-        <p class="muted" style="font-size:12px;margin-bottom:0">Vazio = usa o padrão. Objetivo do mês = ⅓ do trimestral. O índice só mexe no prémio trimestral: os objetivos Nova contam a ×índice e o prémio também (ex.: 50 % → objetivo 39 passa a 19,5 e um patamar de 85 € paga 42,50 €). Para acrescentar uma métrica (ex.: Nova Smart Solutions) basta pedir: entra como mais uma coluna, sem mexer no resto.</p></div>
-      <div class="card scroll"><div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Objetivos de um trimestre</h2><span class="sp"></span>
-        <div><label>Trimestre</label><select id="ot-t">${OT_LISTA.map(t=>`<option value="${t}" ${t===OT_T?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div></div>
-        <div id="ot-b" style="margin-top:8px"></div>
-        <p class="muted" style="font-size:12px;margin-bottom:0">Quando os objetivos de um vendedor mudam num trimestre, escreva-os aqui: valem só para esse trimestre (escalão, majoração e prémio trimestral). Vazio = usa os objetivos acima.</p></div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % de atingimento da categoria (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Com ${PR0.atraso} meses, o prémio do 1.º trimestre paga-se nos RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}. O índice de cada vendedor (júnior/assistente 50 %) está na tabela de objetivos.</p></div>
+      <div class="card scroll"><h2>Objetivos trimestrais padrão</h2>
+        <table><thead><tr><th></th>${v.objetivos.map(o=>`<th class="num">${esc(o.nome)}</th>`).join('')}</tr></thead>
+        <tbody><tr class="tot"><td>Padrão (todos)</td>${v.objetivos.map(o=>`<td class="num">${inp('ob-d-'+o.id,o.trim)}</td>`).join('')}</tr></tbody></table>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Vale para quem não tiver objetivos próprios. Os objetivos, a categoria e o índice de cada vendedor estão no separador «Vendedores». Objetivo do mês = ⅓ do trimestral.</p></div>
       <div class="card"><div class="row" style="gap:12px;flex-wrap:wrap;align-items:flex-end">
         <button class="btn pri" id="pl-s">Guardar</button><button class="btn" id="pl-c">Cancelar</button><span class="sp"></span>
         <div><label>Criar nova versão a partir de</label><input type="month" id="pl-nv" style="width:160px"></div><button class="btn" id="pl-nb" title="Os meses anteriores continuam com a versão atual">Guardar como nova versão</button></div></div>`;
-    const otLer = () => box.querySelectorAll('[data-ot]').forEach(e=>{ const [uid,id]=e.dataset.ot.split('|'), o=(OT[OT_T]=OT[OT_T]||{}); o[uid]=o[uid]||{}; if (e.value==='') delete o[uid][id]; else o[uid][id]=+e.value; if (!Object.keys(o[uid]).length) delete o[uid]; });
-    const otDraw = () => { const o = OT[OT_T]||{}; $('#ot-b').innerHTML = `<table><thead><tr><th>Vendedor</th>${v.objetivos.map(x=>`<th class="num">${esc(x.nome)}</th>`).join('')}</tr></thead>
-        <tbody>${vend.map(x=>`<tr><td>${esc(x.nome)}</td>${v.objetivos.map(ob=>`<td class="num"><input type="number" step="any" data-ot="${x.uid}|${ob.id}" value="${o[x.uid]?.[ob.id]??''}" placeholder="${PLANO.objVend?.[x.uid]?.[ob.id]??ob.trim}" style="width:70px"></td>`).join('')}</tr>`).join('')}</tbody></table>`; };
-    otDraw(); $('#ot-t').onchange = e => { otLer(); OT_T = e.target.value; otDraw(); };
     const ler = () => {
       const nv = JSON.parse(JSON.stringify(v)), nf = JSON.parse(JSON.stringify(vf)), num = id => parseFloat($('#'+id).value)||0;
       nf.valorEvento = {ref:num('pl-vr'), nova:num('pl-vn')};
@@ -2991,22 +3185,124 @@ async function cmsPlano(box){
       nv.pesos = Object.fromEntries(NAT_COM.map(n=>[n, num('pl-p-'+n.replace(/\W/g,''))]));
       nv.maj = v.maj.map((x,i)=>({n:+$('#pl-mn-'+i).value, pct:num('pl-mp-'+i)}));
       nv.objetivos = v.objetivos.map(o=>({...o, trim:num('ob-d-'+o.id)}));
-      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at')))};
-      const ov = {}; box.querySelectorAll('[data-ov]').forEach(e=>{ const [uid,id]=e.dataset.ov.split('|'); if (e.value!=='') (ov[uid]=ov[uid]||{})[id]=+e.value; });
-      otLer(); return {nv, nf, ov};
+      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at'))), regra:$('#pr-rg').value};
+      const ov = PLANO.objVend||{};
+      return {nv, nf, ov};
     };
     box.querySelectorAll('[id^="pl-pct-"],#pl-vr,#pl-vn').forEach(e=>e.oninput=()=>{ const {nv}=ler(); nv.escaloes.forEach((x,i)=>{ $('#pl-er-'+i).textContent=eur(x.ref); $('#pl-en-'+i).textContent=eur(x.nova); }); });
     const gravar = async desde => { const {nv, nf, ov} = ler(); nv.desde = nf.desde = desde;
       const pv = [...PLANO.versoes.filter(x=>x.desde!==desde), nv].sort((a,b)=>a.desde<b.desde?-1:1), pf = [...FIN.versoes.filter(x=>x.desde!==desde), nf].sort((a,b)=>a.desde<b.desde?-1:1);
       try { const b = writeBatch(db);
-        b.set(doc(db,'config','planoVendedor'), {versoes:pv, objVend:ov, objTrim:OT, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
+        b.set(doc(db,'config','planoVendedor'), {versoes:pv, objVend:ov, objTrim:PLANO.objTrim||{}, vendCfg:PLANO.vendCfg||{}, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
         b.set(doc(db,'configFin','comissao'), {versoes:pf, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
-        await b.commit(); PLANO=null; CM.dados=null; toast('Plano guardado.'); cmsPlano(box); } catch(e){ toast(errTxt(e), true); } };
+        await b.commit(); await logAlt({tipo:'Plano', desde, resumo: (vs.some(x=>x.desde===desde)?'Versão de '+mesTxt(desde)+' corrigida':'Nova versão a partir de '+mesTxt(desde))+': '+difPlano(versaoDe(PLANO.versoes, desde), nv, versaoDe(FIN.versoes, desde), nf)});
+        PLANO=null; CM.dados=null; toast('Plano guardado.'); cmsPlano(box); } catch(e){ toast(errTxt(e), true); } };
     $('#pl-s').onclick = () => gravar(v.desde);
     $('#pl-c').onclick = () => cmsPlano(box);
     $('#pl-nb').onclick = () => { const d=$('#pl-nv').value; if (!d) return toast('Escolha o mês a partir do qual vale a nova versão.', true); if (d<=v.desde) return toast('A nova versão tem de começar depois de '+v.desde.split('-').reverse().join('/')+'.', true); gravar(d); };
   } catch(e){ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; }
 }
+// ---- registo de alterações ao comissionamento (comissoes/log/alteracoes: só Master e BO Financeiro leem) ----
+const logAlt = d => addDoc(collection(db,'comissoes','log','alteracoes'), {...d, em:serverTimestamp(), quando:new Date().toISOString(), porUid:S.me.uid, por:S.me.nome}).catch(e=>console.warn('logAlt', e));
+function difPlano(v0, v1, f0, f1){ const d=[];
+  v1.escaloes.forEach((e,i)=>{ const a=v0?.escaloes?.[i]||{}; if (+a.min!==+e.min) d.push(`escalão ${escNum(i)}: ${a.min??'—'} → ${e.min} eventos`); if (+f0?.pct?.[i]!==+f1.pct[i]) d.push(`escalão ${escNum(i)}: ${f0?.pct?.[i]??'—'} % → ${f1.pct[i]} %`); });
+  if (+f0?.valorEvento?.ref!==+f1.valorEvento.ref || +f0?.valorEvento?.nova!==+f1.valorEvento.nova) d.push('comissão VDF por evento alterada');
+  (v1.maj||[]).forEach((m,i)=>{ if (+v0?.maj?.[i]?.pct!==+m.pct) d.push(`majoração ${m.n} objetivos: ${v0?.maj?.[i]?.pct??'—'} → ${m.pct} %`); });
+  (v1.objetivos||[]).forEach(o=>{ const a=(v0?.objetivos||[]).find(x=>x.id===o.id); if (+a?.trim!==+o.trim) d.push(`objetivo padrão ${o.nome}: ${a?.trim??'—'} → ${o.trim}`); });
+  Object.entries(v1.pesos||{}).forEach(([n,x])=>{ if (+v0?.pesos?.[n]!==+x) d.push(`peso ${n}: ${v0?.pesos?.[n]??'—'} → ${x}`); });
+  const p0=premioDe(v0), p1=premioDe(v1); ['valorEvento','teto','prestacoes','atraso','regra'].forEach(k=>{ if (String(p0[k])!==String(p1[k])) d.push(`prémio ${k}: ${p0[k]} → ${p1[k]}`); });
+  if (p0.patamares.join()!==p1.patamares.join()) d.push(`patamares: ${p0.patamares.join('/')} → ${p1.patamares.join('/')}`);
+  return d.join('; ') || 'sem alterações de valores'; }
+// aviso: vendedores ativos sem comissionamento configurado
+async function avisoPorConfigurar(){
+  try { await lerPlano(); const falta = vendLista().filter(x=>x.ativo && !x.cfg && x.perfil!=='master'); const box=$('#cms-aviso'); if (!box) return;
+    box.innerHTML = falta.length ? `<div class="warnbox" style="margin-bottom:12px">⚠ ${falta.length===1?'Há 1 vendedor':'Há '+falta.length+' vendedores'} sem comissionamento configurado (${falta.map(x=>esc(x.nome)).join(', ')}): estão a usar os objetivos padrão e índice 100 %. <a href="#" id="cms-av-go">Configurar em «Vendedores»</a></div>` : '';
+    $('#cms-av-go')?.addEventListener('click', e=>{ e.preventDefault(); CMS_TAB='vendedores'; viewComissionamento(); });
+  } catch(_){} }
+// todos os que vendem (perfil comercial/coordenador ou com nº de vendedor PHC), ligados aos utilizadores da Administração
+function vendLista(mes){
+  return Object.entries(S.users).filter(([uid,u])=>['comercial','coordenador'].includes(u.perfil) || u.vendedorPHC).map(([uid,u])=>{
+    const c = cfgVend(uid, mes||mesLocal()), o = PLANO.objVend?.[uid]||{}, hist = PLANO.vendCfg?.[uid]||[];
+    return {uid, nome:u.nome||uid, perfil:u.perfil||'', ativo:u.ativo!==false, phc:u.vendedorPHC||'', sfid:u.sfid||'', cfg: !!(hist.length || Object.keys(o).length), versoes:hist.length,
+      val:{cat:c?.cat??o.cat??'', indice:c?.indice??o.indice??'', NM:c?.NM??o.NM??'', NF:c?.NF??o.NF??'', RM:c?.RM??o.RM??'', RF:c?.RF??o.RF??''}, desde:c?.desde||'', ult: hist.length ? [...hist].sort((a,b)=>a.desde<b.desde?-1:1).at(-1) : null}; });
+}
+const VD = {mesRef:null, desde:null, sort:'nome', dir:1, f:{}, draft:{}, inat:false, otT:null, ot:null};
+async function cmsVendedores(box){
+  box.innerHTML = `<div class="card muted">A carregar…</div>`;
+  try { await lerPlano(true); } catch(e){ box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
+  VD.mesRef = VD.mesRef || mesLocal(); VD.desde = VD.desde || mesLocal(); VD.draft = {}; VD.ot = JSON.parse(JSON.stringify(PLANO.objTrim||{})); VD.otT = VD.otT || trimId(mesLocal());
+  const v = versaoDe(PLANO.versoes, VD.mesRef), objs = v.objetivos, P = premioDe(v);
+  const COLS = [['aviso',''],['nome','Nome'],['perfil','Perfil'],['ativo','Ativo'],['phc','Nº PHC'],['sfid','SFID'],['cat','Categoria'],['indice','Índice prémio %'],...objs.map(o=>[o.id,'Obj. '+o.nome]),['desde','Em vigor desde']];
+  const OT_LISTA = Array.from({length:10},(_,k)=>trimId(somaMeses(mesLocal(), 3-3*k)));
+  box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Vendedores · comissionamento</h2><span class="sp"></span>
+      <div><label>Ver o que estava em vigor em</label><input type="month" id="vd-ref" value="${VD.mesRef}" style="width:160px"></div>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="vd-inat" ${VD.inat?'checked':''}> Mostrar inativos</label></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Uma linha por utilizador da Administração que vende (perfil Comercial/Coordenador ou com nº de vendedor PHC). Perfil, nº PHC e SFID mudam-se na Administração. Clique no cabeçalho para ordenar; escreva por baixo para filtrar. Para configurar um vendedor novo, filtre pela categoria e copie os valores de um colega. Vazio = usa o padrão do plano (${objs.map(o=>`${esc(o.nome)} ${o.trim}`).join(' · ')} · índice 100 %).</p></div>
+    <div class="card scroll"><table id="vd-t"><thead><tr>${COLS.map(([k,t])=>`<th data-s="${k}" style="cursor:pointer;white-space:nowrap" class="${['indice','NM','NF','RM','RF'].includes(k)?'num':''}">${t}${VD.sort===k?(VD.dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr>
+      <tr>${COLS.map(([k])=>k==='aviso'?'<th></th>':`<th><input data-f="${k}" value="${esc(VD.f[k]||'')}" placeholder="filtrar" style="width:100%;min-width:50px;font-size:12px;padding:3px 5px"></th>`).join('')}</tr></thead><tbody id="vd-b"></tbody></table>
+      <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+        <div><label>As alterações valem a partir de</label><input type="month" id="vd-desde" value="${VD.desde}" style="width:160px"></div>
+        <button class="btn pri" id="vd-s">Guardar alterações</button><button class="btn" id="vd-c">Cancelar</button><span class="sp"></span><span id="vd-n" class="muted" style="font-size:12px"></span></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Cada alteração cria uma versão nova a partir do mês escolhido; os meses anteriores continuam com os valores antigos (um RUN atrasado é recalculado com as condições desse mês). Fica registada no histórico em baixo.</p></div>
+    <div class="card scroll"><div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Objetivos de um trimestre</h2><span class="sp"></span>
+      <div><label>Trimestre</label><select id="ot-t">${OT_LISTA.map(t=>`<option value="${t}" ${t===VD.otT?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div><button class="btn" id="ot-s">Guardar objetivos do trimestre</button></div>
+      <div id="ot-b" style="margin-top:8px"></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Só para exceções num trimestre (ex.: objetivo ajustado a meio do ano). Valem só nesse trimestre, para o escalão, a majoração e o prémio trimestral. Vazio = usa os objetivos da tabela de cima.</p></div>
+    <div class="card scroll"><h2>Histórico de alterações</h2><div id="vd-log" class="muted">A carregar…</div></div>`;
+  const campo = (k) => ['indice',...objs.map(o=>o.id)].includes(k);
+  const desenhar = () => {
+    let L = vendLista(VD.mesRef).filter(x=>VD.inat || x.ativo);
+    const txt = (x,k) => k==='ativo' ? (x.ativo?'sim':'não') : k==='desde' ? (x.desde?x.desde.split('-').reverse().join('/'):'') : k in x.val ? String(VD.draft[x.uid]?.[k] ?? x.val[k] ?? '') : String(x[k]??'');
+    Object.entries(VD.f).forEach(([k,f])=>{ if (f) L = L.filter(x=>txt(x,k).toLowerCase().includes(f.toLowerCase())); });
+    L.sort((a,b)=>{ const k=VD.sort==='aviso'?'nome':VD.sort, A=txt(a,k), B=txt(b,k), na=parseFloat(A), nb=parseFloat(B); return VD.dir*(!isNaN(na)&&!isNaN(nb) ? na-nb : A.localeCompare(B,'pt')); });
+    $('#vd-b').innerHTML = L.map(x=>{ const dv=k=>VD.draft[x.uid]?.[k] ?? x.val[k] ?? '', mud=k=>VD.draft[x.uid] && k in VD.draft[x.uid];
+      return `<tr style="${x.ativo?'':'opacity:.55'}"><td title="${x.cfg?'Configurado':'Sem configuração própria: usa o padrão'}">${x.cfg?'':'⚠'}</td><td><b>${esc(x.nome)}</b></td><td>${esc(x.perfil)}</td><td>${x.ativo?'sim':'não'}</td><td>${esc(x.phc)}</td><td>${esc(x.sfid)}</td>
+        <td><select data-k="${x.uid}|cat" style="font-size:12px;min-width:118px;${mud('cat')?'outline:2px solid var(--warn)':''}"><option value="">—</option>${CATS_VEND.map(c=>`<option ${dv('cat')===c?'selected':''}>${c}</option>`).join('')}</select></td>
+        ${['indice',...objs.map(o=>o.id)].map(k=>`<td class="num"><input type="number" step="any" data-k="${x.uid}|${k}" value="${esc(dv(k))}" placeholder="${k==='indice'?100:(objs.find(o=>o.id===k)?.trim??'')}" style="width:70px;${mud(k)?'outline:2px solid var(--warn)':''}"></td>`).join('')}
+        <td style="font-size:12px">${x.desde?x.desde.split('-').reverse().join('/'):'—'}${x.versoes>1?` <span class="muted">(${x.versoes} versões)</span>`:''}</td></tr>`; }).join('') || `<tr><td colspan="${COLS.length}" class="muted">Nenhum vendedor.</td></tr>`;
+    $('#vd-b').querySelectorAll('[data-k]').forEach(el=>el.onchange=()=>{ const [uid,k]=el.dataset.k.split('|'), x=vendLista(VD.mesRef).find(y=>y.uid===uid), novo = campo(k) ? (el.value===''?'':+el.value) : el.value;
+      if (String(novo)===String(x.val[k]??'')) { if (VD.draft[uid]) { delete VD.draft[uid][k]; if (!Object.keys(VD.draft[uid]).length) delete VD.draft[uid]; } } else (VD.draft[uid]=VD.draft[uid]||{})[k]=novo;
+      el.style.outline = VD.draft[uid] && k in VD.draft[uid] ? '2px solid var(--warn)' : ''; contar(); });
+  };
+  const contar = () => { const n=Object.keys(VD.draft).length; $('#vd-n').textContent = n ? `${n} vendedor(es) com alterações por guardar` : ''; };
+  box.querySelectorAll('th[data-s]').forEach(th=>th.onclick=()=>{ const k=th.dataset.s; VD.dir = VD.sort===k ? -VD.dir : 1; VD.sort=k;
+    box.querySelectorAll('th[data-s]').forEach(h=>h.textContent = COLS.find(c=>c[0]===h.dataset.s)[1] + (VD.sort===h.dataset.s ? (VD.dir>0?' ▲':' ▼') : '')); desenhar(); });
+  box.querySelectorAll('input[data-f]').forEach(i=>i.oninput=()=>{ VD.f[i.dataset.f]=i.value; desenhar(); });
+  $('#vd-ref').onchange = e => { if (e.target.value) { VD.mesRef=e.target.value; cmsVendedores(box); } };
+  $('#vd-inat').onchange = e => { VD.inat=e.target.checked; desenhar(); };
+  $('#vd-desde').onchange = e => { VD.desde = e.target.value || mesLocal(); };
+  $('#vd-c').onclick = () => cmsVendedores(box);
+  $('#vd-s').onclick = async () => {
+    const ids = Object.keys(VD.draft); if (!ids.length) return toast('Não há alterações.');
+    const desde = VD.desde, cfg = JSON.parse(JSON.stringify(PLANO.vendCfg||{})), logs = [];
+    for (const uid of ids) { const base = vendLista(desde).find(x=>x.uid===uid), novo = {...base.val, ...VD.draft[uid]};
+      const vs = (cfg[uid]||[]).filter(x=>x.desde!==desde); const depois = vs.filter(x=>x.desde>desde);
+      vs.push({desde, ...novo, em:new Date().toISOString(), por:S.me.nome}); cfg[uid] = vs.sort((a,b)=>a.desde<b.desde?-1:1);
+      const de = Object.fromEntries(Object.keys(VD.draft[uid]).map(k=>[k, base.val[k]??''])), para = VD.draft[uid];
+      logs.push({tipo:'Vendedor', uid, nome:base.nome, desde, de, para, resumo: Object.keys(para).map(k=>`${k==='cat'?'categoria':k==='indice'?'índice':'obj. '+k}: ${de[k]===''?'padrão':de[k]} → ${para[k]===''?'padrão':para[k]}`).join('; ') + (depois.length?` (atenção: há versões posteriores a partir de ${depois.map(x=>mesTxt(x.desde)).join(', ')})`:'')}); }
+    if (!confirm(`Guardar as alterações de ${ids.length} vendedor(es), em vigor a partir de ${mesTxt(desde)}?\n\nOs meses anteriores mantêm os valores antigos.`)) return;
+    try { await gravarPlanoCampos({vendCfg:cfg, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
+      for (const l of logs) await logAlt(l);
+      PLANO=null; CM.dados=null; TIER_MEM_LIMPAR(); toast('Guardado.'); await cmsVendedores(box); avisoPorConfigurar(); } catch(e){ toast(errTxt(e), true); } };
+  // objetivos de um trimestre
+  const otLer = () => box.querySelectorAll('[data-ot]').forEach(e=>{ const [uid,id]=e.dataset.ot.split('|'), o=(VD.ot[VD.otT]=VD.ot[VD.otT]||{}); o[uid]=o[uid]||{}; if (e.value==='') delete o[uid][id]; else o[uid][id]=+e.value; if (!Object.keys(o[uid]).length) delete o[uid]; if (!Object.keys(o).length) delete VD.ot[VD.otT]; });
+  const otDraw = () => { const o = VD.ot[VD.otT]||{}, mq = trimMeses(VD.otT)[2]; $('#ot-b').innerHTML = `<table><thead><tr><th>Vendedor</th>${objs.map(x=>`<th class="num">${esc(x.nome)}</th>`).join('')}</tr></thead>
+      <tbody>${vendLista(mq).filter(x=>x.ativo||o[x.uid]).map(x=>`<tr><td>${esc(x.nome)}</td>${objs.map(ob=>`<td class="num"><input type="number" step="any" data-ot="${x.uid}|${ob.id}" value="${o[x.uid]?.[ob.id]??''}" placeholder="${x.val[ob.id]!==''&&x.val[ob.id]!=null?x.val[ob.id]:ob.trim}" style="width:70px"></td>`).join('')}</tr>`).join('')}</tbody></table>`; };
+  otDraw(); $('#ot-t').onchange = e => { otLer(); VD.otT = e.target.value; otDraw(); };
+  $('#ot-s').onclick = async () => { otLer(); const antes = JSON.stringify(PLANO.objTrim?.[VD.otT]||{}), depois = JSON.stringify(VD.ot[VD.otT]||{});
+    try { await gravarPlanoCampos({objTrim:VD.ot, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
+      if (antes!==depois) await logAlt({tipo:'Objetivos do trimestre', desde:trimMeses(VD.otT)[0], resumo:`${trimTxt(VD.otT)}: ${Object.entries(VD.ot[VD.otT]||{}).map(([u,o])=>`${userNome(u)||u} ${Object.entries(o).map(([k,x])=>k+' '+x).join(', ')}`).join(' · ')||'sem exceções'}`});
+      PLANO=null; CM.dados=null; TIER_MEM_LIMPAR(); toast('Objetivos do trimestre guardados.'); cmsVendedores(box); } catch(e){ toast(errTxt(e), true); } };
+  desenhar(); contar();
+  // histórico
+  try { const sn = await getDocs(query(collection(db,'comissoes','log','alteracoes'), orderBy('quando','desc'), limit(80)));
+    const L = sn.docs.map(d=>d.data());
+    $('#vd-log').innerHTML = L.length ? `<table><thead><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Em vigor desde</th><th>Alteração</th></tr></thead><tbody>${L.map(l=>`<tr><td style="white-space:nowrap">${esc(String(l.quando||'').slice(0,16).replace('T',' '))}</td><td>${esc(l.por||'')}</td><td>${esc(l.tipo||'')}${l.nome?` · <b>${esc(l.nome)}</b>`:''}</td><td>${l.desde?mesTxt(l.desde):''}</td><td style="font-size:12px">${esc(l.resumo||'')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">Ainda sem alterações registadas.</p>';
+  } catch(e){ $('#vd-log').textContent = 'Histórico indisponível ('+errTxt(e)+').'; }
+}
+const gravarPlanoCampos = async d => { const ref=doc(db,'config','planoVendedor');
+  try { await updateDoc(ref, d); } catch(e){ if (e?.code==='not-found' || /no document/i.test(e?.message||'')) await setDoc(ref, d, {merge:true}); else throw e; } };
+const TIER_MEM_LIMPAR = () => { Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); };
 // BO no ranking: a parte de cada BO no bolo da Produção BO do mês (mesma conta do menu Produção BO)
 async function rankingBO(mes){
   const [cfgS, fS, dS, aS] = await Promise.all([getDoc(doc(db,'config','producaoBO')), getDocs(query(collection(db,'rpn'),where('fechadoMes','==',mes))),
@@ -3079,11 +3375,13 @@ async function renderComPN(tc, r){
         <div style="border-left:3px solid var(--line);padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Comissão prevista</span><b style="display:block;font-size:21px">${eur(tPrev)}</b></div>
         <div style="border-left:3px solid var(--ok);padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Comissão paga</span><b style="display:block;font-size:21px">${eur(tGer)}</b></div>
         <div style="border-left:3px solid ${ger.length&&Math.abs(tPrev-tGer)<0.01?'var(--ok)':'var(--warn)'};padding-left:10px"><span class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Saldo (prevista − paga)</span><b style="display:block;font-size:21px">${eur(tPrev-tGer)}</b><div style="margin-top:4px">${saldoTxt(tPrev, tGer, ger.length>0)}</div></div></div>
+      ${isFin()?`<div class="row" style="margin-top:10px"><button class="btn sm" id="cp-go">Corrigir contrato VDF / MSISDN</button>${(r.contratosAntigos||[]).length||(r.msisdnsAntigos||[]).length?`<span class="muted" style="font-size:12px">Associados: ${esc([...(r.contratosAntigos||[]),...(r.msisdnsAntigos||[])].join(', '))}</span>`:''}</div>`:''}
       <p class="muted" style="font-size:12px;margin-bottom:0">Comissão de ${esc(r.vendedorNome||'')}. A prevista usa o escalão e a majoração de ${mesTxt(r.mesRef||mesLocal())} até hoje. A paga é a que foi apurada nos RUN da Vodafone (pode incluir prémios trimestrais e charge-backs). Saldo 0,00 € = tudo pago.</p></div>
       <div class="card scroll"><table><thead><tr><th>MSISDN</th><th>Referência</th><th>Natureza</th><th>Contrato VDF</th><th class="num">Eventos</th><th class="num">Prevista</th><th class="num">Paga</th><th class="num">Saldo</th><th>RUN</th><th>Estado</th></tr></thead>
       <tbody>${ls.map(x=>`<tr style="${x.g.length?'border-bottom:0':''}"><td>${esc(x.l.msisdn||'—')}</td><td><b>${esc(x.l.ref)}</b> <span class="muted" style="font-size:12px">${esc(x.l.designacao||'')}</span></td><td>${esc(x.n)}</td><td style="font-size:12px">${esc(x.l.contratoVDF||'')}</td><td class="num">${n3(x.s)}</td><td class="num">${eur(x.prev)}</td><td class="num">${x.g.length?eur(x.gv):'—'}</td><td class="num">${x.g.length?eur(x.prev-x.gv):'—'}</td><td style="font-size:12px">${[...new Set(x.g.map(g=>g.run.split('-').reverse().join('/')))].join(', ')}</td><td>${estado(x)}</td></tr>${movRows(x.g)}`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${n3(ls.reduce((a,x)=>a+x.s,0))}</td><td class="num">${eur(tPrev)}</td><td class="num">${eur(tGer)}</td><td class="num">${eur(tPrev-tGer)}</td><td colspan="2"></td></tr></tfoot></table>
       ${soltos.length?`<p class="muted" style="font-size:12px">Outros movimentos deste PN (prémios/acertos sem linha correspondente): ${soltos.map(g=>`${esc(g.tipo)} ${eur(g.valor)} (RUN ${g.run.split('-').reverse().join('/')})`).join(' · ')}</p>`:''}</div>`;
+    tc.querySelector('#cp-go')?.addEventListener('click', ()=>corrigirPN(r, ()=>{ delete CVPN_MEM[r.id]; renderComPN(tc, r); }));
   } catch(e){ tc.innerHTML = `<div class="card">Não foi possível calcular a comissão: ${esc(errTxt(e))}</div>`; }
 }
 // ===== Histórico do PHC (últimos 36 RUN): recebido por linha → runs/{mes} (origem PHC); pago aos vendedores → comissoesVend =====
@@ -3264,7 +3562,7 @@ function gaugeSVG(pct, titulo, sub, real){
     <div style="font-weight:700;margin-top:-2px">${esc(titulo)}</div>
     ${proj?`<div style="font-size:12px;color:#6b6b70;margin-top:2px">ao ritmo atual fecha em ${txt} · feito ${Math.round(real)} %</div>`:''}</div>`;
 }
-function agenteHTML(A, trim){
+function agenteHTML(A, trim, compacto){
   const o = A.obj[trim]||{}, eu = (A.euros||{})[trim]||{}, r = A.real[trim]?.ev||{}, temObj = AG_MET.some(m=>+o[m.id]>0), mst = isMaster();
   const ytd = id => { let ob=0, re=0; A.tAno.forEach(t=>{ const oo=+(A.obj[t]||{})[id]||0; if (oo>0) { ob+=oo; re+=AG_MET.find(m=>m.id===id).nat.reduce((a,n)=>a+((A.real[t]?.ev||{})[n]||0),0); } }); return ob ? re/ob*100 : null; };
   const meses = trimMeses(trim), duT = meses.reduce((a,m)=>a+diasUteis(m),0), duF = meses.reduce((a,m)=>a+(m<mesLocal()?diasUteis(m):m===mesLocal()?diasUteis(m,hojeLocal()):0),0);
@@ -3277,11 +3575,11 @@ function agenteHTML(A, trim){
   const rows = L.map(x=>`<tr><td><b>${esc(x.m.nome)}</b></td><td class="num">${x.oe?Math.round(x.oe):'—'}</td><td class="num">${Math.round(x.re)}</td>
       <td style="min-width:150px"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:90px;position:relative;height:6px;background:#ece9ea;border-radius:3px"><span style="display:block;height:100%;border-radius:3px;width:${Math.min(100,x.pc)}%;background:${cor(x.pc)}"></span><i style="position:absolute;left:${dec}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${cor(x.pc)};min-width:48px;text-align:right">${x.oe?Math.round(x.pc)+' %':'—'}</b></div></td>
       <td class="num" title="Ao ritmo atual, no fim do trimestre">${x.pj!=null?`~${Math.round(x.pj)} %`:'—'}</td><td class="num">${x.y==null?'—':Math.round(x.y)+' %'}</td></tr>`).join('');
-  return gauges + `<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra).${dec<100?' Os velocímetros mostram a projeção para o fim do trimestre ao ritmo atual; o «feito» é o atingimento até hoje.':''} Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>`;
+  return gauges + `${compacto?'<details><summary class="muted" style="cursor:pointer;font-size:12px">Ver a tabela</summary>':''}<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra).${dec<100?' Os velocímetros mostram a projeção para o fim do trimestre ao ritmo atual; o «feito» é o atingimento até hoje.':''} Realizado = eventos dos PN de toda a equipa, pela data do PN${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>${compacto?'</details>':''}`;
 }
-async function desenharAgente(box, mes){
-  try { const t = trimId(mes||mesLocal()), A = await agenteDados(t); box.innerHTML = agenteHTML(A, t); }
+async function desenharAgente(box, mes, compacto){
+  try { const t = trimId(mes||mesLocal()), A = await agenteDados(t); box.innerHTML = agenteHTML(A, t, compacto); }
   catch(e){ box.innerHTML = `<p class="muted" style="margin:0">Indisponível (${esc(errTxt(e))}).</p>`; }
 }
 // Comissionamento › Objetivos Vodafone (Master): objetivos RLMC € por trimestre
@@ -3372,7 +3670,7 @@ function admPN(el){
     <textarea id="psql" rows="5" readonly style="font-family:monospace;font-size:11px;white-space:pre">${esc(PN_SQL)}</textarea>
     <div class="row" style="margin-top:10px"><button class="btn" id="pcp">Copiar consulta</button><input type="file" id="pfi" accept=".txt,.csv,.tsv,text/plain" style="width:auto"><button class="btn pri" id="pan">Analisar ficheiro</button><button class="btn pri" id="pok" style="display:none"></button></div>
     <div id="plog" style="margin-top:12px;font-family:monospace;font-size:12px;line-height:1.7;white-space:pre-wrap"></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Os PN importados ficam fechados, só de leitura, com o número do PHC e a marca “histórico PHC”. Não contam para a Produção BO. Repetir a importação não duplica: atualiza os mesmos processos.</p></div>`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">Os PN importados ficam fechados, só de leitura, com o número do PHC e a marca “histórico PHC”. Não contam para a Produção BO. Repetir a importação não duplica: atualiza os mesmos processos e acrescenta os PN novos (faça-o antes de cada RUN, enquanto os PN ainda forem feitos no PHC). As correções de contrato VDF/MSISDN feitas no Comissionamento mantêm-se.</p></div>`;
   const log=(t,err)=>{ const d=document.createElement('div'); d.textContent=t; if(err) d.style.color='var(--red-d)'; $('#plog').appendChild(d); };
   $('#pcp').onclick=()=>{ const t=$('#psql'); t.select(); (navigator.clipboard?navigator.clipboard.writeText(t.value):Promise.reject()).catch(()=>document.execCommand('copy')).finally(()=>toast('Consulta copiada.')); };
   $('#pan').onclick=async()=>{ const f=$('#pfi').files[0]; if(!f) return toast('Escolha primeiro o ficheiro exportado do PHC.',true);
@@ -3391,7 +3689,7 @@ function admPN(el){
     } catch(e){ log(errTxt(e),true); } };
   $('#pok').onclick=async()=>{ if(!pend) return; const L=pend; pend=null; $('#pok').style.display='none'; $('#pan').disabled=true;
     try { for (let i=0;i<L.length;i+=300){ const b=writeBatch(db);
-        L.slice(i,i+300).forEach(({id,...r})=>b.set(doc(db,'rpn',id),{...r, importadoEm:serverTimestamp(), importadoPor:S.me.uid}));
+        L.slice(i,i+300).forEach(({id,...r})=>b.set(doc(db,'rpn',id),{...r, importadoEm:serverTimestamp(), importadoPor:S.me.uid}, {merge:true}));
         await b.commit(); log(`gravados: ${Math.min(i+300,L.length)} / ${L.length}`); }
       log('Importação terminada.'); toast('PN importados.'); $('#pfi').value='';
     } catch(e){ log('ERRO: '+errTxt(e)+' — pode repetir a importação, não duplica.',true); }
