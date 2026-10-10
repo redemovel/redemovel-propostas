@@ -2900,13 +2900,14 @@ function cmsVend(box){
       box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
       ligaMes(()=>cmsVend(box)); return; }
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
-    const {casa} = await conciliarRun(R);
+    const {casa} = (R.fechado && R.calcN) ? await casaDoFecho(R) : await conciliarRun(R);
     const pv = {}; casa.forEach(x=>{ if (!x.uid || x.f==='ag') return; const o=pv[x.uid]=pv[x.uid]||{uid:x.uid, rec:0, com:0, n:0, cb:0, meses:{}}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; if (x.l[RL.val]<0) o.cb+=x.com;
       const mm=o.meses[x.mesPN]=o.meses[x.mesPN]||{rec:0,com:0,t:x.t}; mm.rec+=x.l[RL.val]; mm.com+=x.com; });
     const semTudo = casa.filter(x=>!x.uid && x.f!=='ag'), sem = semTudo.filter(x=>!x.r), semVend = semTudo.filter(x=>x.r), ag = casa.filter(x=>x.f==='ag'), totRec = casa.reduce((a,x)=>a+x.l[RL.val],0);
     const lst = Object.values(pv).sort((a,b)=>b.com-a.com);
     const {grav, gravPor, nomeV, cardGrav} = await cardGravado(CMS_MES);
-    box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
+    const gravDe = uid => gravPor[uid] || gravPor['phcv_'+String(S.users[uid]?.vendedorPHC||'x')] || null;
+    box.innerHTML = `${avisoPHC}${R.fechado&&R.calcN?`<div class="card muted" style="font-size:13px">🔒 RUN fechado: cálculo guardado no fecho (${esc(String(R.calcEm||'').slice(0,10).split('-').reverse().join('/'))}), sem voltar a procurar os PN.</div>`:''}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
         ${R.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">🔒 RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))}</span>${isMaster()?'<button class="btn" id="cms-reab">Reabrir RUN</button>':''}`
           : `${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()&&CMS_RUN.gravadoEm?'<button class="btn" id="cms-fecha" title="Depois de conferido: bloqueia alterações a este RUN">Fechar RUN</button>':''}${isMaster()?'':'-->'}`}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
@@ -2915,9 +2916,9 @@ function cmsVend(box){
 ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN de ${mesTxt(CMS_MES)}</h2>
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão · %</th><th class="num">Linhas</th><th class="num">Recebido</th><th class="num">Charge-backs</th><th class="num">Comissão calculada</th><th class="num">Gravado</th><th class="num">Margem</th></tr></thead>
       <tbody>${lst.map(o=>`<tr><td><b>${esc(userNome(o.uid)||o.uid)}</b></td><td style="font-size:12px">${Object.entries(o.meses).sort().map(([mp,x])=>`${mp.split('-').reverse().join('/')} · ${x.t?.esc||'—'} · ${String(x.t?.pct||0).replace('.',',')} %${x.t?.maj?` +${Math.round(x.t.maj*100)} %`:''}`).join('<br>')}</td>
-        <td class="num">${o.n}</td><td class="num">${eur(o.rec)}</td><td class="num">${eur(o.cb)}</td><td class="num"><b>${eur(o.com)}</b></td><td class="num">${gravPor[o.uid]?eur(gravPor[o.uid].valor):'—'}</td><td class="num">${eur(o.rec-o.com)}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma linha imputada.</td></tr>'}</tbody>
+        <td class="num">${o.n}</td><td class="num">${eur(o.rec)}</td><td class="num">${eur(o.cb)}</td><td class="num"><b>${eur(o.com)}</b></td><td class="num">${gravDe(o.uid)?`<a href="#" data-dif="${o.uid}" title="Ver as diferenças PN a PN">${eur(gravDe(o.uid).valor)}</a>`:'—'}</td><td class="num">${eur(o.rec-o.com)}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma linha imputada.</td></tr>'}</tbody>
       <tfoot><tr class="tot"><td colspan="3">Total imputado</td><td class="num">${eur(lst.reduce((a,o)=>a+o.rec,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.cb,0))}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.com,0))}</td><td class="num">${grav.length?eur(grav.reduce((a,g)=>a+(+g.valor||0),0)):'—'}</td><td class="num">${eur(lst.reduce((a,o)=>a+o.rec-o.com,0))}</td></tr></tfoot></table>
-      <p class="muted" style="font-size:12px;margin-bottom:0">RUN total ${eur(totRec)} · agência (sem POS) ${eur(ag.reduce((a,x)=>a+x.l[RL.val],0))} · por imputar ${eur(sem.reduce((a,x)=>a+x.l[RL.val],0))}.</p></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Clique no valor «Gravado» para ver, PN a PN, onde a plataforma e o PHC (ou o que foi gravado) divergem. RUN total ${eur(totRec)} · agência (sem POS) ${eur(ag.reduce((a,x)=>a+x.l[RL.val],0))} · por imputar ${eur(sem.reduce((a,x)=>a+x.l[RL.val],0))}.</p></div>
 `:`      <div class="card scroll"><h2>Conciliação · RUN de ${mesTxt(CMS_MES)}</h2>
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão</th><th class="num">Linhas imputadas</th></tr></thead>
       <tbody>${lst.map(o=>`<tr><td><b>${esc(userNome(o.uid)||o.uid)}</b></td><td style="font-size:12px">${Object.entries(o.meses).sort().map(([mp,x])=>`${mp.split('-').reverse().join('/')} · ${esc(x.t?.esc||'—')}`).join('<br>')}</td><td class="num">${o.n}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">Nenhuma linha imputada.</td></tr>'}</tbody></table>
@@ -2936,7 +2937,8 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     ligaMes(()=>cmsVend(box)); desenharPremios($('#cms-pt'));
     box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
     if ($('#cms-g')) $('#cms-g').onclick = () => gravarComissoes(casa, lst).then(()=>cmsVend(box));
-    $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, true)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, true, casa)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    box.querySelectorAll('[data-dif]').forEach(a=>a.onclick=e=>{ e.preventDefault(); compararPHC(a.dataset.dif, casa, gravDe(a.dataset.dif), CMS_MES); });
     $('#cms-reab')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, false)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'); tr.style.display = !t || tr.textContent.toLowerCase().includes(t) ? '' : 'none'; }); });
     box.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>atribuirLinha(casa.find(x=>x.i===+b.dataset.at), R, ()=>cmsVend(box)));
@@ -3049,11 +3051,62 @@ function corrigirPN(r, depois){
   });
 }
 // fecho do RUN (Master): depois de gravado e conferido; bloqueia nova importação, regravação e atribuições
-async function fecharRun(mes, fechar){
-  const txt = fechar ? `Fechar o RUN de ${mesTxt(mes)}?\n\nDepois de fechado não se pode reimportar, regravar nem atribuir linhas (o Master pode reabrir).` : `Reabrir o RUN de ${mesTxt(mes)}?`;
+async function fecharRun(mes, fechar, casa){
+  const txt = fechar ? `Fechar o RUN de ${mesTxt(mes)}?\n\nO cálculo fica guardado (abre logo, sem voltar a procurar os PN). Depois de fechado não se pode reimportar, regravar nem atribuir linhas (o Master pode reabrir).` : `Reabrir o RUN de ${mesTxt(mes)}?\n\nO cálculo guardado é apagado e volta a ser feito com os PN atuais.`;
   if (!confirm(txt)) return false;
-  await setDoc(doc(db,'runs',mes), {fechado: fechar ? {em:new Date().toISOString(), por:S.me.nome} : null}, {merge:true});
-  await logAlt({tipo: fechar?'RUN fechado':'RUN reaberto', desde:mes, resumo:`RUN de ${mesTxt(mes)}`}); CMS_RUN=null; return true;
+  const velhos = (await getDocs(collection(db,'runs',mes,'calc'))).docs;
+  let b = writeBatch(db); velhos.forEach(d=>b.delete(d.ref));
+  if (fechar && casa) {   // fotografia da imputação: [i, PN, nº, cliente, vendedor, mês do PN, comissão, escalão, majoração, vendedor PHC (nome), nº PHC, manual, por MSISDN]
+    const L = casa.map(x=>JSON.stringify([x.i, x.r?.id||'', x.r?.numero||'', x.r?.cliente?.nome||'', x.uid||'', x.mesPN||'', x.com||0, x.t?.esc||'', x.t?.maj||0, x.r?.vendedorNome||'', x.r?.vendedorPHC||'', x.manual?1:0, x.porMsisdn?1:0]));
+    for (let k=0; k*1500<L.length; k++) b.set(doc(db,'runs',mes,'calc',String(k)), {linhas:L.slice(k*1500,(k+1)*1500)});
+    b.set(doc(db,'runs',mes), {fechado:{em:new Date().toISOString(), por:S.me.nome}, calcN:L.length, calcEm:new Date().toISOString()}, {merge:true});
+  } else b.set(doc(db,'runs',mes), {fechado:null, calcN:null, calcEm:null}, {merge:true});
+  await b.commit();
+  await logAlt({tipo: fechar?'RUN fechado':'RUN reaberto', desde:mes, resumo:`RUN de ${mesTxt(mes)}${fechar&&casa?' (cálculo guardado)':''}`}); CMS_RUN=null; return true;
+}
+// RUN fechado: reconstrói a imputação a partir da fotografia (sem ler os PN)
+async function casaDoFecho(R){
+  const sn = await getDocs(collection(db,'runs',R.mes,'calc')), sfidUid = {};
+  Object.entries(S.users).forEach(([uid,u])=>{ if (u.sfid) sfidUid[String(u.sfid).trim()]=uid; });
+  const linhas = sn.docs.sort((a,b)=>(+a.id)-(+b.id)).flatMap(d=>d.data().linhas.map(x=>JSON.parse(x)));
+  const casa = linhas.map(([i, id, numero, cliente, uid, mesPN, com, e, maj, vn, vp, man, pm])=>{ const l=R.linhas[i]||[], val=l[RL.val]||0;
+    return {i, l, f:familiaCod(l[RL.cod], l[RL.pos]), r: id?{id, numero, cliente:{nome:cliente}, mesRef:mesPN, vendedorNome:vn, vendedorPHC:vp}:null, uid:uid||null, mesPN:mesPN||null, com,
+      t: uid&&mesPN ? {esc:e, maj, pct: val ? Math.round(com/(val*(1+maj))*1000)/10 : 0} : null, manual: man?{}:null, porMsisdn:!!pm, sfidUid: sfidUid[l[RL.sfid]]||null}; });
+  // o % de cada mês: o mesmo para todas as linhas desse vendedor/mês → usa a linha de maior valor (menos arredondamento)
+  const best = {}; casa.forEach(x=>{ if (!x.t) return; const k=x.uid+'|'+x.mesPN; if (!best[k] || Math.abs(x.l[RL.val])>Math.abs(best[k].l[RL.val])) best[k]=x; });
+  casa.forEach(x=>{ if (x.t) x.t.pct = best[x.uid+'|'+x.mesPN].t.pct; });
+  return {casa};
+}
+// diferenças plataforma × PHC (ou o que foi gravado) para um vendedor num RUN, PN a PN
+function compararPHC(uid, casa, g, mes){
+  const nome = userNome(uid) || uid, mst = isMaster();
+  const P = {}; casa.filter(x=>x.uid===uid).forEach(x=>{ const id=x.r?.id||'?'; const o=P[id]=P[id]||{id, numero:x.r?.numero||'', cliente:x.r?.cliente?.nome||'', mesPN:x.mesPN||'', rec:0, com:0, n:0, t:x.t}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; });
+  const G = {}; (g?.detalhe||[]).forEach(p=>{ const id=p.rpnId||('·'+(p.numero||p.cliente)); const o=G[id]=G[id]||{id, numero:p.numero||'', cliente:p.cliente||'', mesPN:p.mesPN||'', pago:0, linhas:0, premio:!!p.premio}; o.pago+=+p.valor||0; o.linhas+=(p.linhas||[]).length; });
+  const outro = {}; casa.forEach(x=>{ if (x.r?.id && x.uid!==uid) outro[x.r.id] = x.uid ? (userNome(x.uid)||x.uid) : 'por imputar / sem vendedor'; });
+  const ids = [...new Set([...Object.keys(P), ...Object.keys(G)])];
+  const rows = ids.map(id=>{ const p=P[id], q=G[id], calc=r2(p?.com||0), pago=r2(q?.pago||0);
+    let nota=''; if (!p && q) nota = q.premio ? 'prémio trimestral' : outro[id] ? `na plataforma está em: ${outro[id]}` : 'linhas deste PN não estão neste RUN para este vendedor';
+    else if (p && !q) nota = 'o PHC não pagou nada a este PN neste RUN'; else if (Math.abs(calc-pago)>=0.01 && p.rec) nota = `PHC ≈ ${(pago/p.rec*100).toFixed(1).replace('.',',')} % do recebido · plataforma ${String(p.t?.pct??0).replace('.',',')} %${p.t?.maj?' +'+Math.round(p.t.maj*100)+' %':''}`;
+    return {id, numero:p?.numero||q?.numero||'', cliente:p?.cliente||q?.cliente||'', mesPN:p?.mesPN||q?.mesPN||'', rec:p?.rec||0, esc:p?.t?.esc||'', calc, pago, dif:r2(calc-pago), nota}; })
+    .sort((a,b)=>Math.abs(b.dif)-Math.abs(a.dif));
+  const porMes = {}; rows.forEach(x=>{ const m=porMes[x.mesPN||'—']=porMes[x.mesPN||'—']||{rec:0, calc:0, pago:0, recAmbos:0, pagoAmbos:0, esc:new Set(), pct:null};
+    m.rec+=x.rec; m.calc+=x.calc; m.pago+=x.pago; if (x.rec && x.pago) { m.recAmbos+=x.rec; m.pagoAmbos+=x.pago; } if (x.esc) m.esc.add(x.esc); const p=P[x.id]; if (p?.t) m.pct=p.t; });
+  const tot = k => r2(rows.reduce((a,x)=>a+x[k],0)), dif = rows.filter(x=>Math.abs(x.dif)>=0.01);
+  modal(`<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Plataforma × ${g?.origem==='PHC'?'PHC':'gravado'} · ${esc(nome)} · RUN de ${mesTxt(mes)}</h2><span class="sp"></span><button class="btn sm" id="cf-c">Fechar</button></div>
+    <div class="cm-k" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
+      <div><span class="muted" style="font-size:11px;text-transform:uppercase">Plataforma</span><b style="display:block;font-size:20px">${eur(tot('calc'))}</b></div>
+      <div><span class="muted" style="font-size:11px;text-transform:uppercase">${g?.origem==='PHC'?'Pago pelo PHC':'Gravado'}</span><b style="display:block;font-size:20px">${eur(tot('pago'))}</b></div>
+      <div><span class="muted" style="font-size:11px;text-transform:uppercase">Diferença</span><b style="display:block;font-size:20px;color:${Math.abs(tot('dif'))<0.01?'var(--ok)':'var(--red-d)'}">${eur(tot('dif'))}</b></div>
+      <div><span class="muted" style="font-size:11px;text-transform:uppercase">PN com diferença</span><b style="display:block;font-size:20px">${dif.length} de ${rows.length}</b></div></div>
+    <h3 style="margin:8px 0 4px">Por mês do PN</h3>
+    <p class="muted" style="font-size:12px;margin:0 0 6px">A maior parte das diferenças vem do escalão do mês do PN: a plataforma conta os eventos pelos PN que tem e pelo score dela; o PHC pelo que tinha na altura. Se a % do PHC for diferente da da plataforma num mês, o escalão desse mês não coincide.</p>
+    <div class="scroll"><table><thead><tr><th>Mês do PN</th><th class="num">Recebido</th><th>Escalão plataforma</th>${mst?'<th class="num">% plataforma</th><th class="num">% PHC (pago ÷ recebido)</th>':''}<th class="num">Plataforma</th><th class="num">${g?.origem==='PHC'?'PHC':'Gravado'}</th><th class="num">Diferença</th></tr></thead>
+    <tbody>${Object.entries(porMes).sort().map(([m,x])=>`<tr><td><b>${m==='—'?'—':m.split('-').reverse().join('/')}</b></td><td class="num">${eur(x.rec)}</td><td>${[...x.esc].map(esc).join(', ')}</td>${mst?`<td class="num">${x.pct?String(x.pct.pct).replace('.',',')+' %'+(x.pct.maj?' +'+Math.round(x.pct.maj*100)+' %':''):'—'}</td><td class="num">${x.recAmbos?(x.pagoAmbos/x.recAmbos*100).toFixed(1).replace('.',',')+' %':'—'}</td>`:''}<td class="num">${eur(x.calc)}</td><td class="num">${eur(x.pago)}</td><td class="num" style="${Math.abs(x.calc-x.pago)>=0.01?'color:var(--red-d);font-weight:700':''}">${eur(x.calc-x.pago)}</td></tr>`).join('')}</tbody></table></div>
+    <h3 style="margin:12px 0 4px">PN a PN (maiores diferenças primeiro)</h3>
+    <div class="scroll" style="max-height:45vh"><table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Recebido</th><th class="num">Plataforma</th><th class="num">${g?.origem==='PHC'?'PHC':'Gravado'}</th><th class="num">Diferença</th><th>Porquê</th></tr></thead>
+    <tbody>${rows.map(x=>`<tr ${x.id&&!x.id.startsWith('·')&&x.id!=='?'?`class="click" data-pn="${esc(x.id)}"`:''} style="${Math.abs(x.dif)>=0.01?'':'opacity:.6'}"><td><b>${esc(x.numero)}</b></td><td>${esc(x.cliente)}</td><td>${x.mesPN?x.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${x.rec?eur(x.rec):'—'}</td><td class="num">${eur(x.calc)}</td><td class="num">${eur(x.pago)}</td><td class="num" style="${Math.abs(x.dif)>=0.01?'color:var(--red-d);font-weight:700':''}">${eur(x.dif)}</td><td style="font-size:12px">${esc(mst?x.nota:x.nota.replace(/ · plataforma.*$/,'').replace(/PHC ≈ .*$/,'escalão diferente'))}</td></tr>`).join('')}</tbody></table></div>`, (m, close) => {
+    m.style.maxWidth='1150px'; m.style.width='96vw'; m.querySelector('#cf-c').onclick=close;
+    m.querySelectorAll('[data-pn]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.pn)); });
 }
 // mapa de pagamentos do RUN (o que foi gravado): para a contabilidade
 async function mapaPagamentos(mes){
