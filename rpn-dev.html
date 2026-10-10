@@ -2448,7 +2448,7 @@ function comCalc(v, ev, obj){
 // ---- PRÉMIO TRIMESTRAL do vendedor (plano out/2024, como no mapa Excel do Master) ----
 // por categoria (Móvel, Fixo): eventos Nova × 20 € × % de atingimento do objetivo Nova da categoria (máx. 100 %);
 // soma das categorias → patamar inferior (<85 € = 0; 85/165/330/500/660; a partir de 660 € paga o valor, até 1 700 €);
-// índice do vendedor (júnior/assistente 50 %) aplica-se aos objetivos e ao prémio; pago em 3 prestações iguais.
+// objetivos = os do vendedor (júnior/assistente já com os objetivos reduzidos, ex.: 19,5/16,5); o índice (50 %) aplica-se só ao prémio, depois do patamar (como no mapa Excel); 3 prestações iguais.
 const PREMIO_DEF = { valorEvento:20, cats:[{id:'M', nome:'Móvel', obj:'NM', nat:['Nova Móvel'], ref:'RM', natRef:['Ref Móvel']},{id:'F', nome:'Fixo', obj:'NF', nat:['Nova Fixo'], ref:'RF', natRef:['Ref Fixo']}],
   patamares:[85,165,330,500,660], teto:1700, prestacoes:3, atraso:3, regra:'nova' };
 // regra do atingimento: 'nova' = % do objetivo Nova da categoria (mapa Excel); 'minimo' = a % mais baixa entre Nova e Refidelização da categoria (texto do plano)   // atraso: meses entre o fim do trimestre e a 1.ª prestação
@@ -2457,8 +2457,8 @@ const indiceDe = (uid, mes) => { const c = cfgVend(uid, mes||mesLocal()), x = c 
 const r2 = x => Math.round((+x||0)*100)/100;
 function premioCalc(v, evTrim, obj, ind){
   const P = premioDe(v); ind = ind ?? 1;
-  const cats = P.cats.map(c=>{ const ev=c.nat.reduce((a,n)=>a+(evTrim[n]||0),0), ob=(+obj[c.obj]||0)*ind, atN=ob>0?Math.min(1, ev/ob):0;
-    const evR=(c.natRef||[]).reduce((a,n)=>a+(evTrim[n]||0),0), obR=(+obj[c.ref]||0)*ind, atR=obR>0?Math.min(1, evR/obR):0;
+  const cats = P.cats.map(c=>{ const ev=c.nat.reduce((a,n)=>a+(evTrim[n]||0),0), ob=(+obj[c.obj]||0), atN=ob>0?Math.min(1, ev/ob):0;
+    const evR=(c.natRef||[]).reduce((a,n)=>a+(evTrim[n]||0),0), obR=(+obj[c.ref]||0), atR=obR>0?Math.min(1, evR/obR):0;
     const at = P.regra==='minimo' ? Math.min(atN, atR) : atN;
     return {...c, ev, ob, atN, evR, obR, atR, at, val: ev*P.valorEvento*at}; });
   const apurado = cats.reduce((a,c)=>a+c.val,0), pt = [...P.patamares].map(Number).sort((a,b)=>a-b), topo = pt.at(-1);
@@ -2690,7 +2690,7 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
       </div>
       <div>${pg || `<p class="muted">Nenhum prémio trimestral em pagamento no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
     </div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × ${P.regra==='minimo'?'a % mais baixa entre os objetivos Nova e Refidelização da categoria':'% do objetivo trimestral Nova atingido'} (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} nos objetivos e no prémio.`:''}</p></div>`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × ${P.regra==='minimo'?'a % mais baixa entre os objetivos Nova e Refidelização da categoria':'% do objetivo trimestral Nova atingido'} (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} sobre o prémio.`:''}</p></div>`;
 }
 // mensagens do «treinador»: só regras e números do próprio vendedor (nada de valores Vodafone)
 function comCoach(o){
@@ -2956,7 +2956,7 @@ async function premiosRun(mesRun, trimForcado){
   const uids = [...new Set([...vendedoresProj().map(x=>x.uid), ...Object.keys(porV)])].filter(u=>!['master','backoffice'].includes(S.users[u]?.perfil));
   const lista = uids.map(uid=>{ const q=premioCalc(vq, eventosDe(porV[uid]||[]), objDe(uid, vq, mq[2]), indiceDe(uid, mq[2])); const inativo = S.users[uid]?.ativo===false; return {uid, nome:userNome(uid)||uid, q, inativo, prest: pg.k && !inativo ? q.prest(pg.k) : 0}; })
     .filter(x=>x.q.cats.some(c=>c.ev>0 || c.evR>0)).sort((a,b)=>b.q.apurado-a.q.apurado);
-  return {...pg, vq, lista, runs: runsDoPremio(vq, pg.trim)};
+  return {...pg, vq, lista, porV, runs: runsDoPremio(vq, pg.trim)};
 }
 let PT_TRIM = null;
 async function desenharPremios(box){
@@ -2970,10 +2970,11 @@ async function desenharPremios(box){
       <div><label>Trimestre</label><select id="pt-t">${lista.map(t=>`<option value="${t}" ${t===PT_TRIM?'selected':''}>${trimTxt(t)}</option>`).join('')}</select></div></div>
     <p class="muted" style="font-size:12px">Pago nos RUN de ${PR.runs.map(m=>mesTxt(m)).join(', ')}${emPag?` · <b>neste RUN: prestação ${pg.k} de ${pg.n}</b>`:''}. Eventos Nova pela data do PN, calculados pela plataforma a partir da RLMC das linhas; objetivos e índice de cada vendedor (Plano e objetivos). Regra do atingimento: <b>${mn?'a % mais baixa entre Nova e Refidelização da categoria (plano escrito)':'só o objetivo Nova da categoria (mapa Excel)'}</b>.</p>
     <table><thead><tr><th>Vendedor</th>${cats.map(c=>`<th class="num">Nova ${esc(c.nome)}</th><th class="num">Obj.</th><th class="num">% Nova</th>${mn?`<th class="num">% Ref</th>`:''}<th class="num">€</th>`).join('')}<th class="num">Apurado</th><th class="num">Patamar</th><th class="num">Índice</th><th class="num">Prémio</th><th class="num">/mês</th>${emPag?'<th class="num">Este RUN</th>':''}</tr></thead>
-    <tbody>${PR.lista.map(x=>`<tr style="${x.inativo?'opacity:.6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Inativo: não recebe prestações (os incentivos cessam com o fim do vínculo)">inativo</span>':''}</td>${x.q.cats.map(c=>`<td class="num">${n3(c.ev)}</td><td class="num">${f1(c.ob)}</td><td class="num">${pctE(c.atN)}</td>${mn?`<td class="num">${pctE(c.atR)}</td>`:''}<td class="num">${eur(c.val)}</td>`).join('')}<td class="num">${eur(x.q.apurado)}</td><td class="num">${x.q.patamar?eur(x.q.patamar):'—'}</td><td class="num">${pctE(x.q.ind)}</td><td class="num"><b>${x.q.premio?eur(x.q.premio):'—'}</b></td><td class="num">${x.q.premio?eur(x.q.prest(1)):'—'}</td>${emPag?`<td class="num"><b>${x.prest?eur(x.prest):'—'}</b></td>`:''}</tr>`).join('')||`<tr><td colspan="20" class="muted">Sem eventos Nova no trimestre.</td></tr>`}</tbody>
+    <tbody>${PR.lista.map(x=>`<tr class="click" data-pv="${x.uid}" title="Ver os PN e os eventos Nova" style="${x.inativo?'opacity:.6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Inativo: não recebe prestações (os incentivos cessam com o fim do vínculo)">inativo</span>':''}</td>${x.q.cats.map(c=>`<td class="num">${n3(c.ev)}</td><td class="num">${f1(c.ob)}</td><td class="num">${pctE(c.atN)}</td>${mn?`<td class="num">${pctE(c.atR)}</td>`:''}<td class="num">${eur(c.val)}</td>`).join('')}<td class="num">${eur(x.q.apurado)}</td><td class="num">${x.q.patamar?eur(x.q.patamar):'—'}</td><td class="num">${pctE(x.q.ind)}</td><td class="num"><b>${x.q.premio?eur(x.q.premio):'—'}</b></td><td class="num">${x.q.premio?eur(x.q.prest(1)):'—'}</td>${emPag?`<td class="num"><b>${x.prest?eur(x.prest):'—'}</b></td>`:''}</tr>`).join('')||`<tr><td colspan="20" class="muted">Sem eventos Nova no trimestre.</td></tr>`}</tbody>
     <tfoot><tr class="tot"><td colspan="${1+cats.length*(mn?5:4)+3}">Total</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.premio,0))}</td><td class="num">${eur(PR.lista.reduce((a,x)=>a+x.q.prest(1),0))}</td>${emPag?`<td class="num">${eur(PR.lista.reduce((a,x)=>a+x.prest,0))}</td>`:''}</tr></tfoot></table>
     <p class="muted" style="font-size:12px;margin-bottom:0">Ao gravar as comissões de um RUN, a prestação do trimestre que se paga nesse RUN entra no valor de cada vendedor como uma linha «Prémio trimestral».</p></div>`;
     box.querySelector('#pt-t').onchange = e => { PT_TRIM = e.target.value; desenharPremios(box); };
+    box.querySelectorAll('[data-pv]').forEach(tr=>tr.onclick=()=>premioDetalhe(PR, tr.dataset.pv));
   } catch(e){ console.error(e); box.innerHTML = `<div class="card">Prémio trimestral indisponível: ${esc(errTxt(e))}</div>`; }
 }
 // ---- ferramentas do RUN: atribuição manual, correção do PN, fecho e mapa de pagamentos ----
@@ -3173,6 +3174,19 @@ function cmsManual(box){
   </div>`;
   box.querySelectorAll('[data-ir]').forEach(a=>a.onclick=e=>{ e.preventDefault(); CMS_TAB=a.dataset.ir; viewComissionamento(); });
 }
+// eventos Nova de um vendedor no trimestre, PN a PN (para comparar com o qtt do PHC)
+function premioDetalhe(PR, uid){
+  const P = premioDe(PR.vq), rs = (PR.porV[uid]||[]).slice().sort((a,b)=>String(a.data||a.fechadoEm||'').localeCompare(String(b.data||b.fechadoEm||'')));
+  const L = []; rs.forEach(r=>(r.linhas||[]).forEach(l=>{ const n=natNorm(l.natureza), c=P.cats.find(c=>c.nat.includes(n)); if (!c) return;
+    L.push({r, l, cat:c.nome, ev:scoreLinha(l,r), phc:l.scorePHC!=null}); }));
+  const tot = c => L.filter(x=>x.cat===c).reduce((a,x)=>a+x.ev,0), x = PR.lista.find(y=>y.uid===uid);
+  modal(`<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Eventos Nova · ${esc(userNome(uid)||uid)} · ${trimTxt(PR.trim)}</h2><span class="sp"></span><button class="btn sm" id="pd-c">Fechar</button></div>
+    <p class="muted" style="font-size:13px;margin-top:0">${P.cats.map(c=>`Nova ${esc(c.nome)}: <b>${n3(tot(c.nome))}</b>`).join(' · ')} · por mês do PN. «PHC» = eventos (score) que o PN trazia do PHC; «plataforma» = calculados pela RLMC, tier e prazo. Compare com o «Sum of qtt» do seu mapa: uma diferença aponta para um PN a mais ou a menos, ou para outra natureza.</p>
+    <div class="scroll" style="max-height:60vh"><table><thead><tr><th>PN</th><th>Mês</th><th>Cliente</th><th>Categoria</th><th>Referência</th><th>MSISDN</th><th class="num">RLMC</th><th class="num">Eventos</th><th>Origem</th></tr></thead>
+    <tbody>${L.map(y=>`<tr class="click" data-pn="${esc(y.r.id)}"><td><b>${esc(y.r.numero||'')}</b></td><td>${esc((y.r.mesRef||'').split('-').reverse().join('/'))}</td><td>${esc(y.r.cliente?.nome||'')}</td><td>Nova ${esc(y.cat)}</td><td>${esc(y.l.ref||'')} <span class="muted" style="font-size:11px">${esc(y.l.designacao||'')}</span></td><td>${esc(y.l.msisdn||'')}</td><td class="num">${eur(+y.l.rlmc||0)}</td><td class="num"><b>${n3(y.ev)}</b></td><td style="font-size:12px">${y.phc?'PHC':'plataforma'}</td></tr>`).join('')||'<tr><td colspan="9" class="muted">Sem linhas Nova neste trimestre.</td></tr>'}</tbody></table></div>`, (m, close) => {
+    m.style.maxWidth='1100px'; m.style.width='96vw'; m.querySelector('#pd-c').onclick=close;
+    m.querySelectorAll('[data-pn]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.pn)); });
+}
 // grava o que os vendedores podem ver: só € de comissão (nunca o recebido nem a %)
 async function gravarComissoes(casa, lst){
   if (CMS_RUN?.fechado) return toast('Este RUN está fechado.', true);
@@ -3226,7 +3240,7 @@ async function cmsPlano(box){
           <div><label>1.ª prestação: meses após o fim do trimestre</label>${inp('pr-at',PR0.atraso,60,'1')}</div>
           <div><label>Atingimento de cada categoria</label><select id="pr-rg"><option value="nova" ${PR0.regra!=='minimo'?'selected':''}>Só o objetivo Nova (como no Excel)</option><option value="minimo" ${PR0.regra==='minimo'?'selected':''}>O mais baixo entre Nova e Refidelização (plano escrito)</option></select></div>
         </div>
-        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % de atingimento da categoria (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Com ${PR0.atraso} meses, o prémio do 1.º trimestre paga-se nos RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}. O índice de cada vendedor (júnior/assistente 50 %) está na tabela de objetivos.</p></div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % de atingimento da categoria (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Com ${PR0.atraso} meses, o prémio do 1.º trimestre paga-se nos RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}. Júnior/assistente: escreva os objetivos dele (ex.: 19,5 / 16,5) e índice 50 % no separador «Vendedores»; o índice reduz só o prémio, depois do patamar.</p></div>
       <div class="card scroll"><h2>Objetivos trimestrais padrão</h2>
         <table><thead><tr><th></th>${v.objetivos.map(o=>`<th class="num">${esc(o.nome)}</th>`).join('')}</tr></thead>
         <tbody><tr class="tot"><td>Padrão (todos)</td>${v.objetivos.map(o=>`<td class="num">${inp('ob-d-'+o.id,o.trim)}</td>`).join('')}</tr></tbody></table>
@@ -3294,7 +3308,7 @@ async function cmsVendedores(box){
   box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Vendedores · comissionamento</h2><span class="sp"></span>
       <div><label>Ver o que estava em vigor em</label><input type="month" id="vd-ref" value="${VD.mesRef}" style="width:160px"></div>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="vd-inat" ${VD.inat?'checked':''}> Mostrar inativos</label></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Uma linha por utilizador da Administração que vende (perfil Comercial/Coordenador ou com nº de vendedor PHC). Perfil, nº PHC e SFID mudam-se na Administração. Clique no cabeçalho para ordenar; escreva por baixo para filtrar. Para configurar um vendedor novo, filtre pela categoria e copie os valores de um colega. Vazio = usa o padrão do plano (${objs.map(o=>`${esc(o.nome)} ${o.trim}`).join(' · ')} · índice 100 %).</p></div>
+    <p class="muted" style="font-size:12px;margin-bottom:0">Uma linha por utilizador da Administração que vende (perfil Comercial/Coordenador ou com nº de vendedor PHC). Perfil, nº PHC e SFID mudam-se na Administração. Clique no cabeçalho para ordenar; escreva por baixo para filtrar. Para configurar um vendedor novo, filtre pela categoria e copie os valores de um colega. Vazio = usa o padrão do plano (${objs.map(o=>`${esc(o.nome)} ${o.trim}`).join(' · ')} · índice 100 %). Júnior/assistente: objetivos dele já reduzidos (ex.: 19,5 / 16,5) e índice 50 % (o índice só reduz o prémio trimestral, depois do patamar).</p></div>
     <div class="card scroll"><table id="vd-t"><thead><tr>${COLS.map(([k,t])=>`<th data-s="${k}" style="cursor:pointer;white-space:nowrap" class="${['indice','NM','NF','RM','RF'].includes(k)?'num':''}">${t}${VD.sort===k?(VD.dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr>
       <tr>${COLS.map(([k])=>k==='aviso'?'<th></th>':`<th><input data-f="${k}" value="${esc(VD.f[k]||'')}" placeholder="filtrar" style="width:100%;min-width:50px;font-size:12px;padding:3px 5px"></th>`).join('')}</tr></thead><tbody id="vd-b"></tbody></table>
       <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
