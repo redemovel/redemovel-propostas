@@ -418,7 +418,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     <li><b>Assunto</b>: <i>Aprovação</i> (pedido que a BackOffice submete à Vodafone para aprovar), <i>Implementação</i> (pedido para executar) ou <i>Correcção Implementação</i> (corrigir algo de um PN já feito).</li>
     <li><b>Sub-assunto</b>: Alteração, Desativação, Desconto, Tarifário, Créditos, Faturação, Equipamentos ou Outros. Ao escolher, a descrição mostra o que a BackOffice precisa de saber.</li>
     <li><b>Conta Vodafone</b> e <b>Número(s) afetado(s)</b>: preencha sempre que o pedido for sobre uma conta ou números concretos (vários números separados por vírgula). É por aqui que depois se encontra o pedido.</li>
-    <li><b>Data efetiva pretendida</b>: quando o pedido tem data (por exemplo uma desativação).</li>
+    <li><b>Data efetiva pretendida</b>: quando o pedido tem data (por exemplo uma desativação). Se a data for futura, o botão passa a «Agendar para …»: a Atividade fica <b>Agendada</b> e só vai para uma BackOffice nesse dia, automaticamente (não conta para a carga da BO até lá). Pode editá-la enquanto está agendada, ou usar «Enviar já à BackOffice» se não quiser esperar.</li>
     <li><b>Descrição do pedido</b>: o que é preciso fazer, com todos os dados.</li>
     <li>Junte documentos no separador <b>Anexos</b> (pedido do cliente, certidão permanente, comprovativo de IBAN). Para anexar, guarde primeiro.</li>
     <li>Carregue em <span class="bt r">Submeter à BackOffice</span>. A Atividade recebe um número (A1, A2…) e é atribuída a uma BackOffice.</li>
@@ -432,6 +432,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <div class="scroll"><table>
     <tr><th>Estado</th><th>O que significa</th><th>O que tem de fazer</th></tr>
     <tr><td><span class="est">Em Elaboração</span></td><td>Rascunho, ainda não entregue.</td><td>Completar e submeter.</td></tr>
+    <tr><td><span class="est">Agendada</span></td><td>Submetida com data efetiva futura; vai para uma BackOffice nesse dia.</td><td>Aguardar (ou «Enviar já à BackOffice»).</td></tr>
     <tr><td><span class="est">Submetido</span></td><td>Entregue à BackOffice.</td><td>Aguardar.</td></tr>
     <tr><td><span class="est">Em tratamento</span></td><td>A BackOffice está a tratar.</td><td>Aguardar.</td></tr>
     <tr><td><span class="est">Pendente Comercial</span></td><td>Falta alguma coisa do seu lado; o motivo aparece no topo.</td><td><b>Corrigir e carregar em "Resolvido · devolver à BO".</b></td></tr>

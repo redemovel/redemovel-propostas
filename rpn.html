@@ -44,6 +44,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#eee;white-space:nowrap}
 .b-Em-Elaboração{background:#eee;color:#444}
 .b-Submetido{background:#e7f0fb;color:var(--info)}
+.b-Agendada{background:#fff4d6;color:#8a5a00}
+.b-Agendada{background:#fff4d6;color:#8a5a00}
 .b-Em-Implementação{background:#e8e4fb;color:#4b2fb0}
 .b-Pendente-Comercial,.b-Pendente-Documentos{background:#fff3df;color:var(--warn)}
 .b-Concluído,.b-PN{background:#e6f4ea;color:var(--ok)}
@@ -203,6 +205,7 @@ onAuthStateChanged(auth, async user => {
     handlePropostaParam();
     render();
     projetosAoEntrar();   // não bloqueia a entrada
+    setTimeout(()=>atAgendadasDistribuir(), 2500);   // Atividades agendadas que chegaram à data → BackOffice
   } catch(e){ toast(errTxt(e), true); console.error(e); }
 });
 window.addEventListener('hashchange', () => { if (S.me) render(); });
@@ -1695,12 +1698,12 @@ function desenharCliente(){
 
 // ---------- 9e. ATIVIDADES: pedidos dos vendedores à BackOffice sem negócio associado (desativações, 2.ªs vias, créditos, alterações…) ----------
 // Coleção atividades/{id} (+ anexos, mensagens, historico). Mesma filosofia do RPN, sem linhas nem Score: a BO trata e fecha (não há conferência).
-const AT_ESTADOS = ['Em Elaboração','Submetido','Em tratamento','Pendente Comercial','A aguardar','Concluído','Cancelado','Recusado'];
-const AT_CURSO   = ['Em Elaboração','Submetido','Em tratamento','Pendente Comercial','A aguardar'];
+const AT_ESTADOS = ['Em Elaboração','Agendada','Submetido','Em tratamento','Pendente Comercial','A aguardar','Concluído','Cancelado','Recusado'];
+const AT_CURSO   = ['Em Elaboração','Agendada','Submetido','Em tratamento','Pendente Comercial','A aguardar'];
 const AT_ABERTAS = ['Submetido','Em tratamento','Pendente Comercial','A aguardar'];   // contam 1 para a carga da BO
 const AT_FECHADAS = ['Concluído','Cancelado','Recusado'];
 const AT_PONTUAM = ['Concluído','Recusado'];   // contam para a Produção BO (a BO tratou o pedido)
-const AT_EDIT_COM = ['Em Elaboração','Pendente Comercial'];
+const AT_EDIT_COM = ['Em Elaboração','Agendada','Pendente Comercial'];
 const AT_ASSUNTOS = ['Aprovação','Implementação','Correcção Implementação'];
 const AT_SUBS = ['Alteração','Desativação','Desconto','Tarifário','Créditos','Faturação','Equipamentos','Outros'];
 const AT_GUIA = {   // texto-guia: entra na descrição quando ela está vazia, para o pedido chegar completo à BO
@@ -1808,7 +1811,8 @@ function atFicha(){
   const tabs=[['pedido','Pedido'],['anexos','Anexos'],['msg','Mensagens'+(msgPorLer(r)?' ● nova':'')],['hist','Histórico']];
   const acts=[];
   if (ed) acts.push(`<button class="btn" id="t-save">Guardar</button><button class="btn" id="t-canc" title="${r.id?'Repõe o que estava gravado':'Sai sem criar a Atividade'}">Cancelar</button>`);
-  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="t-sub">Submeter à BackOffice</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="t-sub">${String(r.dataEfetiva||'')>hojeLocal()?'Agendar para '+fmtD(r.dataEfetiva):'Submeter à BackOffice'}</button>`);
+  if ((p.own||isBO()) && r.estado==='Agendada') acts.push(`<button class="btn pri" id="t-subja" title="Não esperar pela data: entregar já a uma BackOffice">Enviar já à BackOffice</button>`);
   if (p.own && r.estado==='Pendente Comercial') acts.push(`<button class="btn pri" id="t-res">Resolvido · devolver à BO</button>`);
   if (isBO() && r.id && AT_ABERTAS.includes(r.estado)) {
     if (r.estado!=='Em tratamento') acts.push(`<button class="btn" id="t-tra">Em tratamento</button>`);
@@ -1866,6 +1870,7 @@ function atFicha(){
   on('#t-save',()=>atGuardar());
   on('#t-canc',()=>{ if (S.dirty && !confirm('Descartar as alterações que não foram guardadas?')) return; S.dirty=false; if (r.id) atAbrir(r.id); else location.hash='#/atividades'; });
   on('#t-sub',()=>atGuardar('submeter'));
+  on('#t-subja',()=>atGuardar('submeterJa'));
   on('#t-res',()=>atGuardar('resolvido'));
   on('#t-tra',()=>atGuardar('tratar'));
   on('#t-ok',()=>atGuardar('concluir'));
@@ -1905,8 +1910,10 @@ async function atGuardar(acao, arg){
         if (!isBO() && !AT_EDIT_COM.includes(old.estado)) throw new Error('Esta Atividade já está com a BackOffice e não pode ser alterada.');
       }
       const agora=new Date().toISOString(), de=old?.estado||'Em Elaboração';
-      if (acao==='submeter') { if(de!=='Em Elaboração') throw new Error('Esta Atividade já foi submetida.'); data.estado='Submetido'; data.submetidoEm=agora;
-        if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus); data.boUid=b.uid; data.boNome=b.nome; } }
+      if (acao==='submeter' || acao==='submeterJa') { if(!(de==='Em Elaboração' || (de==='Agendada' && acao==='submeterJa'))) throw new Error('Esta Atividade já foi submetida.');
+        if (acao==='submeter' && String(data.dataEfetiva||'') > hojeLocal()) { data.estado='Agendada'; data.agendadaEm=agora; data.boUid=null; data.boNome=''; }
+        else { data.estado='Submetido'; data.submetidoEm=agora;
+          if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus); data.boUid=b.uid; data.boNome=b.nome; } } }
       else if (acao==='resolvido') { if(de!=='Pendente Comercial') throw new Error('Esta Atividade já não está pendente.'); data.estado='Em tratamento'; data.motivo=''; }
       else if (acao==='tratar') { data.estado='Em tratamento'; data.motivo=''; }
       else if (acao==='pendente') { data.estado='Pendente Comercial'; data.motivo=arg||''; }
@@ -1914,7 +1921,7 @@ async function atGuardar(acao, arg){
       else if (acao==='concluir' || acao==='recusar' || acao==='cancelar') { data.estado={concluir:'Concluído',recusar:'Recusado',cancelar:'Cancelado'}[acao]; data.motivo=acao==='concluir'?'':(arg||'');
         data.fechadoEm=agora; data.fechadoMes=mesLocal(); data.mesRef=mesLocal(); data.fechadoPorUid=S.me.uid; data.fechadoPorNome=S.me.nome; }
       else if (acao==='reabrir') { data.estado='Em tratamento'; data.fechadoEm=null; data.fechadoMes=null; data.mesRef=null; data.motivo=''; }
-      if (acao && !['submeter','resolvido'].includes(acao) && !isBO()) throw new Error('Sem permissão para esta operação.');
+      if (acao && !['submeter','submeterJa','resolvido'].includes(acao) && !isBO()) throw new Error('Sem permissão para esta operação.');
       const oc=old?.cargaContada||0, nc=(AT_ABERTAS.includes(data.estado)&&data.boUid)?1:0;
       if (old?.boUid && oc) carga[old.boUid]=Math.max(0,(carga[old.boUid]||0)-oc);
       if (data.boUid && nc) carga[data.boUid]=(carga[data.boUid]||0)+nc;
@@ -1927,16 +1934,32 @@ async function atGuardar(acao, arg){
     const msg=r.msgUlt, lido=r.msgLido; AT.cur={...data, id:ref.id, msgUlt:msg, msgLido:lido}; delete AT.cur.atualizadoEm; delete AT.cur.criadoEm; S.dirty=false;
     const de=old?.estado||'';
     if (isNew) await atHist(ref.id,'Criada','');
-    if (acao==='submeter') await atHist(ref.id,'Submetida',`Atribuída a ${data.boNome} (distribuição automática)`);
+    if (acao==='submeter' && data.estado==='Agendada') await atHist(ref.id,'Agendada',`Data efetiva ${fmtD(data.dataEfetiva)}: entregue automaticamente a uma BackOffice nesse dia`);
+    else if (acao==='submeter' || acao==='submeterJa') await atHist(ref.id,'Submetida',`Atribuída a ${data.boNome} (distribuição automática${acao==='submeterJa'?', antes da data agendada':''})`);
     else if (acao) await atHist(ref.id,{resolvido:'Devolvida à BO',tratar:'Em tratamento',pendente:'Pendente Comercial',aguardar:'A aguardar',concluir:'Concluída',recusar:'Recusada',cancelar:'Cancelada',reabrir:'Reaberta'}[acao], arg||(acao==='reabrir'?`De ${de}`:''));
     else if (old) { const ch=[['assunto','Assunto'],['subAssunto','Sub-assunto'],['conta','Conta'],['msisdns','Números'],['dataEfetiva','Data efetiva'],['pnNumero','PN relacionado'],['valor','Valor'],['refVDF','Ref.ª Vodafone'],['boNome','BO'],['vendedorNome','Vendedor']].filter(([k])=>String(old[k]??'')!==String(data[k]??'')).map(([k,t])=>`${t}: ${old[k]||'—'} → ${data[k]||'—'}`);
       if (String(old.descricao||'')!==String(data.descricao||'')) ch.push('Descrição alterada'); if (String(old.resposta||'')!==String(data.resposta||'')) ch.push('Relatório BackOffice alterado');
       if (ch.length) await atHist(ref.id,'Alterada',ch.join('; ')); }
     if (old || acao) await atAviso(ref.id, data, de||'Em Elaboração', data.estado);
-    toast(acao==='submeter'?`Atividade ${atNum(data)} submetida · BackOffice: ${data.boNome}`:acao==='concluir'?'Atividade concluída.':'Guardado.');
+    toast(data.estado==='Agendada'&&acao==='submeter'?`Atividade ${atNum(data)} agendada para ${fmtD(data.dataEfetiva)}: nesse dia vai para uma BackOffice`:(acao==='submeter'||acao==='submeterJa')?`Atividade ${atNum(data)} submetida · BackOffice: ${data.boNome}`:acao==='concluir'?'Atividade concluída.':'Guardado.');
     if (isNew) { history.replaceState(null,'','#/atividades/'+ref.id); }
     atFicha(); return true;
   } catch(e){ toast(errTxt(e),true); atFicha(); return false; }
+}
+async function atAgendadasDistribuir(){
+  try {
+    const col=collection(db,'atividades'), q = isBO() ? query(col, where('estado','==','Agendada')) : query(col, where('vendedorUid','==',S.me.uid), where('estado','==','Agendada'));
+    const sn = await getDocs(q), hj = hojeLocal(), prontas = sn.docs.filter(d=>String(d.data().dataEfetiva||'') <= hj);
+    for (const d of prontas) { let bo='';
+      try { await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',d.id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef);
+          if (!s.exists() || s.data().estado!=='Agendada') return; const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, b=escolherBO(carga, cd.ausentes||{});
+          carga[b.uid]=(carga[b.uid]||0)+1; bo=b.nome;
+          tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+          tx.update(ref,{estado:'Submetido', submetidoEm:new Date().toISOString(), boUid:b.uid, boNome:b.nome, cargaContada:1, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
+        if (bo) { await atHist(d.id,'Submetida',`Chegou a data agendada (${fmtD(d.data().dataEfetiva)}): atribuída a ${bo} (distribuição automática)`); await atAviso(d.id, {...d.data(), boNome:bo}, 'Agendada', 'Submetido'); }
+      } catch(e){ console.warn('agendada', d.id, e); } }
+    if (prontas.length) { AT.lista=null; }
+  } catch(e){ console.warn('atAgendadasDistribuir', e); }
 }
 async function atEliminar(){
   const r=AT.cur; if(!r?.id) return;
