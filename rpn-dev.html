@@ -462,6 +462,7 @@ function drawFicha(){
   if (isBO() && r.estado==='Em Conferência') acts.push(`<button class="btn" id="a-realc">Realocar conferência</button>`);
   if (isBO() && r.estado==='PN') acts.push(`<button class="btn ${r.pnEmail||r.origem==='PHC'?'':'pri'}" id="a-pnm" title="Envia ao cliente o PDF do Processo de Negócio">${r.pnEmail?'Reenviar PN ao cliente':'Enviar PN ao cliente'}</button>`);
   if (isMaster() && ['PN','Concluído'].includes(r.estado) && r.origem!=='PHC') acts.push(`<button class="btn" id="a-reab">Reabrir</button>`);
+  if (isBO() && r.estado==='PN' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-dpn" title="Mês de produção do PN (escalão, objetivos, comissões). Só dentro de meses ainda não fechados.">Data do PN</button>`);
 
   $('#main').innerHTML = `
     <div class="row" style="margin-bottom:12px">
@@ -470,7 +471,7 @@ function drawFicha(){
       <span class="badge b-${r.estado.replace(/ /g,'-')}">${esc(estTxt(r.estado))}</span>${r.estado==='PN'&&(r.origem!=='PHC'||r.pnEmail)?(r.pnEmail?`<span class="muted" id="pn-env" style="font-size:12px">✉ enviado ao cliente (${esc(r.pnEmail.para)}) em ${tsTxt(r.pnEmail.em)}</span>`:`<span id="pn-env" style="font-size:12px;color:var(--red-d);font-weight:600">✉ por enviar ao cliente</span>`):''}
       ${r.boNome?`<span class="muted">BO: <b>${esc(r.boNome)}</b></span>`:''}
       ${r.estado==='Em Conferência'?`<span class="muted">Conferência: <b>${esc(r.confNome||'em fila (sem BO disponível)')}</b></span>`:''}
-      ${r.origem==='PHC'?`<span class="badge">histórico PHC</span>`:(r.estado==='PN'?`<span class="muted">Conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:'')}
+      ${r.origem==='PHC'?`<span class="badge">histórico PHC</span>`:(r.estado==='PN'?`<span class="muted">PN de <b>${fmtD(dataPN(r))}</b> · conferido por <b>${esc(r.conferidoPorNome||r.confNome||'—')}</b></span>`:'')}
       <span class="sp"></span>${acts.join('')}
     </div>
     ${r.propostaRef?`<div class="warnbox">Criado a partir da proposta <b>${esc(r.propostaRef)}</b>${r.propostaInfo?` — ${esc(r.propostaInfo)}`:''}${r.propostaTarif?`<div class="muted" style="font-size:12px;margin-top:4px">Serviços na proposta: ${esc(r.propostaTarif)}</div>`:''}</div>`:''}
@@ -492,7 +493,11 @@ function drawFicha(){
   $('#a-del')?.addEventListener('click',eliminar);
   $('#a-conf')?.addEventListener('click',()=>{ const sem=(S.cur.linhas||[]).filter(l=>!String(l.contratoVDF||'').trim()).length;
     if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return; acaoGrupo('conferencia',{conferencia:true}); });
-  $('#a-ok')?.addEventListener('click',()=>{ if(confirm(`Confirma que conferiu a implementação do RPN ${S.cur.numero} na Vodafone?\n\nO RPN fica fechado como PN (Processo de Negócio).${S.grupo?.lista?.length?`\n\nOs outros RPN do grupo em conferência (${S.grupo.lista.filter(x=>x.estado==='Em Conferência').map(x=>x.numero).join(', ')||'nenhum'}) fecham também.`:''}`)) acaoGrupo('conferido',{conferido:true}).then(()=>{ if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
+  $('#a-ok')?.addEventListener('click', async ()=>{ const d = await escolherDataPN(S.cur, false); if (!d) return; S.dataPNEsc = d;
+    acaoGrupo('conferido',{conferido:true}).then(()=>{ S.dataPNEsc = null; if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
+  $('#a-dpn')?.addEventListener('click', async ()=>{ const r=S.cur, d = await escolherDataPN(r, true); if (!d || d===dataPN(r)) return;
+    try { const u = {dataPN:d, fechadoEm: d+'T12:00:00.000Z', fechadoMes:d.slice(0,7), mesRef:d.slice(0,7), atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
+      await updateDoc(doc(db,'rpn',r.id), u); await hist('Data do PN alterada', `${fmtD(dataPN(r))} → ${fmtD(d)}`, r.id); Object.assign(r, u); toast('Data do PN alterada.'); render(); } catch(e){ toast(errTxt(e), true); } });
   $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>acaoGrupo('devolverImpl',{devolverImpl:rz})));
   $('#a-real')?.addEventListener('click',()=>realocar('bo'));
   $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
@@ -926,7 +931,8 @@ async function guardar(opts={}){
     if (opts.submeter) { data.estado='Submetido'; data.submetidoEm=new Date().toISOString(); }
     if (opts.devolver) { data.estado='Em Implementação'; data.motivos=[]; }
     if (opts.conferencia) { data.estado='Em Conferência'; data.motivos=[]; data.confNota=''; data.implementadoEm=new Date().toISOString(); }
-    if (opts.conferido) { data.estado='PN'; data.conferidoEm=new Date().toISOString(); data.conferidoPorUid=S.me.uid; data.conferidoPorNome=S.me.nome; }
+    if (opts.conferido) { data.estado='PN'; data.conferidoEm=new Date().toISOString(); data.conferidoPorUid=S.me.uid; data.conferidoPorNome=S.me.nome;
+      const dp=S.dataPNEsc||hojeLocal(); data.dataPN=dp; data.fechadoEm = dp===hojeLocal() ? new Date().toISOString() : dp+'T12:00:00.000Z'; data.fechadoMes=dp.slice(0,7); }
     if (opts.devolverImpl) { data.estado='Em Implementação'; data.confNota=opts.devolverImpl; }
     if (opts.reabrir) { data.estado='Em Implementação'; }
     if (data.estado==='A aguardar') {
@@ -1036,7 +1042,8 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     else if (tipo==='conferencia') { if(!IMPL.includes(o.estado)) return; estado='Em Conferência'; cf=L.confUid||null;
       Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); }
     else if (tipo==='conferido') { if(o.estado!=='Em Conferência' || o.boUid===S.me.uid) return; estado='PN';
-      Object.assign(u,{conferidoEm:agora, conferidoPorUid:S.me.uid, conferidoPorNome:S.me.nome, fechadoEm:agora, fechadoMes:mesLocal(), mesRef:mesLocal()}); }
+      const dp=S.dataPNEsc||hojeLocal();
+      Object.assign(u,{conferidoEm:agora, conferidoPorUid:S.me.uid, conferidoPorNome:S.me.nome, dataPN:dp, fechadoEm: dp===hojeLocal()?agora:dp+'T12:00:00.000Z', fechadoMes:dp.slice(0,7), mesRef:dp.slice(0,7)}); }
     else if (tipo==='devolverImpl') { if(o.estado!=='Em Conferência') return; estado='Em Implementação';
       Object.assign(u,{confNota:nota||'', devMeses:[...new Set([...(o.devMeses||[]), mesLocal()])],
         devolucoes:[...(o.devolucoes||[]), {em:agora, mes:mesLocal(), porUid:S.me.uid, porNome:S.me.nome, aUid:o.implPorUid||o.boUid, aNome:o.implPorNome||o.boNome||'', linhas:o.nLinhas||0, motivo:nota||'', anulada:false}]}); }
@@ -1072,6 +1079,21 @@ function escolherParcial(r, abertos){
         feito=true; fechar(); res({ids, fora, razao:rz}); };
       const obs=new MutationObserver(()=>{ if(!document.body.contains(m) && !feito){ feito=true; res(null); } }); obs.observe(document.body,{childList:true}); });
   });
+}
+// data do PN (= mês de produção): a BO escolhe na conferência; não pode cair num mês já fechado (RUN finalizado)
+async function escolherDataPN(r, editar){
+  let ate=''; try { const s=await getDoc(doc(db,'config','producao')); ate = s.exists() ? (s.data().fechadoAte||'') : ''; } catch(_){}
+  const hj=hojeLocal(), min = ate ? somaMeses(ate,1)+'-01' : '', def0 = editar ? (dataPN(r)||hj) : hj, def = min && def0<min ? min : def0;
+  const grupo = !editar && S.grupo?.lista?.length ? S.grupo.lista.filter(x=>x.estado==='Em Conferência').map(x=>x.numero) : [];
+  return new Promise(res=>{ modal(`<h2 style="margin-top:0">${editar?'Data do PN '+esc(r.numero||''):'Conferido · fechar como PN '+esc(r.numero||'')}</h2>
+      ${editar?'':`<p>Confirma que conferiu a implementação na Vodafone? O RPN fica fechado como PN.${grupo.length?` Os outros RPN do grupo em conferência (${grupo.join(', ')}) fecham também, com a mesma data.`:''}</p>`}
+      <label>Data do PN (mês de produção)</label><input type="date" id="dp-d" value="${def}" ${min?`min="${min}"`:''} max="${hj}" style="width:200px">
+      <p class="muted" style="font-size:12px">É esta data que conta para o escalão, os objetivos e as comissões do vendedor. Negócio do mês anterior convertido nos primeiros dias do mês? Escolha a data do mês anterior.${ate?` A produção até ${mesTxt(ate)} já está fechada (RUN finalizado): a data mínima é ${fmtD(min)}.`:''}</p>
+      <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="dp-c">Cancelar</button><button class="btn pri" id="dp-ok">${editar?'Guardar data':'Conferido · fechar como PN'}</button></div>`, (m,close)=>{
+      m.querySelector('#dp-c').onclick=()=>{ close(); res(null); };
+      m.querySelector('#dp-ok').onclick=()=>{ const v=m.querySelector('#dp-d').value; if (!v) return toast('Escolha a data do PN.', true);
+        if (min && v<min) return toast(`A produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
+        if (v>hj) return toast('A data do PN não pode ser futura.', true); close(); res(v); }; }); });
 }
 async function acaoGrupo(tipo, opts){
   const r=S.cur; let irm=[];
@@ -1289,7 +1311,7 @@ const PROJ_PRAZOS = [12,18,24,30,36,48];
 const PROJ_ANTECEDENCIA = 6;   // meses antes do fim do contrato
 const somaMeses = (ym,n) => { let [y,m]=ym.split('-').map(Number); m+=n; y+=Math.floor((m-1)/12); m=((m-1)%12+12)%12+1; return y+'-'+String(m).padStart(2,'0'); };
 const diaNoMes = (ym,d) => { const [y,m]=ym.split('-').map(Number); return ym+'-'+String(Math.min(d, new Date(y,m,0).getDate())).padStart(2,'0'); };   // dia 31 num mês de 30 → dia 30
-const dataPN = r => String(r.fechadoEm||r.conferidoEm||r.data||'').slice(0,10);
+const dataPN = r => String(r.dataPN||r.fechadoEm||r.conferidoEm||r.data||'').slice(0,10);
 const hojeLocal = () => { const d=new Date(); return mesLocal(d)+'-'+String(d.getDate()).padStart(2,'0'); };
 async function gerarProjetos(M){
   const cand={};
@@ -2892,10 +2914,12 @@ function verGravado(g, nome){
 }
 async function cardGravado(mes){
     // o que está gravado para este RUN (importado do PHC ou gravado na plataforma): é o que os vendedores veem
-    const gS = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
+    let gS = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes))), rasc = false;
+    if (!gS.docs.length) { const rS = await getDocs(collection(db,'runs',mes,'rasc')).catch(()=>null); if (rS?.docs.length) { gS = rS; rasc = true; } }
     const grav = gS.docs.map(d=>({id:d.id,...d.data()})).filter(d=>d.uid).sort((a,b)=>(b.valor||0)-(a.valor||0)), gravPor = Object.fromEntries(grav.map(g=>[g.uid,g]));
     const nomeV = uid => userNome(uid) || (CMS_RUN_RANK(gS, uid)) || uid;
     const cardGrav = `<div class="card scroll"><h2>Comissões gravadas · RUN de ${mesTxt(mes)}</h2>
+      ${rasc?'<div class="warnbox" style="margin-bottom:8px">📝 <b>Rascunho</b> — ainda não visível aos vendedores. Fica publicado quando carregar em «Finalizar RUN».</div>':''}
       <p class="muted" style="font-size:12px;margin-top:0">${grav.length ? (grav.some(g=>g.origem==='PHC') ? 'Valores importados do PHC: o que foi efetivamente pago a cada vendedor.' : 'Valores gravados na plataforma.') + ' É o que cada vendedor vê no ranking e no separador «Comissão» dos seus PN.' : 'Ainda não há comissões gravadas para este RUN.'}</p>
       ${grav.length?`<table><thead><tr><th>Vendedor</th><th>Origem</th><th class="num">PN</th><th class="num">Linhas</th><th class="num">Pago</th><th></th></tr></thead>
       <tbody>${grav.map(g=>`<tr><td><b>${esc(nomeV(g.uid))}</b></td><td>${g.origem==='PHC'?'<span class="badge">PHC</span>':'Plataforma'}</td><td class="num">${(g.detalhe||[]).length}</td><td class="num">${(g.detalhe||[]).reduce((a,p)=>a+(p.linhas||[]).length,0)}</td><td class="num"><b>${eur(g.valor)}</b></td><td><button class="btn sm" data-gv="${esc(g.id)}">Ver PN</button></td></tr>`).join('')}</tbody>
@@ -2932,7 +2956,7 @@ function cmsVend(box){
     const gravDe = uid => gravPor[uid] || gravPor['phcv_'+String(S.users[uid]?.vendedorPHC||'x')] || null;
     box.innerHTML = `${avisoPHC}${R.fechado&&R.calcN?`<div class="card muted" style="font-size:13px">🔒 RUN fechado: cálculo guardado no fecho (${esc(String(R.calcEm||'').slice(0,10).split('-').reverse().join('/'))}), sem voltar a procurar os PN.</div>`:''}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span>
         ${R.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">🔒 RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))}</span>${isMaster()?'<button class="btn" id="cms-reab">Reabrir RUN</button>':''}`
-          : `${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">Gravar comissões do mês</button>${isMaster()&&CMS_RUN.gravadoEm?'<button class="btn" id="cms-fecha" title="Depois de conferido: bloqueia alterações a este RUN">Fechar RUN</button>':''}${isMaster()?'':'-->'}`}</div>
+          : `${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">${CMS_RUN.comPHC?'Gravar rascunho (substitui o PHC)':'Gravar rascunho'}</button>${isMaster()&&(CMS_RUN.rascEm||CMS_RUN.comPHC||CMS_RUN.gravadoEm)?'<button class="btn pri" id="cms-fecha" title="Publica as comissões aos vendedores, guarda o cálculo e fecha a produção do mês">Finalizar RUN</button>':''}${isMaster()?'':'-->'}`}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
       ${cardGrav}
       <div id="cms-pt"></div>
@@ -2960,7 +2984,7 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     ligaMes(()=>cmsVend(box)); desenharPremios($('#cms-pt'));
     box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
     if ($('#cms-g')) $('#cms-g').onclick = () => gravarComissoes(casa, lst).then(()=>cmsVend(box));
-    $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, true, casa)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await finalizarRun(CMS_MES, casa, R)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     box.querySelectorAll('[data-dif]').forEach(a=>a.onclick=e=>{ e.preventDefault(); compararPHC(a.dataset.dif, casa, gravDe(a.dataset.dif), CMS_MES); });
     $('#cms-reab')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, false)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'); tr.style.display = !t || tr.textContent.toLowerCase().includes(t) ? '' : 'none'; }); });
@@ -3082,8 +3106,8 @@ function corrigirPN(r, depois){
 }
 // fecho do RUN (Master): depois de gravado e conferido; bloqueia nova importação, regravação e atribuições
 async function fecharRun(mes, fechar, casa){
-  const txt = fechar ? `Fechar o RUN de ${mesTxt(mes)}?\n\nO cálculo fica guardado (abre logo, sem voltar a procurar os PN). Depois de fechado não se pode reimportar, regravar nem atribuir linhas (o Master pode reabrir).` : `Reabrir o RUN de ${mesTxt(mes)}?\n\nO cálculo guardado é apagado e volta a ser feito com os PN atuais.`;
-  if (!confirm(txt)) return false;
+  const txt = fechar ? `Fechar o RUN de ${mesTxt(mes)}?\n\nO cálculo fica guardado (abre logo, sem voltar a procurar os PN). Depois de fechado não se pode reimportar, regravar nem atribuir linhas (o Master pode reabrir).` : `Reabrir o RUN de ${mesTxt(mes)}?\n\nO cálculo guardado é apagado e volta a ser feito com os PN atuais. A produção do mês volta a aceitar PN com data nesse mês. As comissões já publicadas continuam visíveis aos vendedores até finalizar outra vez.`;
+  if (!fechar && !confirm(txt)) return false;
   const velhos = (await getDocs(collection(db,'runs',mes,'calc'))).docs;
   let b = writeBatch(db); velhos.forEach(d=>b.delete(d.ref));
   if (fechar && casa) {   // fotografia da imputação: [i, PN, nº, cliente, vendedor, mês do PN, comissão, escalão, majoração, vendedor PHC (nome), nº PHC, manual, por MSISDN]
@@ -3095,9 +3119,46 @@ async function fecharRun(mes, fechar, casa){
     const porPN = {}; casa.filter(x=>x.r?.id).forEach(x=>{ const o=porPN[x.r.id]=porPN[x.r.id]||{rec:0, prm:0, com:0, linhas:[]}; const v=x.l[RL.val]||0;
       o.rec=r2(o.rec+v); if (x.prm) o.prm=r2(o.prm+v); o.com=r2(o.com+(x.com||0)); o.linhas.push([x.l[RL.cod], x.l[RL.pos], x.l[RL.msisdn], v, x.com||0, descVDF(x.l)]); });
     let n=0; for (const [id,o] of Object.entries(porPN)) { b.set(doc(db,'comissoes','pn_'+id), {rpnId:id, runs:{[mes]:o}}, {merge:true}); if (++n>=400) { await b.commit(); b=writeBatch(db); n=0; } }
-  } else b.set(doc(db,'runs',mes), {fechado:null, calcN:null, calcEm:null}, {merge:true});
+  } else { b.set(doc(db,'runs',mes), {fechado:null, calcN:null, calcEm:null}, {merge:true});
+    // reabrir: a produção desse mês volta a aceitar PN (se era o último mês fechado)
+    try { const p = await getDoc(doc(db,'config','producao')); if (p.exists() && p.data().fechadoAte===mes) b.set(doc(db,'config','producao'), {fechadoAte: somaMeses(mes,-1), atualizadoEm:serverTimestamp(), por:S.me.nome}, {merge:true}); } catch(_){} }
   await b.commit();
   await logAlt({tipo: fechar?'RUN fechado':'RUN reaberto', desde:mes, resumo:`RUN de ${mesTxt(mes)}${fechar&&casa?' (cálculo guardado)':''}`}); CMS_RUN=null; return true;
+}
+// FINALIZAR RUN (Master): verifica RPN em aberto, publica as comissões aos vendedores, guarda o cálculo e fecha a produção do mês
+async function finalizarRun(mes, casa, R){
+  const fim = mes+'-31';
+  const sn = await getDocs(query(collection(db,'rpn'), where('estado','in',[...ABERTOS,'Em Conferência'])));
+  const abertos = sn.docs.map(d=>({id:d.id,...d.data()})).filter(r=>String(r.submetidoEm||r.data||'').slice(0,10) <= fim).sort((a,b)=>(a.numero||0)-(b.numero||0));
+  if (!R.comPHC && !R.rascEm) return toast('Grave primeiro o rascunho das comissões («Gravar rascunho») e confira-o.', true);
+  const ok = await new Promise(res=>modal(`<h2 style="margin-top:0">Finalizar o RUN de ${mesTxt(mes)}</h2>
+    <ol style="line-height:1.6;margin-top:0">
+      <li>${R.comPHC&&!R.rascEm?'As comissões deste RUN vieram do PHC e ficam como estão.':'As comissões do rascunho ficam <b>visíveis aos vendedores</b> (ranking e detalhe por PN).'}</li>
+      <li>O cálculo e a rentabilidade de cada PN ficam guardados; o RUN fica fechado (sem reimportar, regravar nem atribuir).</li>
+      <li><b>A produção de ${mesTxt(mes)} fecha</b>: deixa de ser possível conferir PN com data até ${fmtD(fim.replace(/-31$/, '-'+String(new Date(+mes.slice(0,4), +mes.slice(5,7), 0).getDate())))}. Novos PN passam a ter data a partir de ${fmtD(somaMeses(mes,1)+'-01')}.</li></ol>
+    ${abertos.length?`<div class="warnbox"><b>⚠ ${abertos.length} RPN submetido(s) até ${mesTxt(mes)} ainda em aberto.</b> Se finalizar, estes negócios contam na produção do mês em que forem conferidos (não em ${mesTxt(mes)}).
+      <div class="scroll" style="max-height:180px;margin-top:6px"><table><tbody>${abertos.map(r=>`<tr><td><b>${esc(r.numero||'')}</b></td><td>${esc(r.estado)}</td><td>${esc(r.cliente?.nome||'')}</td><td>${esc(r.vendedorNome||'')}</td><td>${esc(r.boNome||'')}</td><td>${fmtD(String(r.submetidoEm||r.data||'').slice(0,10))}</td></tr>`).join('')}</tbody></table></div>
+      <label style="margin-top:8px">Motivo para finalizar com RPN em aberto</label><input id="fz-mot" style="width:100%"></div>`:'<p class="muted">✓ Não há RPN em aberto submetidos até este mês.</p>'}
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="fz-c">Cancelar</button><button class="btn pri" id="fz-ok">Finalizar RUN</button></div>`, (m,close)=>{
+      m.style.maxWidth='860px'; m.querySelector('#fz-c').onclick=()=>{ close(); res(null); };
+      m.querySelector('#fz-ok').onclick=()=>{ const mot = m.querySelector('#fz-mot')?.value.trim()||''; if (abertos.length && mot.length<5) return toast('Escreva o motivo (ou feche primeiro os RPN em aberto).', true); close(); res({mot}); }; }));
+  if (!ok) return false;
+  toast('A finalizar…');
+  // 1) publicar o rascunho (substitui o que estava publicado para este RUN)
+  if (R.rascEm) { const rS = await getDocs(collection(db,'runs',mes,'rasc')), pub = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
+    let b = writeBatch(db), n = 0; const flush = async () => { await b.commit(); b = writeBatch(db); n = 0; };
+    for (const d of pub.docs) { b.delete(d.ref); if (++n>=400) await flush(); }
+    await flush();
+    for (const d of rS.docs) { b.set(doc(db,'comissoesVend',d.id), {...d.data(), publicadoEm:serverTimestamp()}); if (++n>=200) await flush(); }
+    await flush(); }
+  // 2) fotografia do cálculo + rentabilidade + RUN fechado
+  await fecharRun(mes, true, casa);
+  // 3) fecho da produção do mês
+  const p = await getDoc(doc(db,'config','producao')), ate = p.exists() ? (p.data().fechadoAte||'') : '';
+  await setDoc(doc(db,'config','producao'), {fechadoAte: ate>mes ? ate : mes, meses:{[mes]:{em:new Date().toISOString(), por:S.me.nome, rpnAbertos:abertos.length, motivo:ok.mot||''}}, atualizadoEm:serverTimestamp()}, {merge:true});
+  await setDoc(doc(db,'runs',mes), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome, publicadoEm:new Date().toISOString()}, {merge:true});
+  await logAlt({tipo:'RUN finalizado', desde:mes, resumo:`RUN de ${mesTxt(mes)}: comissões ${R.rascEm?'publicadas':'do PHC mantidas'}; produção de ${mesTxt(mes)} fechada${abertos.length?`; ${abertos.length} RPN em aberto (${ok.mot})`:''}`});
+  CMS_RUN = null; toast(`RUN de ${mesTxt(mes)} finalizado.`); return true;
 }
 // RUN fechado: reconstrói a imputação a partir da fotografia (sem ler os PN)
 async function casaDoFecho(R){
@@ -3145,7 +3206,8 @@ function compararPHC(uid, casa, g, mes){
 }
 // mapa de pagamentos do RUN (o que foi gravado): para a contabilidade
 async function mapaPagamentos(mes){
-  const sn = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
+  let sn = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
+  if (!sn.docs.length) { const rS = await getDocs(collection(db,'runs',mes,'rasc')).catch(()=>null); if (rS?.docs.length) sn = rS; }
   const rank = sn.docs.find(d=>!d.data().uid)?.data()?.ranking||[], det = sn.docs.filter(d=>d.data().uid).map(d=>d.data());
   const linhas = det.map(g=>{ const pr = (g.detalhe||[]).filter(p=>p.premio || (!p.rpnId && (p.linhas||[]).some(l=>/prémio trimestral/i.test(l.tipo||'')))).reduce((a,p)=>a+(+p.valor||0),0), u=S.users[g.uid]||{};
     return {nome: userNome(g.uid) || rank.find(x=>x.uid===g.uid)?.nome || g.uid, phc:u.vendedorPHC||'', cat:'Vendedor', inativo: u.ativo===false, categoria: cfgVend(g.uid, mes)?.cat||'', com: r2((+g.valor||0)-pr), premio: r2(pr), total: r2(+g.valor||0), origem:g.origem||'Plataforma'}; });
@@ -3175,6 +3237,7 @@ function cmsManual(box){
   <p class="muted">Para o Master e a BO Financeiro. Passos de cada mês e de cada trimestre, do RUN da Vodafone até ao mapa para a contabilidade. ⚠ Zona confidencial: o que a Vodafone paga, a % de cada escalão e a margem não podem sair daqui.</p>
   <h3>Todos os meses</h3>
   <ol>
+    <li><b>Data do PN.</b> Na conferência, a BO escolhe a <i>Data do PN</i> (mês de produção). Negócios do mês anterior convertidos nos primeiros dias do mês seguinte ficam com a data do mês anterior — até o RUN desse mês ser finalizado. A data também pode ser corrigida no PN (botão <i>Data do PN</i>) enquanto o mês estiver aberto.</li>
     <li><b>Durante o mês — PN corretos.</b> Quando a Vodafone reabre um processo e dá um POS novo, ou muda o MSISDN, abra o PN › separador <i>Comissão</i> › <b>Corrigir contrato VDF / MSISDN</b>. O valor antigo fica guardado no PN e continua a ser reconhecido nos RUN (comissões e charge-backs que cheguem mais tarde).</li>
     <li><b>Trazer os PN novos do PHC</b> (enquanto os PN ainda forem feitos no PHC): Administração › <i>Importar PN do PHC</i>, com a consulta de sempre. Sem isto, as linhas do RUN de PN feitos no PHC depois da última importação ficam «por imputar». Não duplica nem apaga correções.</li>
     <li><b>Obter o RUN.</b> A Vodafone disponibiliza todos os meses o ficheiro <code>UNE_VI_Detalhe_AAAAMM_….xlsx</code> (ex.: o RUN de agosto chegou a 14/09). Descarregue-o como hoje e não o altere.</li>
@@ -3186,9 +3249,9 @@ function cmsManual(box){
       <li>As atribuições aparecem em <i>Atribuições manuais deste RUN</i> e podem ser desfeitas. Linhas de agência (sem POS: IC_, CT_PL_) não são de vendedores.</li></ul></li>
     <li><b>Conferir o cálculo (Master).</b> Em <i>Cálculo da plataforma</i>: escalão, % e majoração de cada vendedor no mês de cada PN, charge-backs e margem. Um RUN atrasado é sempre calculado com as condições do mês do PN (plano e vendedores em vigor nessa altura).</li>
     <li><b>Prémio trimestral.</b> Se este RUN paga uma prestação (${P.prestacoes} prestações; o 1.º trimestre paga-se nos recibos de junho, julho e agosto, ou seja, com os RUN de abril, maio e junho), confira o quadro <i>Prémio trimestral</i> no mesmo separador.</li>
-    <li><b>Gravar (Master).</b> <i>Gravar comissões do mês</i>: grava o ranking (visível a todos), o detalhe por PN de cada vendedor e a prestação do prémio trimestral.</li>
+    <li><b>Gravar o rascunho (Master).</b> <i>Gravar rascunho</i>: calcula o ranking, o detalhe por PN de cada vendedor e a prestação do prémio trimestral. <b>Os vendedores ainda não veem nada.</b> Pode gravar quantas vezes quiser enquanto faz acertos.
     <li><b>Mapa de pagamentos.</b> Confira o <i>Mapa de pagamentos</i> (vendedores: comissão do RUN + prémio; BackOffice: parte da Produção BO). Os incentivos cessam com o fim do vínculo do colaborador: quem já saiu não deve ser pago.</li>
-    <li><b>Fechar o RUN (Master)</b> e <b>Descarregar Excel</b> do mapa para enviar à contabilidade. O RUN de um mês é pago no recibo de dois meses depois (RUN de julho → recibo de setembro); o mapa já traz o mês do recibo. Depois de fechado não se reimporta, regrava nem atribui; só o Master pode reabrir.</li>
+    <li><b>Finalizar o RUN (Master).</b> <i>Finalizar RUN</i>: avisa se há RPN submetidos até esse mês ainda em aberto; publica as comissões aos vendedores; guarda o cálculo e a rentabilidade; e <b>fecha a produção do mês</b> (deixa de ser possível conferir PN com data nesse mês). Depois, <b>Descarregar Excel</b> do mapa para a contabilidade. O RUN de um mês é pago no recibo de dois meses depois (RUN de julho → recibo de setembro). Só o Master pode reabrir.
   </ol>
   <h3>Todos os trimestres</h3>
   <ol>
@@ -3235,9 +3298,11 @@ async function rentabilidadePN(r, box){
 // grava o que os vendedores podem ver: só € de comissão (nunca o recebido nem a %)
 async function gravarComissoes(casa, lst){
   if (CMS_RUN?.fechado) return toast('Este RUN está fechado.', true);
-  if (!confirm(`Gravar as comissões do RUN de ${mesTxt(CMS_MES)}?\n\nO ranking fica visível a toda a equipa e cada vendedor passa a ver a comissão de cada linha dos seus PN.\nInclui a prestação do prémio trimestral que se paga neste RUN.`)) return;
+  if (!confirm(`Gravar o rascunho das comissões do RUN de ${mesTxt(CMS_MES)}?\n\nOs vendedores ainda NÃO veem nada: o ranking e o detalhe por PN só ficam visíveis quando carregar em «Finalizar RUN».\nInclui a prestação do prémio trimestral que se paga neste RUN.`)) return;
   try {
-    const b = writeBatch(db), mes = CMS_MES;
+    const mes = CMS_MES, velhos = (await getDocs(collection(db,'runs',mes,'rasc'))).docs;
+    if (velhos.length) { const bd = writeBatch(db); velhos.forEach(d=>bd.delete(d.ref)); await bd.commit(); }
+    const b = writeBatch(db), alvo = id => doc(db,'runs',mes,'rasc',id);   // rascunho (só Master/BO Fin); publicado em comissoesVend ao finalizar
     // prestação do prémio trimestral: entra no total de cada vendedor (mesmo sem linhas neste RUN)
     const PR = await premiosRun(mes), prem = {};
     (PR?.lista||[]).filter(x=>x.prest).forEach(x=>{ prem[x.uid] = {rpnId:'', premio:true, numero:'Prémio', cliente:`Prémio trimestral · ${trimTxt(PR.trim)}`, mesPN:'', valor:x.prest,
@@ -3245,13 +3310,13 @@ async function gravarComissoes(casa, lst){
     Object.keys(prem).filter(u=>!lst.some(o=>o.uid===u)).forEach(u=>lst.push({uid:u, com:0}));
     lst.forEach(o=>{ o.com = (o.com||0) + (prem[o.uid]?.valor||0); });
     const rank = [...lst.map(o=>({uid:o.uid, nome:userNome(o.uid), cat:'Vendedor', valor:Math.round(o.com*100)/100})).filter(x=>S.users[x.uid]?.perfil!=='master'), ...await rankingBO(mes)];
-    b.set(doc(db,'comissoesVend',mes), {mes, ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome});
+    b.set(alvo(mes), {mes, ranking:rank, gravadoEm:serverTimestamp(), por:S.me.nome});
     lst.forEach(o=>{ const pns={};
       casa.filter(x=>x.uid===o.uid && x.f!=='ag' && !x.prm).forEach(x=>{ const p=pns[x.r.id]=pns[x.r.id]||{rpnId:x.r.id, numero:x.r.numero||'', cliente:x.r.cliente?.nome||'', mesPN:x.mesPN, valor:0, linhas:[]};
         p.valor=Math.round((p.valor+x.com)*100)/100; p.linhas.push({pos:x.l[RL.pos], cod:x.l[RL.cod], msisdn:x.l[RL.msisdn], plano:x.l[RL.ppn], tipo:FAMILIAS.find(f=>f[0]===x.f)[1], ativacao:x.l[RL.cri], desc:descVDF(x.l), eventos:x.l[RL.rlmcA]?Math.round(x.l[RL.rlmcA]/SCORE_BASE*1000)/1000:0, valor:x.com}); });
-      b.set(doc(db,'comissoesVend',mes+'_'+o.uid), {mes, uid:o.uid, valor:Math.round(o.com*100)/100, pns:Object.keys(pns), detalhe:[...Object.values(pns), ...(prem[o.uid]?[prem[o.uid]]:[])], gravadoEm:serverTimestamp()}); });
-    b.set(doc(db,'runs',mes), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome}, {merge:true});
-    await b.commit(); CMS_RUN=null; toast('Comissões gravadas.');
+      b.set(alvo(mes+'_'+o.uid), {mes, uid:o.uid, valor:Math.round(o.com*100)/100, pns:Object.keys(pns), detalhe:[...Object.values(pns), ...(prem[o.uid]?[prem[o.uid]]:[])], gravadoEm:serverTimestamp()}); });
+    b.set(doc(db,'runs',mes), {rascEm:new Date().toISOString(), rascPor:S.me.nome}, {merge:true});
+    await b.commit(); CMS_RUN=null; toast('Rascunho gravado. Os vendedores só veem quando finalizar o RUN.');
   } catch(e){ toast(errTxt(e), true); }
 }
 // ---- plano do vendedor (público, em €) e % por escalão (confidencial) ----
