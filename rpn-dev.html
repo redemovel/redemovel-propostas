@@ -157,10 +157,14 @@ const ATIVIDADE= ['Elegível/Carteira','Não Incentivada'];
 // Score = RLMC × ajuste prazo × ajustes / 22,50   (Manual Comissões Redemóvel + Plano VDF FY26/27)
 const SCORE_BASE = 22.5;
 function fatorPrazo(m){ m=+m||0; if(m>=48)return 1.5; if(m>=36)return 1.2525; if(m>=30)return 1.125; if(m>=24)return 1; if(m>=18)return 0.6488; if(m>=12)return 0.4; return 0; }
-const FATOR_TIER = {Gold:1, Bronze:0.6, Silver:0.6, Estanho:0.36};   // Bronze = Gold desc.; Estanho = Silver desc.
+// Manual de Comissões Vodafone: face ao Gold, Bronze −30 %, Silver −40 %, Estanho −64 % (Bronze = Gold descontinuada; Estanho = Silver descontinuada)
+const FATOR_TIER = {Gold:1, Bronze:0.7, Silver:0.6, Estanho:0.36};
+const BRONZE30_DESDE = '2026-10';   // produção anterior: Bronze −40 % (plano dos vendedores de out/2024), para não mexer em meses já pagos
 function scoreLinha(l, r){
-  let f = fatorPrazo(l.prazo) * (FATOR_TIER[l.tier] ?? 1);
-  if (l.descontinuado && (l.tier==='Gold' || l.tier==='Silver')) f *= 0.6;
+  const mes = String(r?.dataPN||r?.fechadoEm||r?.data||'').slice(0,7), antigo = !!mes && mes < BRONZE30_DESDE;
+  let f = fatorPrazo(l.prazo) * (l.tier==='Bronze' && antigo ? 0.6 : (FATOR_TIER[l.tier] ?? 1));
+  if (l.descontinuado && l.tier==='Gold') f *= antigo ? 0.6 : 0.7;   // Gold descontinuada = Bronze
+  if (l.descontinuado && l.tier==='Silver') f *= 0.6;               // Silver descontinuada = Estanho
   if (r.clienteParticular) f *= 0.6;
   if (r.atividade==='Não Incentivada' && /Móvel/.test(l.natureza||'')) f *= 0.6;
   const s = (+l.rlmc||0) * f / SCORE_BASE;
@@ -3797,7 +3801,7 @@ function cmsValid(box){
       if (!ln) { o.dif.push('linha não encontrada no PN'); return o; }
       const pN=natNorm(ln.natureza), pR=+ln.rlmc||0, pP=+ln.prazo||0, pT=String(ln.tier||'').toUpperCase(), pE=scoreLinha(ln, x.r);
       // eventos: compara com os que a Vodafone devia considerar pelo PN (fatores do RUN), não com o Score do vendedor —
-      // o plano dos vendedores penaliza o Bronze em 40 % e a Vodafone em 30 %; essa diferença é regra, não erro
+      // (até set/2026 o Score penalizava o Bronze em 40 % e a Vodafone em 30 %; desde out/2026 ambos 30 %)
       const fV = FAT[`${pT}|${pP}|${kx(x.l,'incent')}|${kx(x.l,'tcli')}`] ?? FAT[`${pT}|${pP}`] ?? null, evV = fV!=null && pR>0 ? pR*fV/SCORE_BASE : null;
       o.pl = {nat:pN, rlmc:pR, prazo:pP, tier:pT, ev:pE, evV, val:esperadoVDF(ln, x.l)};
       o.idx = lsP.indexOf(ln);
@@ -3827,7 +3831,7 @@ function cmsValid(box){
       <div class="card scroll"><table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th class="num" title="Esperada: RLMC e tier/prazo do PN × fatores e mensalidades que a Vodafone aplicou neste RUN. Em baixo: o que a Vodafone pagou.">Comissão VDF</th><th>Divergência</th></tr></thead>
       <tbody>${L.slice(0,800).map((o,ix)=>{ const d=k=>o.dif.includes(k), p=o.pl||{};
         return `<tr><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
-        ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier)}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v)).replace('</td>', p.evV!=null && Math.abs(p.evV-p.ev)>0.001 ? `<div class="muted" style="font-size:11px;font-weight:400" title="Eventos que a Vodafone devia considerar por este PN (o Score do vendedor penaliza o Bronze em 40 %, a Vodafone em 30 %)">esperado VDF: ${n3(p.evV)}</div></td>` : '</td>')}<td class="num" style="${d('comissão')?'background:#fde8e8;font-weight:600':''}">${p.val!=null?eur(p.val):'—'}<div class="muted" style="font-size:11px;font-weight:400">VDF: ${eur(o.vdf.val)}</div></td>
+        ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier)}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v)).replace('</td>', p.evV!=null && Math.abs(p.evV-p.ev)>0.001 ? `<div class="muted" style="font-size:11px;font-weight:400" title="Eventos que a Vodafone devia considerar por este PN, com os fatores deste RUN (até set/2026 o Score penalizava o Bronze em 40 %)">esperado VDF: ${n3(p.evV)}</div></td>` : '</td>')}<td class="num" style="${d('comissão')?'background:#fde8e8;font-weight:600':''}">${p.val!=null?eur(p.val):'—'}<div class="muted" style="font-size:11px;font-weight:400">VDF: ${eur(o.vdf.val)}</div></td>
         <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}${(o.tol||[]).map(t=>` <span class="badge" style="background:#fff4d6;color:#8a5a00" title="Diferença dentro da tolerância">${esc(t)} ≈</span>`).join('')}
           ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}</td></tr>`; }).join('')||'<tr><td colspan="11" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
       ${L.length>800?`<p class="muted">Mostradas 800 de ${L.length} linhas.</p>`:''}</div>`;
