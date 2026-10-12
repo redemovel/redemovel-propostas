@@ -502,7 +502,7 @@ function drawFicha(){
     acaoGrupo('conferido',{conferido:true}).finally(()=>{ S.dataPNEsc = null; S.dataPNIrm = null; }).then(()=>{ if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
   $('#a-dpn')?.addEventListener('click', async ()=>{ const r=S.cur, d = await escolherDataPN(r, 'excecao'); if (!d || d===dataPN(r)) return;
     try { const u = {dataPN:d, fechadoEm: d+'T12:00:00.000Z', fechadoMes:d.slice(0,7), mesRef:d.slice(0,7), atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
-      await updateDoc(doc(db,'rpn',r.id), u); await hist('Data do PN alterada (exceção)', `${fmtD(dataPN(r))} → ${fmtD(d)}. Motivo: ${S.dataPNMotivo||''}`, r.id);
+      await updateDoc(doc(db,'rpn',r.id), u); agDelta(r, {...r, ...u}); await hist('Data do PN alterada (exceção)', `${fmtD(dataPN(r))} → ${fmtD(d)}. Motivo: ${S.dataPNMotivo||''}`, r.id);
       try { await logAlt({tipo:'Data do PN (exceção)', desde:d.slice(0,7), resumo:`PN ${r.numero} (${r.vendedorNome||''}): ${fmtD(dataPN(r))} → ${fmtD(d)} · ${S.dataPNMotivo||''}`}); } catch(_){}
       Object.assign(r, u); S.dataPNMotivo=null; toast('Data do PN alterada.'); render(); } catch(e){ toast(errTxt(e), true); } });
   $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>acaoGrupo('devolverImpl',{devolverImpl:rz})));
@@ -1001,6 +1001,7 @@ async function guardar(opts={}){
     });
     S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.dataPN=data.dataPN||S.cur.dataPN||''; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.esperaMotivo=data.esperaMotivo; S.cur.esperaData=data.esperaData; S.cur.esperaDesde=data.esperaDesde; S.cur.mesRef=data.mesRef; S.cur.contratos=data.contratos; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
     S.dirty = false;
+    agDelta(old, {...(old||{}), ...data});
     if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
     // marca a proposta de origem (app Propostas, coleção 'propostas') com o nº do RPN
     if (isNew && r.propostaRef) updateDoc(doc(db,'propostas',r.propostaRef),{rpnId:rpnRef.id,rpnNumero:data.numero}).catch(()=>{});
@@ -1040,7 +1041,7 @@ async function desenharGrupo(){
 }
 // aplica aos outros RPN do grupo a mesma passagem de estado que acabou de ser feita no RPN aberto (L)
 async function aplicarNoIrmao(id, tipo, L, nota){
-  let feito=null, antes=null;
+  let feito=null, antes=null, orig=null;
   await runTransaction(db, async tx => {
     const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO');
     const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(), cd=cs.exists()?cs.data():{};
@@ -1063,11 +1064,11 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     if (o.confUid && o.confContada) conf[o.confUid]=Math.max(0,(conf[o.confUid]||0)-o.confContada);
     if (cf && ncf) conf[cf]=(conf[cf]||0)+ncf;
     u.cargaContada=nc; u.confContada=ncf;
-    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,u); feito=o.numero; antes={...o, ...u, _de:o.estado};
+    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,u); feito=o.numero; orig=o; antes={...o, ...u, _de:o.estado};
   });
   if (feito!=null) await hist({submeter:'Submetido',conferencia:'Concluído · enviado para conferência',conferido:'Conferido → PN',devolverImpl:'Devolvido à implementação'}[tipo],
     `Em conjunto com o RPN ${L.numero} (mesmo grupo)`+(tipo==='submeter'?`. BackOffice: ${L.boNome}`:tipo==='conferencia'?`. Conferência: ${L.confNome||'em fila'}`:tipo==='devolverImpl'?`: ${nota}`:`, por ${S.me.nome}`), id);
-  if (feito!=null && antes) await msgEstado(id, antes, antes._de, antes.estado);
+  if (feito!=null && antes) { agDelta(orig, antes); await msgEstado(id, antes, antes._de, antes.estado); }
   return feito;
 }
 // janela do envio parcial: devolve {ids (os que seguem com o RPN aberto), fora (os que ficam), razao} ou null se cancelar
@@ -1241,7 +1242,7 @@ async function eliminar(){
     });
     if (r.propostaRef) { const irm=await irmaos(r).catch(()=>[]);   // sem mais RPN, a proposta fica outra vez livre
       await updateDoc(doc(db,'propostas',r.propostaRef), irm.length?{rpnId:irm[0].id,rpnNumero:irm.map(x=>x.numero).join(' + ')}:{rpnId:'',rpnNumero:''}).catch(()=>{}); }
-    S.dirty=false; toast('RPN eliminado.'); location.hash='#/lista';
+    agDelta(r, null); S.dirty=false; toast('RPN eliminado.'); location.hash='#/lista';
   } catch(e){ toast(errTxt(e),true); }
 }
 
@@ -3852,6 +3853,7 @@ function atualizarPNdoRUN(o, depois){
         await updateDoc(doc(db,'rpn',o.pn.id), u);
         await hist('Atualizado pelo RUN', `RUN de ${mesTxt(CMS_MES)} (${l[RL.cod]} ${l[RL.pos]||''}): ${txt.join('; ')}`, o.pn.id);
         await logAlt({tipo:'PN atualizado pelo RUN', desde:CMS_MES, resumo:`PN ${o.pn.numero}: ${txt.join('; ')}`});
+        agDelta(d, {...d, ...u});
         // a reimportação dos PN do PHC não volta a escrever as linhas deste PN (ficam as correções feitas aqui)
         try { await setDoc(doc(db,'comissoes','pnCorrigidos'), {pns:{[o.pn.id]:{numero:o.pn.numero||'', em:new Date().toISOString(), por:S.me.nome}}}, {merge:true}); } catch(_){}
         Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); delete CVPN_MEM[o.pn.id]; CMS_RUN=null;
@@ -3971,9 +3973,26 @@ async function agenteRecalcular(t){
   let evRpn = {}, nRpn = 0;
   if (t===trimId(mesLocal())) { const sr = await getDocs(query(collection(db,'rpn'), where('estado','in', EM_CURSO)));
     const rs = sr.docs.map(d=>({id:d.id,...d.data()})); nRpn = rs.length; evRpn = eventosDe(rs); }
-  const d = {trim:t, ev, evRpn, nRpn, rpnTodos:true, dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
+  const d = {trim:t, ev, evRpn, nRpn, rpnTodos:true, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
   await setDoc(doc(db,'agente',t), d); return d;
 }
+// velocímetro: atualização incremental durante o dia. O recálculo completo (1.º acesso da staff em cada dia) substitui tudo e corrige
+// qualquer desvio; entre recálculos, cada gravação de um RPN/PN soma ao agente/{trimestre} a diferença dos seus eventos (antes → depois).
+function agContrib(r){ const o={}; if (!r) return o;
+  const add=(t,k,ev,n)=>{ const x=o[t]=o[t]||{ev:{},evRpn:{},nRpn:0}; Object.entries(ev).forEach(([nat,v])=>x[k][nat]=(x[k][nat]||0)+v); x.nRpn+=n; };
+  if (r.estado==='PN' && r.mesRef) add(trimId(r.mesRef),'ev',eventosDe([r]),0);
+  else if (EM_CURSO.includes(r.estado)) add(trimId(mesLocal()),'evRpn',eventosDe([r]),1);
+  return o; }
+async function agDelta(antes, depois){
+  try { const a=agContrib(antes), d=agContrib(depois), vz={ev:{},evRpn:{},nRpn:0};
+    for (const t of [...new Set([...Object.keys(a), ...Object.keys(d)])]) { const A=a[t]||vz, D=d[t]||vz;
+      const dif=k=>{ const o={}; new Set([...Object.keys(A[k]), ...Object.keys(D[k])]).forEach(n=>{ const v=(D[k][n]||0)-(A[k][n]||0); if (Math.abs(v)>1e-9) o[n]=v; }); return o; };
+      const dEv=dif('ev'), dRp=dif('evRpn'), dN=D.nRpn-A.nRpn; if (!Object.keys(dEv).length && !Object.keys(dRp).length && !dN) continue;
+      await runTransaction(db, async tx=>{ const ref=doc(db,'agente',t), sn=await tx.get(ref); if (!sn.exists()) return; const x=sn.data();
+        const ap=(m,dd)=>{ const o={...(m||{})}; Object.entries(dd).forEach(([n,v])=>o[n]=r3((o[n]||0)+v)); return o; };
+        tx.update(ref, {ev:ap(x.ev,dEv), evRpn:ap(x.evRpn,dRp), nRpn:Math.max(0,(x.nRpn||0)+dN), incEm:new Date().toISOString(), incN:(x.incN||0)+1}); });
+      AG_MEM=null; }
+  } catch(e){ console.warn('velocímetro (atualização do dia):', e); } }
 // velocímetro: 0–150 %, vermelho até 90 %, amarelo 90–100 %, verde acima de 100 %
 function gaugeSVG(pct, titulo, sub, real){
   // real != null → trimestre em curso: o ponteiro mostra a PROJEÇÃO ao ritmo atual (pct) e por baixo o realizado
@@ -4008,7 +4027,7 @@ function agenteHTML(A, trim, compacto){
       <td class="num" title="Ao ritmo atual, no fim do trimestre">${x.pj!=null?`~${Math.round(x.pj)} %`:'—'}</td><td class="num">${x.y==null?'—':Math.round(x.y)+' %'}</td></tr>`).join('');
   const caixa = podeRpn ? `<label style="display:inline-flex;gap:6px;align-items:center;margin:0 0 6px;font-size:13px;color:var(--ink);cursor:pointer"><input type="checkbox" class="ag-rpn" ${comRpn?'checked':''}> Incluir os RPN em curso <span class="muted">(${RT.nRpn||0} RPN em curso, ainda não PN)</span></label>` : '';
   return caixa + gauges + `${compacto?'<details><summary class="muted" style="cursor:pointer;font-size:12px">Ver a tabela</summary>':''}<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra).${dec<100?' Os velocímetros mostram a projeção para o fim do trimestre ao ritmo atual; o «feito» é o atingimento até hoje.':''} Realizado = eventos dos PN de toda a equipa, pela data do PN${comRpn?', mais todos os RPN em curso (em elaboração, submetidos, em implementação, a aguardar ou em conferência)':''}${A.real[trim]?.dia?`, atualizado em ${fmtD(A.real[trim].dia)}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>${compacto?'</details>':''}`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra).${dec<100?' Os velocímetros mostram a projeção para o fim do trimestre ao ritmo atual; o «feito» é o atingimento até hoje.':''} Realizado = eventos dos PN de toda a equipa, pela data do PN${comRpn?', mais todos os RPN em curso (em elaboração, submetidos, em implementação, a aguardar ou em conferência)':''}${A.real[trim]?.dia?`, recálculo completo em ${fmtD(A.real[trim].dia)}${A.real[trim].incN?` e ${A.real[trim].incN} atualização(ões) desde então (a última às ${String(A.real[trim].incEm||'').slice(11,16)} UTC)`:''}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>${compacto?'</details>':''}`;
 }
 async function desenharAgente(box, mes, compacto){
   try { const t = trimId(mes||mesLocal()), A = await agenteDados(t);
