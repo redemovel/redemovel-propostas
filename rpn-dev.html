@@ -493,9 +493,9 @@ function drawFicha(){
   $('#a-del')?.addEventListener('click',eliminar);
   $('#a-conf')?.addEventListener('click',()=>{ const sem=(S.cur.linhas||[]).filter(l=>!String(l.contratoVDF||'').trim()).length;
     if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return;
-    escolherDataPN(S.cur, 'impl').then(d=>{ if (!d) return; S.dataPNEsc = d; acaoGrupo('conferencia',{conferencia:true}).finally(()=>{ S.dataPNEsc = null; }); }); });
+    escolherDataPN(S.cur, 'impl').then(d=>{ if (!d) return; S.dataPNEsc = d; acaoGrupo('conferencia',{conferencia:true}).finally(()=>{ S.dataPNEsc = null; S.dataPNIrm = null; }); }); });
   $('#a-ok')?.addEventListener('click', async ()=>{ const d = await escolherDataPN(S.cur, 'conf'); if (!d) return; S.dataPNEsc = d;
-    acaoGrupo('conferido',{conferido:true}).then(()=>{ S.dataPNEsc = null; if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
+    acaoGrupo('conferido',{conferido:true}).finally(()=>{ S.dataPNEsc = null; S.dataPNIrm = null; }).then(()=>{ if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
   $('#a-dpn')?.addEventListener('click', async ()=>{ const r=S.cur, d = await escolherDataPN(r, 'excecao'); if (!d || d===dataPN(r)) return;
     try { const u = {dataPN:d, fechadoEm: d+'T12:00:00.000Z', fechadoMes:d.slice(0,7), mesRef:d.slice(0,7), atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
       await updateDoc(doc(db,'rpn',r.id), u); await hist('Data do PN alterada (exceção)', `${fmtD(dataPN(r))} → ${fmtD(d)}. Motivo: ${S.dataPNMotivo||''}`, r.id);
@@ -1043,9 +1043,9 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     const u={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}; let estado=o.estado, bo=o.boUid||null, cf=o.confUid||null;
     if (tipo==='submeter') { if(o.estado!=='Em Elaboração') return; estado='Submetido'; bo=L.boUid; Object.assign(u,{submetidoEm:agora, boUid:L.boUid, boNome:L.boNome||''}); }
     else if (tipo==='conferencia') { if(!IMPL.includes(o.estado)) return; estado='Em Conferência'; cf=L.confUid||null;
-      Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); if (S.dataPNEsc) u.dataPN=S.dataPNEsc; }
+      Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); if (S.dataPNIrm?.[id]) u.dataPN=S.dataPNIrm[id]; }
     else if (tipo==='conferido') { if(o.estado!=='Em Conferência' || o.boUid===S.me.uid) return; estado='PN';
-      const dp=S.dataPNEsc||hojeLocal();
+      const dp=S.dataPNIrm?.[id]||String(o.dataPN||'').slice(0,10)||hojeLocal();
       Object.assign(u,{conferidoEm:agora, conferidoPorUid:S.me.uid, conferidoPorNome:S.me.nome, dataPN:dp, fechadoEm: dp===hojeLocal()?agora:dp+'T12:00:00.000Z', fechadoMes:dp.slice(0,7), mesRef:dp.slice(0,7)}); }
     else if (tipo==='devolverImpl') { if(o.estado!=='Em Conferência') return; estado='Em Implementação';
       Object.assign(u,{confNota:nota||'', devMeses:[...new Set([...(o.devMeses||[]), mesLocal()])],
@@ -1088,13 +1088,17 @@ function escolherParcial(r, abertos){
 async function escolherDataPN(r, modo){
   let ate=''; try { const s=await getDoc(doc(db,'config','producao')); ate = s.exists() ? (s.data().fechadoAte||'') : ''; } catch(_){}
   const hj=hojeLocal(), min = ate ? somaMeses(ate,1)+'-01' : '', def0 = String(r.dataPN||r.data||hj).slice(0,10), def = min && def0<min && modo!=='excecao' ? min : def0;
-  const grupo = modo!=='excecao' && S.grupo?.lista?.length ? S.grupo.lista.filter(x=>modo==='conf'?x.estado==='Em Conferência':!['PN','Concluído','Cancelado','Reprovado','Em Conferência'].includes(x.estado)).map(x=>x.numero) : [];
+  const grupo = modo!=='excecao' && S.grupo?.lista?.length ? S.grupo.lista.filter(x=>modo==='conf'?x.estado==='Em Conferência':!['PN','Concluído','Cancelado','Reprovado','Em Conferência'].includes(x.estado)) : [];
+  const defDe = x => { const d0=String(x.dataPN||x.data||hj).slice(0,10); return min && d0<min ? min : d0; };
+  S.dataPNIrm = null;
   const tit = {impl:'Implementação terminada · data do negócio', conf:'Conferido · fechar como PN '+esc(r.numero||''), excecao:'Data do PN '+esc(r.numero||'')+' (exceção)'}[modo];
   const txt = {impl:`Confirme a <b>data do negócio</b>: a data em que a Vodafone efetivou as fidelizações. Começa com a data do RPN (${fmtD(String(r.data||'').slice(0,10))}).`,
-    conf:`Confirma que conferiu a implementação na Vodafone? O RPN fica fechado como PN.${grupo.length?` Os outros RPN do grupo em conferência (${grupo.join(', ')}) fecham também, com a mesma data.`:''}<br>Confira também a <b>data do negócio</b> indicada pela BO da implementação${r.dataPN?'':' (ainda não indicada: está a data do RPN)'}.`,
+    conf:`Confirma que conferiu a implementação na Vodafone? O RPN fica fechado como PN.${grupo.length?` Os outros RPN do grupo em conferência (${grupo.map(x=>x.numero).join(', ')}) fecham também, cada um com a sua data.`:''}<br>Confira também a <b>data do negócio</b> indicada pela BO da implementação${r.dataPN?'':' (ainda não indicada: está a data do RPN)'}.`,
     excecao:`<b>Exceção.</b> A data do negócio foi definida na implementação e confirmada na conferência. Mudar agora (por exemplo, a pedido do vendedor) fica registado com o motivo.`}[modo];
   return new Promise(res=>{ modal(`<h2 style="margin-top:0">${tit}</h2><p>${txt}</p>
-      <label>Data do negócio (data do PN)</label><input type="date" id="dp-d" value="${def}" ${min&&modo!=='excecao'?`min="${min}"`:''} max="${hj}" style="width:200px">
+      <label>Data do negócio (data do PN)${grupo.length?` · RPN ${esc(r.numero||'')}`:''}</label><input type="date" id="dp-d" value="${def}" ${min&&modo!=='excecao'?`min="${min}"`:''} max="${hj}" style="width:200px">
+      ${grupo.length?`<div style="margin-top:10px"><label>Outros RPN do grupo que ${modo==='conf'?'fecham como PN':'seguem para conferência'} — cada um com a sua data</label>
+        <table style="margin-top:4px"><tbody>${grupo.map(x=>`<tr><td><b>${esc(x.numero)}</b> <span class="muted" style="font-size:12px">RPN de ${fmtD(String(x.data||'').slice(0,10))}</span></td><td><input type="date" data-dpi="${esc(x.id)}" value="${defDe(x)}" ${min?`min="${min}"`:''} max="${hj}" style="width:170px"></td></tr>`).join('')}</tbody></table></div>`:''}
       ${modo==='excecao'?`<div style="margin-top:8px"><label>Motivo</label><input id="dp-m" style="width:100%" placeholder="Ex.: pedido do vendedor para fechar no mês do negócio"></div>`:''}
       <p class="muted" style="font-size:12px">É esta data que define o mês da produção do vendedor (escalão, objetivos, prémio e comissões).${ate?` A produção até ${mesTxt(ate)} está fechada (RUN finalizado)${modo==='excecao'?': só o Master pode lá pôr datas, e o que já foi pago desse mês não é recalculado':`: a data mais antiga possível é ${fmtD(min)}`}.`:''}</p>
       <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="dp-c">Cancelar</button><button class="btn pri" id="dp-ok">${{impl:'Enviar para conferência', conf:'Conferido · fechar como PN', excecao:'Guardar data'}[modo]}</button></div>`, (m,close)=>{
@@ -1102,6 +1106,11 @@ async function escolherDataPN(r, modo){
       m.querySelector('#dp-ok').onclick=()=>{ const v=m.querySelector('#dp-d').value; if (!v) return toast('Escolha a data do negócio.', true);
         if (min && v<min && !(modo==='excecao' && isMaster())) return toast(`A produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
         if (v>hj) return toast('A data do negócio não pode ser futura.', true);
+        const irm={}; for (const el of m.querySelectorAll('[data-dpi]')) { const x=el.value, n=grupo.find(g=>g.id===el.dataset.dpi)?.numero;
+          if (!x) return toast(`Escolha a data do negócio do RPN ${n}.`, true);
+          if (min && x<min) return toast(`RPN ${n}: a produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
+          if (x>hj) return toast(`RPN ${n}: a data do negócio não pode ser futura.`, true); irm[el.dataset.dpi]=x; }
+        S.dataPNIrm = Object.keys(irm).length ? irm : null;
         if (modo==='excecao') { const mo=(m.querySelector('#dp-m').value||'').trim(); if (mo.length<5) return toast('Escreva o motivo da exceção.', true); S.dataPNMotivo=mo; }
         close(); res(v); }; }); });
 }
@@ -3268,7 +3277,7 @@ function cmsManual(box){
     <li><b>Trazer os PN novos do PHC</b> (enquanto os PN ainda forem feitos no PHC): Administração › <i>Importar PN do PHC</i>, com a consulta de sempre. Sem isto, as linhas do RUN de PN feitos no PHC depois da última importação ficam «por imputar». Não duplica nem apaga correções.</li>
     <li><b>Obter o RUN.</b> A Vodafone disponibiliza todos os meses o ficheiro <code>UNE_VI_Detalhe_AAAAMM_….xlsx</code> (ex.: o RUN de agosto chegou a 14/09). Descarregue-o como hoje e não o altere.</li>
     <li><b>Importar.</b> ${tab('run','RUN Vodafone')} › escolher o ficheiro. Confira o total e as famílias (upfront, prémios, charge-backs, ajustes, agência) com o que a Vodafone comunicou. Se vier um ficheiro corrigido, importe-o de novo (substitui; as atribuições manuais mantêm-se).</li>
-    <li><b>Validar.</b> ${tab('valid','Validação')}: compara cada linha do RUN com o PN (natureza, RLMC, prazo, tier, eventos). Erro nosso → corrigir o PN. Erro da Vodafone → pedido de esclarecimento.</li>
+    <li><b>Validar.</b> ${tab('valid','Validação')}: compara cada linha do RUN com o PN (natureza, RLMC, prazo, tier, eventos e comissão esperada × paga), com a tolerância indicada (por omissão 2 %). Erro nosso → «Atualizar PN» e escolher os campos a corrigir. Erro da Vodafone → pedido de esclarecimento.</li>
     <li><b>Imputar o que falta.</b> ${tab('vend','Comissões por vendedor')} › <i>Linhas por imputar</i> › <b>Atribuir</b>: procure o PN por NIF, MSISDN, contrato VDF ou nº do PN.
       <ul><li><b>Só esta linha</b> — é a antiga «Atribuição Manual» do PHC: a comissão vai para esse PN apenas neste RUN.</li>
       <li><b>Associar o POS ao PN</b> — é o antigo «inserir o POS novo no PN e recalcular»: o POS fica no PN e esta linha e as seguintes passam a ir para lá sozinhas.</li>
@@ -3712,7 +3721,7 @@ function cmsHist(box){
   };
 }
 // ===== Validação: o que a Vodafone considerou no RUN vs. o que está no PN (natureza, RLMC, prazo, tier, eventos) =====
-let VAL_FILTRO = 'dif', VAL_TOL = (()=>{ try { const v=localStorage.getItem('cms-val-tol'); return v!=null ? +v : 21; } catch(_){ return 21; } })();
+let VAL_FILTRO = 'dif', VAL_TOL = (()=>{ try { const v=localStorage.getItem('cms-val-tol2'); return v!=null ? +v : 2; } catch(_){ return 2; } })();
 const tierTxt = t => { t=String(t||'').trim(); return t ? t.charAt(0).toUpperCase()+t.slice(1).toLowerCase() : ''; };
 // «Atualizar PN» a partir da Validação: escolhe que campos passam a ter o valor que a Vodafone considerou
 function atualizarPNdoRUN(o, depois){
@@ -3726,7 +3735,7 @@ function atualizarPNdoRUN(o, depois){
     <p class="muted" style="margin-top:0;font-size:13px">Linha do PN: ${esc(o.ln.ref||'')} ${esc(o.ln.designacao||'')} · MSISDN ${esc(o.ln.msisdn||'—')} · ${esc(o.ln.contratoVDF||'')}<br>RUN de ${mesTxt(CMS_MES)}: ${esc(descVDF(l))}</p>
     <table><thead><tr><th></th><th>Campo</th><th>No PN</th><th>Vodafone</th></tr></thead>
     <tbody>${campos.map(([k,t,a,b,f])=>`<tr><td><input type="checkbox" data-c="${k}" ${o.dif.includes(k==='rlmc'?'RLMC':k)?'checked':''}></td><td>${t}</td><td>${a==null||a===''?'—':f(a)}</td><td><b>${f(b)}</b></td></tr>`).join('')||'<tr><td colspan="4" class="muted">Nada a atualizar.</td></tr>'}</tbody></table>
-    <p class="muted" style="font-size:12px">Marque só o que quer mudar (ex.: a natureza sem mexer na RLMC). Fica no histórico do PN. «Eventos» fixa na linha os eventos da Vodafone em vez de os calcular pela RLMC. Depois a Validação e o cálculo do RUN são refeitos.</p>
+    <p class="muted" style="font-size:12px">Marque só o que quer mudar (ex.: a natureza sem mexer na RLMC). Fica no histórico do PN. «Eventos» fixa na linha os eventos da Vodafone em vez de os calcular pela RLMC. Depois a Validação e o cálculo do RUN são refeitos.${o.dif.includes('comissão')||(o.tol||[]).includes('comissão')?`<br>Comissão: esperada ${o.pl?.val!=null?eur(o.pl.val)+' €':'—'}, paga ${eur(o.vdf.val)} €. Se o PN está certo, a diferença é da Vodafone → pedido de esclarecimento.`:''}</p>
     <div class="row"><span class="sp"></span><button class="btn" id="up-c">Cancelar</button><button class="btn pri" id="up-ok">Atualizar PN</button></div>`, (m, close) => {
     m.querySelector('#up-c').onclick = close;
     m.querySelector('#up-ok').onclick = async () => {
@@ -3755,8 +3764,8 @@ function natVDF(l){ const nova = !/REFIDELIZ/i.test(l[RL.neg]||''), c=String(l[R
 function cmsValid(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
-    const topo = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<div><label>Mostrar</label><select id="vl-d">${[['dif','Divergências em PN'],['sem','Linhas sem PN'],['todas','Todas']].map(([k,t])=>`<option value="${k}" ${VAL_FILTRO===k?'selected':''}>${t}</option>`).join('')}</select></div><div><label>Tolerância RLMC / eventos (%)</label><input type="number" id="vl-tol" value="${VAL_TOL}" min="0" max="100" step="1" style="width:90px"></div></div>
-      <p class="muted" style="font-size:12px;margin-bottom:0">Antes de pagar comissões: compara cada linha de upfront do RUN com a linha do PN (pelo POS ou MSISDN). Natureza (Nova/Refidelização, Móvel/Fixo/SS), RLMC, prazo, tier e eventos (RLMC ajustada da Vodafone ÷ 22,50). Corrija o PN quando o erro é nosso; reclame à Vodafone quando o erro é deles.</p></div>`;
+    const topo = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<div><label>Mostrar</label><select id="vl-d">${[['dif','Divergências em PN'],['sem','Linhas sem PN'],['todas','Todas']].map(([k,t])=>`<option value="${k}" ${VAL_FILTRO===k?'selected':''}>${t}</option>`).join('')}</select></div><div><label>Tolerância RLMC / eventos / comissão (%)</label><input type="number" id="vl-tol" value="${VAL_TOL}" min="0" max="100" step="0.5" style="width:90px"></div></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Antes de pagar comissões: compara cada linha de upfront do RUN com a linha do PN (pelo POS ou MSISDN). Natureza (Nova/Refidelização, Móvel/Fixo/SS), RLMC, prazo, tier, eventos (RLMC ajustada da Vodafone ÷ 22,50) e comissão (esperada pelo PN × paga pela Vodafone; diferenças até 0,05 € são arredondamentos). Corrija o PN quando o erro é nosso; reclame à Vodafone quando o erro é deles.</p></div>`;
     if (!R.existe) { box.innerHTML = topo+`<div class="card muted">Sem RUN importado para ${mesTxt(CMS_MES)}.</div>`; ligaMes(()=>cmsValid(box)); return; }
     if (R.origem==='PHC') { box.innerHTML = topo+`<div class="card muted">Este RUN veio do histórico PHC, que não traz prazo, tier nem RLMC ajustada. A validação funciona com os RUN importados do ficheiro da Vodafone (xlsx).</div>`; ligaMes(()=>cmsValid(box)); return; }
     let casa;
@@ -3764,6 +3773,16 @@ function cmsValid(box){
     else if (VAL_CONC===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; }
     else { box.innerHTML = topo+`<div class="card"><p class="muted" style="margin-top:0">Para obter as divergências, carregue em «Validar» (lê os PN da plataforma).</p><button class="btn pri" id="vl-go">Validar RUN de ${mesTxt(CMS_MES)}</button></div>`;
       $('#vl-go').onclick = () => { VAL_CONC = CMS_MES; cmsValid(box); }; ligaMes(()=>cmsValid(box)); return; }
+    // comissão esperada: calibrada no próprio RUN (nada de multiplicadores Vodafone no código) — fator RLMC ajustada ÷ RLMC
+    // por tier × prazo × incentivada × tipo de cliente, e nº de mensalidades por Nova/Refid (medianas das linhas do mês)
+    const med = a => { if (!a.length) return null; const b=[...a].sort((x,y)=>x-y), h=b.length>>1; return b.length%2 ? b[h] : (b[h-1]+b[h])/2; };
+    const FAT = {}, MENS = {nova:[], ref:[]}, kx = (l,k) => String(l[RLX[k]]??'').trim().toUpperCase();
+    casa.filter(x=>x.f==='up').forEach(x=>{ const l=x.l, r=+l[RL.rlmc], a=+l[RL.rlmcA], t=String(l[RL.tier]||'').toUpperCase(), d=+l[RL.dur]||0;
+      if (r>0 && a>0) for (const k of [`${t}|${d}|${kx(l,'incent')}|${kx(l,'tcli')}`, `${t}|${d}`, t]) (FAT[k]=FAT[k]||[]).push(a/r);
+      if (+l[RL.mens]>0) MENS[/^Ref/.test(natVDF(l))?'ref':'nova'].push(+l[RL.mens]); });
+    Object.keys(FAT).forEach(k=>{ FAT[k] = FAT[k].length>=3 || !k.includes('|') ? med(FAT[k]) : null; }); MENS.nova=med(MENS.nova); MENS.ref=med(MENS.ref);
+    const esperadoVDF = (ln, l) => { const t=String(ln.tier||'').toUpperCase(), d=+ln.prazo||0, f = FAT[`${t}|${d}|${kx(l,'incent')}|${kx(l,'tcli')}`] ?? FAT[`${t}|${d}`] ?? null,
+      m = /^Ref/.test(natNorm(ln.natureza)) ? MENS.ref : MENS.nova; return f!=null && m && +ln.rlmc>0 ? Math.round((+ln.rlmc)*f*m*100)/100 : null; };
     const rows = casa.filter(x=>x.f==='up').map(x=>{
       const pos=x.l[RL.pos], ms=normMsisdn(x.l[RL.msisdn]||'');
       // bundles: várias linhas do PN com o mesmo POS → a da mesma natureza e, entre essas, a de RLMC mais próxima
@@ -3773,11 +3792,11 @@ function cmsValid(box){
       const ln = pool.sort((a,b)=>Math.abs((+a.rlmc||0)-x.l[RL.rlmc])-Math.abs((+b.rlmc||0)-x.l[RL.rlmc]))[0] || null;
       const o = {x, ln, pn:x.r, dif:[]};
       const vN=vN0, vR=x.l[RL.rlmc], vP=x.l[RL.dur], vT=String(x.l[RL.tier]||'').toUpperCase(), vE=x.l[RL.rlmcA]?x.l[RL.rlmcA]/SCORE_BASE:null;
-      o.vdf = {nat:vN, rlmc:vR, prazo:vP, tier:vT, ev:vE};
+      o.vdf = {nat:vN, rlmc:vR, prazo:vP, tier:vT, ev:vE, val:+x.l[RL.val]||0};
       if (!x.r) { o.dif.push('sem PN'); return o; }
       if (!ln) { o.dif.push('linha não encontrada no PN'); return o; }
       const pN=natNorm(ln.natureza), pR=+ln.rlmc||0, pP=+ln.prazo||0, pT=String(ln.tier||'').toUpperCase(), pE=scoreLinha(ln, x.r);
-      o.pl = {nat:pN, rlmc:pR, prazo:pP, tier:pT, ev:pE};
+      o.pl = {nat:pN, rlmc:pR, prazo:pP, tier:pT, ev:pE, val:esperadoVDF(ln, x.l)};
       o.idx = lsP.indexOf(ln);
       // RLMC e eventos: tolerância de VAL_TOL % (diferenças pequenas não contam como divergência; aparecem a amarelo)
       const fora = (a,b) => Math.abs(a-b) > Math.max(0.01, Math.abs(b)*VAL_TOL/100), perto = (a,b) => Math.abs(a-b) > 0.01 && !fora(a,b);
@@ -3785,6 +3804,7 @@ function cmsValid(box){
       if (vP && pP!==vP) o.dif.push('prazo');
       if (vT && pT && pT!==vT) o.dif.push('tier');
       if (vE!=null) { if (fora(pE,vE)) o.dif.push('eventos'); else if (perto(pE,vE)) o.tol=(o.tol||[]).concat('eventos'); }
+      if (o.pl.val!=null) { if (Math.abs(o.vdf.val-o.pl.val)>0.05 && fora(o.vdf.val,o.pl.val)) o.dif.push('comissão'); else if (Math.abs(o.vdf.val-o.pl.val)>0.05 && perto(o.vdf.val,o.pl.val)) o.tol=(o.tol||[]).concat('comissão'); }
       return o; });
     const comPN = rows.filter(o=>o.pn), sem = rows.filter(o=>!o.pn), nDif = comPN.filter(o=>o.dif.length).length;
     const L = VAL_FILTRO==='dif' ? comPN.filter(o=>o.dif.length) : VAL_FILTRO==='sem' ? sem : [...comPN.filter(o=>o.dif.length), ...comPN.filter(o=>!o.dif.length), ...sem];
@@ -3796,17 +3816,20 @@ function cmsValid(box){
         <div><b style="font-size:22px;color:${nDif?'var(--red-d)':'var(--ok)'}">${nDif}</b><div class="muted" style="font-size:12px">com divergências</div></div>
         <div><b style="font-size:22px;color:${sem.length?'var(--warn)':'var(--ok)'}">${sem.length}</b><div class="muted" style="font-size:12px">sem PN na plataforma</div></div>
         <div><b style="font-size:22px">${n3(evTot(o=>o.pl?.ev))}</b><div class="muted" style="font-size:12px">eventos nos PN (linhas ligadas)</div></div>
-        <div><b style="font-size:22px">${n3(evTot(o=>o.vdf.ev))}</b><div class="muted" style="font-size:12px">eventos considerados pela Vodafone (mesmas linhas)</div></div></div></div>
-      <div class="card scroll"><table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th>Divergência</th></tr></thead>
+        <div><b style="font-size:22px">${n3(evTot(o=>o.vdf.ev))}</b><div class="muted" style="font-size:12px">eventos considerados pela Vodafone (mesmas linhas)</div></div>
+        <div><b style="font-size:22px">${eur(evTot(o=>o.pl?.val))} €</b><div class="muted" style="font-size:12px">comissão esperada pelos PN</div></div>
+        <div><b style="font-size:22px">${eur(evTot(o=>o.pl?o.vdf.val:0))} €</b><div class="muted" style="font-size:12px">paga pela Vodafone (mesmas linhas)</div></div></div>
+        <p class="muted" style="font-size:12px;margin-bottom:0">Comissão esperada = RLMC do PN × fator de ajuste (tier, prazo, incentivada, tipo de cliente) × nº de mensalidades (Nova/Refidelização), com os fatores que a Vodafone aplicou nas linhas deste RUN. Se a Vodafone pagar fora da tolerância, a linha aparece com «comissão».</p></div>
+      <div class="card scroll"><table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th class="num" title="Esperada: RLMC e tier/prazo do PN × fatores e mensalidades que a Vodafone aplicou neste RUN. Em baixo: o que a Vodafone pagou.">Comissão VDF</th><th>Divergência</th></tr></thead>
       <tbody>${L.slice(0,800).map((o,ix)=>{ const d=k=>o.dif.includes(k), p=o.pl||{};
         return `<tr><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
-        ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier)}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v))}
+        ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier)}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v))}<td class="num" style="${d('comissão')?'background:#fde8e8;font-weight:600':''}">${p.val!=null?eur(p.val):'—'}<div class="muted" style="font-size:11px;font-weight:400">VDF: ${eur(o.vdf.val)}</div></td>
         <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}${(o.tol||[]).map(t=>` <span class="badge" style="background:#fff4d6;color:#8a5a00" title="Diferença dentro da tolerância">${esc(t)} ≈</span>`).join('')}
-          ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}</td></tr>`; }).join('')||'<tr><td colspan="10" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
+          ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}</td></tr>`; }).join('')||'<tr><td colspan="11" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
       ${L.length>800?`<p class="muted">Mostradas 800 de ${L.length} linhas.</p>`:''}</div>`;
     ligaMes(()=>cmsValid(box));
     $('#vl-d').onchange = e => { VAL_FILTRO = e.target.value; cmsValid(box); };
-    $('#vl-tol').onchange = e => { VAL_TOL = Math.max(0, +e.target.value||0); try { localStorage.setItem('cms-val-tol', String(VAL_TOL)); } catch(_){} cmsValid(box); };
+    $('#vl-tol').onchange = e => { VAL_TOL = Math.max(0, +e.target.value||0); try { localStorage.setItem('cms-val-tol2', String(VAL_TOL)); } catch(_){} cmsValid(box); };
     box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ()=>{ CMS_CASA=null; cmsValid(box); }));
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
