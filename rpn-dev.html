@@ -3780,12 +3780,16 @@ function cmsValid(box){
     // comissão esperada: calibrada no próprio RUN (nada de multiplicadores Vodafone no código) — fator RLMC ajustada ÷ RLMC
     // por tier × prazo × incentivada × tipo de cliente, e nº de mensalidades por Nova/Refid (medianas das linhas do mês)
     const med = a => { if (!a.length) return null; const b=[...a].sort((x,y)=>x-y), h=b.length>>1; return b.length%2 ? b[h] : (b[h-1]+b[h])/2; };
-    const FAT = {}, MENS = {nova:[], ref:[]}, kx = (l,k) => String(l[RLX[k]]??'').trim().toUpperCase();
+    // prazo por escalão de ajuste (12–17, 18–23, 24–29, 30–35, 36+…): um prazo de 43 meses usa o fator dos 36+
+    const FAT = {}, MENS = {nova:[], ref:[]}, kx = (l,k) => String(l[RLX[k]]??'').trim().toUpperCase(), fx = d => fatorPrazo(+d||0);
     casa.filter(x=>x.f==='up').forEach(x=>{ const l=x.l, r=+l[RL.rlmc], a=+l[RL.rlmcA], t=String(l[RL.tier]||'').toUpperCase(), d=+l[RL.dur]||0;
-      if (r>0 && a>0) for (const k of [`${t}|${d}|${kx(l,'incent')}|${kx(l,'tcli')}`, `${t}|${d}`, t]) (FAT[k]=FAT[k]||[]).push(a/r);
+      if (r>0 && a>0) for (const k of [`${t}|${fx(d)}|${kx(l,'incent')}|${kx(l,'tcli')}`, `${t}|${fx(d)}`, t]) (FAT[k]=FAT[k]||[]).push(a/r);
       if (+l[RL.mens]>0) MENS[/^Ref/.test(natVDF(l))?'ref':'nova'].push(+l[RL.mens]); });
-    Object.keys(FAT).forEach(k=>{ FAT[k] = FAT[k].length>=3 || !k.includes('|') ? med(FAT[k]) : null; }); MENS.nova=med(MENS.nova); MENS.ref=med(MENS.ref);
-    const esperadoVDF = (ln, l) => { const t=String(ln.tier||'').toUpperCase(), d=+ln.prazo||0, f = FAT[`${t}|${d}|${kx(l,'incent')}|${kx(l,'tcli')}`] ?? FAT[`${t}|${d}`] ?? null,
+    Object.keys(FAT).forEach(k=>{ FAT[k] = FAT[k].length>=3 || k.split('|').length<=2 ? med(FAT[k]) : null; });
+    // fator para um tier/prazo do PN; sem tier no PN usa o da Vodafone (a divergência «tier» já fica assinalada)
+    const fatPN = (tier, prazo, l) => { const t = String(tier||l[RL.tier]||'').toUpperCase(), d = fx(prazo);
+      return FAT[`${t}|${d}|${kx(l,'incent')}|${kx(l,'tcli')}`] ?? FAT[`${t}|${d}`] ?? (FAT[t]!=null && FAT[`GOLD|1`] ? FAT[t]/FAT['GOLD|1']*d : null); }; MENS.nova=med(MENS.nova); MENS.ref=med(MENS.ref);
+    const esperadoVDF = (ln, l) => { const f = fatPN(ln.tier, ln.prazo, l),
       m = /^Ref/.test(natNorm(ln.natureza)) ? MENS.ref : MENS.nova; return f!=null && m && +ln.rlmc>0 ? Math.round((+ln.rlmc)*f*m*100)/100 : null; };
     const rows = casa.filter(x=>x.f==='up').map(x=>{
       const pos=x.l[RL.pos], ms=normMsisdn(x.l[RL.msisdn]||'');
@@ -3802,7 +3806,7 @@ function cmsValid(box){
       const pN=natNorm(ln.natureza), pR=+ln.rlmc||0, pP=+ln.prazo||0, pT=String(ln.tier||'').toUpperCase(), pE=scoreLinha(ln, x.r);
       // eventos: compara com os que a Vodafone devia considerar pelo PN (fatores do RUN), não com o Score do vendedor —
       // (até set/2026 o Score penalizava o Bronze em 40 % e a Vodafone em 30 %; desde out/2026 ambos 30 %)
-      const fV = FAT[`${pT}|${pP}|${kx(x.l,'incent')}|${kx(x.l,'tcli')}`] ?? FAT[`${pT}|${pP}`] ?? null, evV = fV!=null && pR>0 ? pR*fV/SCORE_BASE : null;
+      const fV = fatPN(pT, pP, x.l), evV = fV!=null && pR>0 ? pR*fV/SCORE_BASE : null;
       o.pl = {nat:pN, rlmc:pR, prazo:pP, tier:pT, ev:pE, evV, val:esperadoVDF(ln, x.l)};
       o.idx = lsP.indexOf(ln);
       // RLMC e eventos: tolerância de VAL_TOL % (diferenças pequenas não contam como divergência; aparecem a amarelo)
