@@ -564,7 +564,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <p>Todos os RPN são conferidos por <b>uma segunda BackOffice</b>. Quem implementou nunca confere o seu próprio processo.</p>
   <h3>Quem implementou</h3>
   <ol>
-    <li>Carregue em <span class="bt r">Implementação terminada · enviar para conferência</span>.</li>
+    <li>Carregue em <span class="bt r">Implementação terminada · enviar para conferência</span> e confirme a <b>data do negócio</b>: a data em que a Vodafone efetivou as fidelizações. Começa com a data do RPN; acerte-a se a Vodafone efetivou noutra data. É esta data que define o mês da produção do vendedor.</li>
     <li>Se houver linhas sem contrato VDF, a plataforma avisa e pergunta se quer enviar na mesma.</li>
     <li>O RPN passa a <i>Concluído</i> e é atribuído automaticamente a outra BackOffice para conferir. Se não houver ninguém disponível, fica em fila. O vendedor recebe aqui o último aviso automático; a devolução pela conferência e a passagem a PN já não o avisam.</li>
   </ol>
@@ -572,7 +572,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <ol>
     <li>Abra o RPN em conferência que lhe está atribuído.</li>
     <li>Confirme na Vodafone que a implementação corresponde ao processo.</li>
-    <li>Se está certo, carregue em <span class="bt r">Conferido · fechar como PN</span> e escolha a <b>Data do PN</b> (mês de produção: conta para o escalão e as comissões do vendedor). Um negócio do mês anterior conferido nos primeiros dias do mês pode ficar com a data do mês anterior, enquanto o RUN desse mês não for finalizado. O RPN passa a <b>PN</b> e fica fechado. Enganou-se na data? Botão <span class="bt">Data do PN</span> no PN (só em meses ainda abertos).</li>
+    <li>Se está certo, carregue em <span class="bt r">Conferido · fechar como PN</span> e confira a <b>data do negócio</b> indicada pela BO da implementação (pode corrigi-la se não bater certo com a Vodafone). O RPN passa a <b>PN</b> e fica fechado. Não é possível usar datas de meses cujo RUN já foi finalizado. Mudar a data depois de PN é uma exceção rara, só do Master, com motivo registado.</li>
     <li>Se está errado, carregue em <span class="bt">Devolver à implementação</span> e escreva a razão. O processo volta a quem o implementou.</li>
   </ol>
   <div class="aviso">Uma devolução penaliza a produção de quem implementou (ver secção 3.9). Escreva sempre uma razão clara, para o erro poder ser corrigido à primeira.</div>

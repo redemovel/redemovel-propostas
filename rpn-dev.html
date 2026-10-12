@@ -462,7 +462,7 @@ function drawFicha(){
   if (isBO() && r.estado==='Em Conferência') acts.push(`<button class="btn" id="a-realc">Realocar conferência</button>`);
   if (isBO() && r.estado==='PN') acts.push(`<button class="btn ${r.pnEmail||r.origem==='PHC'?'':'pri'}" id="a-pnm" title="Envia ao cliente o PDF do Processo de Negócio">${r.pnEmail?'Reenviar PN ao cliente':'Enviar PN ao cliente'}</button>`);
   if (isMaster() && ['PN','Concluído'].includes(r.estado) && r.origem!=='PHC') acts.push(`<button class="btn" id="a-reab">Reabrir</button>`);
-  if (isBO() && r.estado==='PN' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-dpn" title="Mês de produção do PN (escalão, objetivos, comissões). Só dentro de meses ainda não fechados.">Data do PN</button>`);
+  if (isMaster() && r.estado==='PN' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-dpn" title="Exceção: mudar a data do negócio depois de conferido (fica registado com o motivo)">Data do PN</button>`);
 
   $('#main').innerHTML = `
     <div class="row" style="margin-bottom:12px">
@@ -492,12 +492,15 @@ function drawFicha(){
   $('#a-resp')?.addEventListener('click',()=>guardar({devolver:true}));
   $('#a-del')?.addEventListener('click',eliminar);
   $('#a-conf')?.addEventListener('click',()=>{ const sem=(S.cur.linhas||[]).filter(l=>!String(l.contratoVDF||'').trim()).length;
-    if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return; acaoGrupo('conferencia',{conferencia:true}); });
-  $('#a-ok')?.addEventListener('click', async ()=>{ const d = await escolherDataPN(S.cur, false); if (!d) return; S.dataPNEsc = d;
+    if (sem && !confirm(`Há ${sem} linha(s) sem nº de contrato VDF.\n\nEnviar para conferência na mesma?`)) return;
+    escolherDataPN(S.cur, 'impl').then(d=>{ if (!d) return; S.dataPNEsc = d; acaoGrupo('conferencia',{conferencia:true}).finally(()=>{ S.dataPNEsc = null; }); }); });
+  $('#a-ok')?.addEventListener('click', async ()=>{ const d = await escolherDataPN(S.cur, 'conf'); if (!d) return; S.dataPNEsc = d;
     acaoGrupo('conferido',{conferido:true}).then(()=>{ S.dataPNEsc = null; if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
-  $('#a-dpn')?.addEventListener('click', async ()=>{ const r=S.cur, d = await escolherDataPN(r, true); if (!d || d===dataPN(r)) return;
+  $('#a-dpn')?.addEventListener('click', async ()=>{ const r=S.cur, d = await escolherDataPN(r, 'excecao'); if (!d || d===dataPN(r)) return;
     try { const u = {dataPN:d, fechadoEm: d+'T12:00:00.000Z', fechadoMes:d.slice(0,7), mesRef:d.slice(0,7), atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
-      await updateDoc(doc(db,'rpn',r.id), u); await hist('Data do PN alterada', `${fmtD(dataPN(r))} → ${fmtD(d)}`, r.id); Object.assign(r, u); toast('Data do PN alterada.'); render(); } catch(e){ toast(errTxt(e), true); } });
+      await updateDoc(doc(db,'rpn',r.id), u); await hist('Data do PN alterada (exceção)', `${fmtD(dataPN(r))} → ${fmtD(d)}. Motivo: ${S.dataPNMotivo||''}`, r.id);
+      try { await logAlt({tipo:'Data do PN (exceção)', desde:d.slice(0,7), resumo:`PN ${r.numero} (${r.vendedorNome||''}): ${fmtD(dataPN(r))} → ${fmtD(d)} · ${S.dataPNMotivo||''}`}); } catch(_){}
+      Object.assign(r, u); S.dataPNMotivo=null; toast('Data do PN alterada.'); render(); } catch(e){ toast(errTxt(e), true); } });
   $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>acaoGrupo('devolverImpl',{devolverImpl:rz})));
   $('#a-real')?.addEventListener('click',()=>realocar('bo'));
   $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
@@ -930,7 +933,7 @@ async function guardar(opts={}){
     const data = JSON.parse(JSON.stringify({...r})); ['id','criadoEm','atualizadoEm','msgUlt','msgLido','_msgVistas','pnEmail'].forEach(k=>delete data[k]);
     if (opts.submeter) { data.estado='Submetido'; data.submetidoEm=new Date().toISOString(); }
     if (opts.devolver) { data.estado='Em Implementação'; data.motivos=[]; }
-    if (opts.conferencia) { data.estado='Em Conferência'; data.motivos=[]; data.confNota=''; data.implementadoEm=new Date().toISOString(); }
+    if (opts.conferencia) { data.estado='Em Conferência'; data.motivos=[]; data.confNota=''; data.implementadoEm=new Date().toISOString(); if (S.dataPNEsc) data.dataPN=S.dataPNEsc; }
     if (opts.conferido) { data.estado='PN'; data.conferidoEm=new Date().toISOString(); data.conferidoPorUid=S.me.uid; data.conferidoPorNome=S.me.nome;
       const dp=S.dataPNEsc||hojeLocal(); data.dataPN=dp; data.fechadoEm = dp===hojeLocal() ? new Date().toISOString() : dp+'T12:00:00.000Z'; data.fechadoMes=dp.slice(0,7); }
     if (opts.devolverImpl) { data.estado='Em Implementação'; data.confNota=opts.devolverImpl; }
@@ -991,7 +994,7 @@ async function guardar(opts={}){
       data.atualizadoEm = serverTimestamp(); data.atualizadoPor = S.me.uid;
       if (isNew) tx.set(rpnRef, data); else tx.set(rpnRef, data, {merge:true});
     });
-    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.esperaMotivo=data.esperaMotivo; S.cur.esperaData=data.esperaData; S.cur.esperaDesde=data.esperaDesde; S.cur.mesRef=data.mesRef; S.cur.contratos=data.contratos; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
+    S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.dataPN=data.dataPN||S.cur.dataPN||''; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.esperaMotivo=data.esperaMotivo; S.cur.esperaData=data.esperaData; S.cur.esperaDesde=data.esperaDesde; S.cur.mesRef=data.mesRef; S.cur.contratos=data.contratos; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
     S.dirty = false;
     if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
     // marca a proposta de origem (app Propostas, coleção 'propostas') com o nº do RPN
@@ -1040,7 +1043,7 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     const u={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}; let estado=o.estado, bo=o.boUid||null, cf=o.confUid||null;
     if (tipo==='submeter') { if(o.estado!=='Em Elaboração') return; estado='Submetido'; bo=L.boUid; Object.assign(u,{submetidoEm:agora, boUid:L.boUid, boNome:L.boNome||''}); }
     else if (tipo==='conferencia') { if(!IMPL.includes(o.estado)) return; estado='Em Conferência'; cf=L.confUid||null;
-      Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); }
+      Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); if (S.dataPNEsc) u.dataPN=S.dataPNEsc; }
     else if (tipo==='conferido') { if(o.estado!=='Em Conferência' || o.boUid===S.me.uid) return; estado='PN';
       const dp=S.dataPNEsc||hojeLocal();
       Object.assign(u,{conferidoEm:agora, conferidoPorUid:S.me.uid, conferidoPorNome:S.me.nome, dataPN:dp, fechadoEm: dp===hojeLocal()?agora:dp+'T12:00:00.000Z', fechadoMes:dp.slice(0,7), mesRef:dp.slice(0,7)}); }
@@ -1080,20 +1083,27 @@ function escolherParcial(r, abertos){
       const obs=new MutationObserver(()=>{ if(!document.body.contains(m) && !feito){ feito=true; res(null); } }); obs.observe(document.body,{childList:true}); });
   });
 }
-// data do PN (= mês de produção): a BO escolhe na conferência; não pode cair num mês já fechado (RUN finalizado)
-async function escolherDataPN(r, editar){
+// data do PN (= data do negócio = mês de produção): começa na data do RPN; a BO da implementação acerta-a para a data em que a Vodafone
+// efetivou as fidelizações; a BO da conferência confirma; depois de PN só o Master a muda (exceção, com motivo). Nunca num mês já fechado.
+async function escolherDataPN(r, modo){
   let ate=''; try { const s=await getDoc(doc(db,'config','producao')); ate = s.exists() ? (s.data().fechadoAte||'') : ''; } catch(_){}
-  const hj=hojeLocal(), min = ate ? somaMeses(ate,1)+'-01' : '', def0 = editar ? (dataPN(r)||hj) : hj, def = min && def0<min ? min : def0;
-  const grupo = !editar && S.grupo?.lista?.length ? S.grupo.lista.filter(x=>x.estado==='Em Conferência').map(x=>x.numero) : [];
-  return new Promise(res=>{ modal(`<h2 style="margin-top:0">${editar?'Data do PN '+esc(r.numero||''):'Conferido · fechar como PN '+esc(r.numero||'')}</h2>
-      ${editar?'':`<p>Confirma que conferiu a implementação na Vodafone? O RPN fica fechado como PN.${grupo.length?` Os outros RPN do grupo em conferência (${grupo.join(', ')}) fecham também, com a mesma data.`:''}</p>`}
-      <label>Data do PN (mês de produção)</label><input type="date" id="dp-d" value="${def}" ${min?`min="${min}"`:''} max="${hj}" style="width:200px">
-      <p class="muted" style="font-size:12px">É esta data que conta para o escalão, os objetivos e as comissões do vendedor. Negócio do mês anterior convertido nos primeiros dias do mês? Escolha a data do mês anterior.${ate?` A produção até ${mesTxt(ate)} já está fechada (RUN finalizado): a data mínima é ${fmtD(min)}.`:''}</p>
-      <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="dp-c">Cancelar</button><button class="btn pri" id="dp-ok">${editar?'Guardar data':'Conferido · fechar como PN'}</button></div>`, (m,close)=>{
+  const hj=hojeLocal(), min = ate ? somaMeses(ate,1)+'-01' : '', def0 = String(r.dataPN||r.data||hj).slice(0,10), def = min && def0<min && modo!=='excecao' ? min : def0;
+  const grupo = modo!=='excecao' && S.grupo?.lista?.length ? S.grupo.lista.filter(x=>modo==='conf'?x.estado==='Em Conferência':!['PN','Concluído','Cancelado','Reprovado','Em Conferência'].includes(x.estado)).map(x=>x.numero) : [];
+  const tit = {impl:'Implementação terminada · data do negócio', conf:'Conferido · fechar como PN '+esc(r.numero||''), excecao:'Data do PN '+esc(r.numero||'')+' (exceção)'}[modo];
+  const txt = {impl:`Confirme a <b>data do negócio</b>: a data em que a Vodafone efetivou as fidelizações. Começa com a data do RPN (${fmtD(String(r.data||'').slice(0,10))}).`,
+    conf:`Confirma que conferiu a implementação na Vodafone? O RPN fica fechado como PN.${grupo.length?` Os outros RPN do grupo em conferência (${grupo.join(', ')}) fecham também, com a mesma data.`:''}<br>Confira também a <b>data do negócio</b> indicada pela BO da implementação${r.dataPN?'':' (ainda não indicada: está a data do RPN)'}.`,
+    excecao:`<b>Exceção.</b> A data do negócio foi definida na implementação e confirmada na conferência. Mudar agora (por exemplo, a pedido do vendedor) fica registado com o motivo.`}[modo];
+  return new Promise(res=>{ modal(`<h2 style="margin-top:0">${tit}</h2><p>${txt}</p>
+      <label>Data do negócio (data do PN)</label><input type="date" id="dp-d" value="${def}" ${min&&modo!=='excecao'?`min="${min}"`:''} max="${hj}" style="width:200px">
+      ${modo==='excecao'?`<div style="margin-top:8px"><label>Motivo</label><input id="dp-m" style="width:100%" placeholder="Ex.: pedido do vendedor para fechar no mês do negócio"></div>`:''}
+      <p class="muted" style="font-size:12px">É esta data que define o mês da produção do vendedor (escalão, objetivos, prémio e comissões).${ate?` A produção até ${mesTxt(ate)} está fechada (RUN finalizado)${modo==='excecao'?': só o Master pode lá pôr datas, e o que já foi pago desse mês não é recalculado':`: a data mais antiga possível é ${fmtD(min)}`}.`:''}</p>
+      <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="dp-c">Cancelar</button><button class="btn pri" id="dp-ok">${{impl:'Enviar para conferência', conf:'Conferido · fechar como PN', excecao:'Guardar data'}[modo]}</button></div>`, (m,close)=>{
       m.querySelector('#dp-c').onclick=()=>{ close(); res(null); };
-      m.querySelector('#dp-ok').onclick=()=>{ const v=m.querySelector('#dp-d').value; if (!v) return toast('Escolha a data do PN.', true);
-        if (min && v<min) return toast(`A produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
-        if (v>hj) return toast('A data do PN não pode ser futura.', true); close(); res(v); }; }); });
+      m.querySelector('#dp-ok').onclick=()=>{ const v=m.querySelector('#dp-d').value; if (!v) return toast('Escolha a data do negócio.', true);
+        if (min && v<min && !(modo==='excecao' && isMaster())) return toast(`A produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
+        if (v>hj) return toast('A data do negócio não pode ser futura.', true);
+        if (modo==='excecao') { const mo=(m.querySelector('#dp-m').value||'').trim(); if (mo.length<5) return toast('Escreva o motivo da exceção.', true); S.dataPNMotivo=mo; }
+        close(); res(v); }; }); });
 }
 async function acaoGrupo(tipo, opts){
   const r=S.cur; let irm=[];
@@ -2778,6 +2788,13 @@ const RUN_COLS = ['Run','Commission','Contract ID','Office Agg UNE','SFID','Posi
 // descrição do que a Vodafone liquidou numa linha do RUN (sem valores Vodafone): como o PHC põe na comissão paga
 const descVDF = l => [l[RL.neg], l[RL.cod], l[RL.grp], l[RL.pp], l[RL.ppn], l[RL.rlmc]?'RLMC '+String(l[RL.rlmc]).replace('.',','):'', l[RL.tier]?'LINHA '+l[RL.tier]:''].filter(Boolean).join(' ');
 const RL = {cod:0,pos:1,sfid:2,nif:3,msisdn:4,pp:5,ppn:6,neg:7,dur:8,grp:9,cri:10,des:11,rlmc:12,val:13,tier:14,rlmcA:15,mens:16};
+// colunas extra do ficheiro da Vodafone (guardadas a partir da posição 19; RUN importados antes de 12/10/2026 não as têm)
+const RUN_EXTRA = [['conta','Account','Conta'],['tcli','Client Type','Tipo de cliente'],['receita','Revenue Type','Tipo de receita'],['subgrp','Sub Group','Subgrupo'],['qnt','Qnt','Qtd.'],
+  ['bfixo','Bundle Fixo %','Bundle fixo %'],['bvoz','Bundle Voz %','Bundle voz %'],['bdados','Bundle Dados %','Bundle dados %'],['incent','IncentFlag','Incentivado'],['desc','Discontinued','Descontinuado'],
+  ['prod','ProductCode','Código produto'],['opor','OpportunityID','Oportunidade'],['sales','SalesCode','Sales code'],['cart','ClientPortfolio','Carteira'],['tprod','TipoProduto','Tipo produto'],
+  ['toferta','OfferType','Tipo de oferta'],['office','Office Agg UNE','Office'],['posicao','Position','Posição'],['cid','Contract ID','Contract ID']];
+const RLX = Object.fromEntries(RUN_EXTRA.map(([k],i)=>[k, 19+i]));
+const xFmt = (k,v) => { if (/^b(fixo|voz|dados)$/.test(k) && v!=='' && !isNaN(+v) && +v<=1) return Math.round(+v*100)+' %'; return v; };
 const FAMILIAS = [['up','Upfront'],['pr','Prémio trimestral'],['cb','Charge-back / correções'],['aj','Ajustes'],['ag','Agência (sem POS)'],['nc','Por classificar']];
 function familiaCod(cod, pos){ const c=String(cod||'').toUpperCase();
   if (['CTRA','CTRA_FIXO','CTRA_SS','CTRA_SS_FX'].includes(c)) return 'up';
@@ -2848,7 +2865,8 @@ async function importarRun(file, box){
     const g = (r,n) => { const i=ix(n); return i<0?null:r[i]; }, s = x => x==null?'':String(x).trim();
     const linhas = rows.slice(1).filter(r=>r && s(g(r,'Commission'))).map(r=>[ s(g(r,'Commission')), s(g(r,'Contract ID')).toUpperCase(), s(g(r,'SFID')), s(g(r,'NIF')), s(g(r,'MSISDN')).replace(/\.0+$/,''),
       s(g(r,'Price Plan')), s(g(r,'Price Plan Name')), s(g(r,'Business Type')), +numX(g(r,'Duration'))||0, s(g(r,'Group')), dIso(g(r,'Creation Date')), dIso(g(r,'Deactivation Date')),
-      Math.round(numX(g(r,'RLMC'))*100)/100, Math.round(numX(g(r,'Value'))*100)/100, s(g(r,'Offer Category')), Math.round(numX(g(r,'RLMCAjustada'))*100)/100, numX(g(r,'NumMensPlano')) ]);
+      Math.round(numX(g(r,'RLMC'))*100)/100, Math.round(numX(g(r,'Value'))*100)/100, s(g(r,'Offer Category')), Math.round(numX(g(r,'RLMCAjustada'))*100)/100, numX(g(r,'NumMensPlano')),
+      '', '', ...RUN_EXTRA.map(([,c])=>{ const v=g(r,c); return v instanceof Date ? dIso(v) : s(v).replace(/\.0+$/,''); }) ]);
     const tot = linhas.reduce((a,l)=>a+l[RL.val],0);
     const hS = await getDoc(doc(db,'runs',mes)), existe = hS.exists(), antigo = existe ? hS.data() : {};
     if (antigo.fechado) return toast(`O RUN de ${mesTxt(mes)} está fechado. Para o substituir, o Master tem de o reabrir em «Comissões por vendedor».`, true);
@@ -2975,9 +2993,15 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
         <p class="muted" style="font-size:12px;margin-top:0">O PN existe, mas o vendedor do PHC não tem utilizador na plataforma, por isso a comissão não tem a quem ser imputada. Crie o utilizador na Administração com o nº de vendedor PHC (se já saiu, crie-o <b>inativo</b>: não entra na app, mas fica dono dos seus PN, comissões e charge-backs) e repita Administração › Importar PN do PHC.</p>
         <table><thead><tr><th>Vendedor no PHC</th><th>Nº PHC</th><th class="num">Linhas</th><th>PN</th></tr></thead><tbody>${Object.values(g).sort((a,b)=>b.n-a.n).map(o=>`<tr><td><b>${esc(o.nome)}</b></td><td>${esc(o.phc)}</td><td class="num">${o.n}</td><td style="font-size:12px">${[...o.pns].slice(0,25).map(esc).join(', ')}${o.pns.size>25?' …':''}</td></tr>`).join('')}</tbody></table></div>`; })():''}
       <div class="card scroll"><h2>Linhas por imputar (${sem.length})</h2><p class="muted" style="font-size:12px;margin-top:0">POS que não existe em nenhum PN da plataforma. Use «Atribuir» para procurar o PN certo (por NIF, MSISDN, contrato VDF ou nº do PN) e atribuir a linha ou associar o POS ao PN.</p>
-      <input id="lpi-f" placeholder="Filtrar por código, POS, NIF, MSISDN, plano, SFID…" style="width:100%;max-width:420px;margin-bottom:8px">
-      <table><thead><tr><th>Código</th><th>POS</th><th>NIF</th><th>MSISDN</th><th>Plano</th><th>Ativação</th><th>SFID → vendedor</th><th class="num">Valor</th><th></th></tr></thead>
-      <tbody>${sem.sort((a,b)=>Math.abs(b.l[RL.val])-Math.abs(a.l[RL.val])).slice(0,1500).map(x=>`<tr><td>${esc(x.l[RL.cod])}</td><td>${esc(x.l[RL.pos])}</td><td>${esc(x.l[RL.nif])}</td><td>${esc(x.l[RL.msisdn])}</td><td>${esc(x.l[RL.ppn])}</td><td>${fmtD(x.l[RL.cri])}</td><td>${esc(x.l[RL.sfid])}${x.sfidUid?' → '+esc(userNome(x.sfidUid)):''}</td><td class="num">${eur(x.l[RL.val])}</td><td>${R.fechado?'':`<button class="btn sm" data-at="${x.i}">Atribuir</button>`}</td></tr>`).join('')||'<tr><td colspan="9" class="muted">Tudo imputado.</td></tr>'}</tbody></table></div>
+      <input id="lpi-f" placeholder="Filtrar por qualquer dado da linha: código, POS, NIF, conta, MSISDN, plano, oportunidade, SFID…" style="width:100%;max-width:520px;margin-bottom:8px">
+      ${R.linhas.some(l=>l.length>19)?'':'<p class="muted" style="font-size:12px;margin-top:0">Este RUN foi importado antes de 12/10/2026 e só tem os dados principais. Para ver também conta, oportunidade, tipo de cliente, produto e restantes colunas, importe de novo o ficheiro em «RUN Vodafone» (as atribuições manuais mantêm-se).</p>'}
+      <table><thead><tr><th>Código · negócio</th><th>POS · conta</th><th>NIF</th><th>MSISDN</th><th>Plano</th><th>Datas</th><th class="num">RLMC</th><th>SFID → vendedor</th><th class="num">Valor</th><th></th></tr></thead>
+      <tbody>${sem.sort((a,b)=>Math.abs(b.l[RL.val])-Math.abs(a.l[RL.val])).slice(0,1500).map(x=>{ const l=x.l, xv=k=>l[RLX[k]]||'', extra=RUN_EXTRA.filter(([k])=>xv(k) && !['conta','cid'].includes(k)).map(([k,,t])=>`${t}: ${esc(xFmt(k,xv(k)))}`).join(' · ');
+        return `<tr><td><b>${esc(l[RL.cod])}</b><br><span class="muted" style="font-size:11px">${esc(l[RL.neg]||'')}${l[RL.grp]?' · '+esc(l[RL.grp]):''}</span></td><td style="font-size:12px">${esc(l[RL.pos])}${xv('conta')?`<br>conta ${esc(xv('conta'))}`:''}</td><td>${esc(l[RL.nif])}</td><td>${esc(l[RL.msisdn])}</td>
+          <td style="font-size:12px">${esc(l[RL.ppn])}<br><span class="muted">${esc(l[RL.pp]||'')}${l[RL.dur]?' · '+esc(l[RL.dur])+' m':''}${l[RL.tier]?' · '+esc(tierTxt(l[RL.tier])):''}</span></td>
+          <td style="font-size:12px;white-space:nowrap">ativ. ${fmtD(l[RL.cri])}${l[RL.des]?`<br>desat. ${fmtD(l[RL.des])}`:''}</td><td class="num" style="font-size:12px">${l[RL.rlmc]?eur(l[RL.rlmc]):'—'}${l[RL.rlmcA]?`<br><span class="muted">aj. ${eur(l[RL.rlmcA])}</span>`:''}</td>
+          <td style="font-size:12px">${esc(l[RL.sfid])}${x.sfidUid?' → '+esc(userNome(x.sfidUid)):''}</td><td class="num"><b>${eur(l[RL.val])}</b></td><td>${R.fechado?'':`<button class="btn sm" data-at="${x.i}">Atribuir</button>`}</td></tr>
+          ${extra?`<tr class="lpi-x"><td></td><td colspan="9" class="muted" style="font-size:11px;padding-top:0">${extra}</td></tr>`:''}`; }).join('')||'<tr><td colspan="10" class="muted">Tudo imputado.</td></tr>'}</tbody></table></div>
       ${(()=>{ const man=R.manual||{}, ks=Object.keys(man); if (!ks.length) return ''; const ch=chavesLinhas(R.linhas);
         return `<div class="card scroll"><h2>Atribuições manuais deste RUN (${ks.length})</h2><table><thead><tr><th>Código</th><th>POS</th><th>MSISDN</th><th class="num">Valor</th><th>PN</th><th>Por</th><th></th></tr></thead><tbody>${ks.map(k=>{ const i=ch.indexOf(k), l=R.linhas[i]||[]; return `<tr><td>${esc(l[RL.cod]||k.split('|')[0])}</td><td>${esc(l[RL.pos]||'')}</td><td>${esc(l[RL.msisdn]||'')}</td><td class="num">${l.length?eur(l[RL.val]):'—'}</td><td><b>${esc(man[k].numero||'')}</b>${i<0?' <span class="muted">(linha já não existe no RUN)</span>':''}</td><td style="font-size:12px">${esc(man[k].por||'')} ${esc(String(man[k].em||'').slice(0,10).split('-').reverse().join('/'))}</td><td>${R.fechado?'':`<button class="btn sm" data-desf="${esc(k)}">Desfazer</button>`}</td></tr>`; }).join('')}</tbody></table></div>`; })()}
       <div id="cms-mapa"></div>`;
@@ -2987,7 +3011,8 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await finalizarRun(CMS_MES, casa, R)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     box.querySelectorAll('[data-dif]').forEach(a=>a.onclick=e=>{ e.preventDefault(); compararPHC(a.dataset.dif, casa, gravDe(a.dataset.dif), CMS_MES); });
     $('#cms-reab')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, false)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
-    $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'); tr.style.display = !t || tr.textContent.toLowerCase().includes(t) ? '' : 'none'; }); });
+    $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'), nx=tr.nextElementSibling?.classList.contains('lpi-x')?tr.nextElementSibling:null;
+      const ok = !t || (tr.textContent+' '+(nx?.textContent||'')).toLowerCase().includes(t); tr.style.display = ok ? '' : 'none'; if (nx) nx.style.display = ok ? '' : 'none'; }); });
     box.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>atribuirLinha(casa.find(x=>x.i===+b.dataset.at), R, ()=>cmsVend(box)));
     box.querySelectorAll('[data-desf]').forEach(b=>b.onclick=async()=>{ const man={...(R.manual||{})}; delete man[b.dataset.desf];
       try { await updateDoc(doc(db,'runs',CMS_MES), {manual:man}); await logAlt({tipo:'Atribuição manual desfeita', desde:CMS_MES, resumo:b.dataset.desf.split('#')[0]}); CMS_RUN=null; cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
@@ -3044,7 +3069,8 @@ async function procurarPN(tipo, v){
 function atribuirLinha(x, R, depois){
   const l = x.l, chave = chavesLinhas(R.linhas)[x.i], fechado = !!R.fechado;
   modal(`<h2>Atribuir linha do RUN de ${mesTxt(R.mes)}</h2>
-    <div class="card" style="background:#fafafa;font-size:13px"><b>${esc(l[RL.cod])}</b> · POS <b>${esc(l[RL.pos]||'—')}</b> · NIF <b>${esc(l[RL.nif])}</b> · MSISDN <b>${esc(l[RL.msisdn]||'—')}</b><br>${esc(descVDF(l))} · ativação ${fmtD(l[RL.cri])} · SFID ${esc(l[RL.sfid])}${x.sfidUid?' ('+esc(userNome(x.sfidUid))+')':''} · <b>${eur(l[RL.val])} €</b></div>
+    <div class="card" style="background:#fafafa;font-size:13px"><b>${esc(l[RL.cod])}</b> · POS <b>${esc(l[RL.pos]||'—')}</b> · NIF <b>${esc(l[RL.nif])}</b> · MSISDN <b>${esc(l[RL.msisdn]||'—')}</b>${l[RLX.conta]?` · conta <b>${esc(l[RLX.conta])}</b>`:''}<br>${esc(descVDF(l))} · ativação ${fmtD(l[RL.cri])}${l[RL.des]?' · desativação '+fmtD(l[RL.des]):''} · SFID ${esc(l[RL.sfid])}${x.sfidUid?' ('+esc(userNome(x.sfidUid))+')':''} · <b>${eur(l[RL.val])} €</b>
+      ${RUN_EXTRA.some(([k])=>l[RLX[k]])?`<div class="muted" style="font-size:12px;margin-top:4px">${RUN_EXTRA.filter(([k])=>l[RLX[k]] && k!=='conta').map(([k,,t])=>`${t}: ${esc(xFmt(k,l[RLX[k]]))}`).join(' · ')}</div>`:''}</div>
     <div class="row" style="gap:8px;align-items:flex-end;flex-wrap:wrap"><div><label>Procurar PN por</label><select id="ap-t"><option value="nif">NIF</option><option value="msisdn">MSISDN</option><option value="pos">Contrato VDF (POS)</option><option value="pn">Nº do PN</option></select></div>
       <div style="flex:1;min-width:200px"><label>&nbsp;</label><input id="ap-v" value="${esc(l[RL.nif])}" style="width:100%"></div><button class="btn" id="ap-go">Procurar</button></div>
     <div id="ap-r" class="scroll" style="max-height:48vh;margin-top:10px"></div>
@@ -3237,7 +3263,7 @@ function cmsManual(box){
   <p class="muted">Para o Master e a BO Financeiro. Passos de cada mês e de cada trimestre, do RUN da Vodafone até ao mapa para a contabilidade. ⚠ Zona confidencial: o que a Vodafone paga, a % de cada escalão e a margem não podem sair daqui.</p>
   <h3>Todos os meses</h3>
   <ol>
-    <li><b>Data do PN.</b> Na conferência, a BO escolhe a <i>Data do PN</i> (mês de produção). Negócios do mês anterior convertidos nos primeiros dias do mês seguinte ficam com a data do mês anterior — até o RUN desse mês ser finalizado. A data também pode ser corrigida no PN (botão <i>Data do PN</i>) enquanto o mês estiver aberto.</li>
+    <li><b>Data do PN (data do negócio).</b> Começa com a data do RPN. A BO que implementa, ao enviar para conferência, acerta-a para a data em que a Vodafone efetivou as fidelizações; a BO da conferência confirma se bate certo. É esta data que define o mês da produção do vendedor. Depois de finalizado o RUN de um mês, já não se usam datas desse mês. Mudar a data de um PN já conferido (por exemplo, a pedido do vendedor para chegar ao escalão seguinte) é uma exceção rara: só o Master, no PN › <i>Data do PN</i>, com motivo registado.</li>
     <li><b>Durante o mês — PN corretos.</b> Quando a Vodafone reabre um processo e dá um POS novo, ou muda o MSISDN, abra o PN › separador <i>Comissão</i> › <b>Corrigir contrato VDF / MSISDN</b>. O valor antigo fica guardado no PN e continua a ser reconhecido nos RUN (comissões e charge-backs que cheguem mais tarde).</li>
     <li><b>Trazer os PN novos do PHC</b> (enquanto os PN ainda forem feitos no PHC): Administração › <i>Importar PN do PHC</i>, com a consulta de sempre. Sem isto, as linhas do RUN de PN feitos no PHC depois da última importação ficam «por imputar». Não duplica nem apaga correções.</li>
     <li><b>Obter o RUN.</b> A Vodafone disponibiliza todos os meses o ficheiro <code>UNE_VI_Detalhe_AAAAMM_….xlsx</code> (ex.: o RUN de agosto chegou a 14/09). Descarregue-o como hoje e não o altere.</li>
@@ -3686,13 +3712,50 @@ function cmsHist(box){
   };
 }
 // ===== Validação: o que a Vodafone considerou no RUN vs. o que está no PN (natureza, RLMC, prazo, tier, eventos) =====
-let VAL_FILTRO = 'dif';
+let VAL_FILTRO = 'dif', VAL_TOL = (()=>{ try { const v=localStorage.getItem('cms-val-tol'); return v!=null ? +v : 21; } catch(_){ return 21; } })();
+const tierTxt = t => { t=String(t||'').trim(); return t ? t.charAt(0).toUpperCase()+t.slice(1).toLowerCase() : ''; };
+// «Atualizar PN» a partir da Validação: escolhe que campos passam a ter o valor que a Vodafone considerou
+function atualizarPNdoRUN(o, depois){
+  const p=o.pl||{}, v=o.vdf, l=o.x.l, campos=[
+    ['natureza','Natureza', p.nat, v.nat, x=>esc(x)],
+    ['rlmc','RLMC', p.rlmc, v.rlmc, x=>eur(x)+' €'],
+    ['prazo','Prazo (meses)', p.prazo, v.prazo, x=>esc(x)],
+    ['tier','Tier', p.tier, tierTxt(v.tier), x=>esc(tierTxt(x))],
+    ['eventos','Eventos (fixar os da Vodafone)', p.ev, v.ev, x=>x==null?'—':n3(x)]].filter(([k,,a,b])=>b!=null && b!=='' && String(a)!==String(b) && !(k==='tier' && String(a).toUpperCase()===String(b).toUpperCase()));
+  modal(`<h2>Atualizar PN ${esc(o.pn.numero||'')} com o que a Vodafone considerou</h2>
+    <p class="muted" style="margin-top:0;font-size:13px">Linha do PN: ${esc(o.ln.ref||'')} ${esc(o.ln.designacao||'')} · MSISDN ${esc(o.ln.msisdn||'—')} · ${esc(o.ln.contratoVDF||'')}<br>RUN de ${mesTxt(CMS_MES)}: ${esc(descVDF(l))}</p>
+    <table><thead><tr><th></th><th>Campo</th><th>No PN</th><th>Vodafone</th></tr></thead>
+    <tbody>${campos.map(([k,t,a,b,f])=>`<tr><td><input type="checkbox" data-c="${k}" ${o.dif.includes(k==='rlmc'?'RLMC':k)?'checked':''}></td><td>${t}</td><td>${a==null||a===''?'—':f(a)}</td><td><b>${f(b)}</b></td></tr>`).join('')||'<tr><td colspan="4" class="muted">Nada a atualizar.</td></tr>'}</tbody></table>
+    <p class="muted" style="font-size:12px">Marque só o que quer mudar (ex.: a natureza sem mexer na RLMC). Fica no histórico do PN. «Eventos» fixa na linha os eventos da Vodafone em vez de os calcular pela RLMC. Depois a Validação e o cálculo do RUN são refeitos.</p>
+    <div class="row"><span class="sp"></span><button class="btn" id="up-c">Cancelar</button><button class="btn pri" id="up-ok">Atualizar PN</button></div>`, (m, close) => {
+    m.querySelector('#up-c').onclick = close;
+    m.querySelector('#up-ok').onclick = async () => {
+      const ks = [...m.querySelectorAll('[data-c]:checked')].map(e=>e.dataset.c); if (!ks.length) return toast('Escolha pelo menos um campo.', true);
+      try { const sn = await getDoc(doc(db,'rpn',o.pn.id)), d = sn.data(), ls = JSON.parse(JSON.stringify(d.linhas||[]));
+        let i = o.idx; if (!(i>=0 && ls[i])) i = ls.findIndex(y=>String(y.contratoVDF||'').toUpperCase()===String(o.ln.contratoVDF||'').toUpperCase() && String(y.msisdn||'')===String(o.ln.msisdn||'') && natNorm(y.natureza)===natNorm(o.ln.natureza));
+        if (i<0) return toast('Não encontrei a linha no PN (foi alterado entretanto?). Volte a validar.', true);
+        const y = ls[i], txt = [];
+        if (ks.includes('natureza')) { txt.push(`natureza ${y.natureza||'—'} → ${v.nat}`); y.natureza = v.nat; }
+        if (ks.includes('rlmc')) { txt.push(`RLMC ${y.rlmc} → ${v.rlmc}`); y.rlmc = +v.rlmc; }
+        if (ks.includes('prazo')) { txt.push(`prazo ${y.prazo||'—'} → ${v.prazo}`); y.prazo = +v.prazo; }
+        if (ks.includes('tier')) { txt.push(`tier ${y.tier||'—'} → ${tierTxt(v.tier)}`); y.tier = tierTxt(v.tier); }
+        if (ks.includes('eventos')) { txt.push(`eventos ${n3(scoreLinha(y,d))} → ${n3(v.ev)} (da Vodafone)`); y.scorePHC = Math.round(v.ev*1000)/1000; }
+        const rr = {...d, linhas:ls}; ls.forEach(z=>{ z.score = scoreLinha(z, rr); });
+        const u = {linhas:ls, nLinhas:ls.length, totRLMC:Math.round(ls.reduce((a,z)=>a+(+z.rlmc||0),0)*100)/100, totScore:Math.round(ls.reduce((a,z)=>a+scoreLinha(z,rr),0)*1000)/1000, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
+        await updateDoc(doc(db,'rpn',o.pn.id), u);
+        await hist('Atualizado pelo RUN', `RUN de ${mesTxt(CMS_MES)} (${l[RL.cod]} ${l[RL.pos]||''}): ${txt.join('; ')}`, o.pn.id);
+        await logAlt({tipo:'PN atualizado pelo RUN', desde:CMS_MES, resumo:`PN ${o.pn.numero}: ${txt.join('; ')}`});
+        Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); delete CVPN_MEM[o.pn.id]; CMS_RUN=null;
+        close(); toast('PN atualizado. A validação vai ser refeita.'); depois&&depois();
+      } catch(e){ toast(errTxt(e), true); } };
+  });
+}
 function natVDF(l){ const nova = !/REFIDELIZ/i.test(l[RL.neg]||''), c=String(l[RL.cod]||'').toUpperCase(), ss=/_SS/.test(c), fx=/FIXO|_FX/.test(c);
   return nova ? (ss ? 'Nova SS' : fx ? 'Nova Fixo' : 'Nova Móvel') : (fx ? 'Ref Fixo' : 'Ref Móvel'); }
 function cmsValid(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
-    const topo = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<div><label>Mostrar</label><select id="vl-d">${[['dif','Divergências em PN'],['sem','Linhas sem PN'],['todas','Todas']].map(([k,t])=>`<option value="${k}" ${VAL_FILTRO===k?'selected':''}>${t}</option>`).join('')}</select></div></div>
+    const topo = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<div><label>Mostrar</label><select id="vl-d">${[['dif','Divergências em PN'],['sem','Linhas sem PN'],['todas','Todas']].map(([k,t])=>`<option value="${k}" ${VAL_FILTRO===k?'selected':''}>${t}</option>`).join('')}</select></div><div><label>Tolerância RLMC / eventos (%)</label><input type="number" id="vl-tol" value="${VAL_TOL}" min="0" max="100" step="1" style="width:90px"></div></div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Antes de pagar comissões: compara cada linha de upfront do RUN com a linha do PN (pelo POS ou MSISDN). Natureza (Nova/Refidelização, Móvel/Fixo/SS), RLMC, prazo, tier e eventos (RLMC ajustada da Vodafone ÷ 22,50). Corrija o PN quando o erro é nosso; reclame à Vodafone quando o erro é deles.</p></div>`;
     if (!R.existe) { box.innerHTML = topo+`<div class="card muted">Sem RUN importado para ${mesTxt(CMS_MES)}.</div>`; ligaMes(()=>cmsValid(box)); return; }
     if (R.origem==='PHC') { box.innerHTML = topo+`<div class="card muted">Este RUN veio do histórico PHC, que não traz prazo, tier nem RLMC ajustada. A validação funciona com os RUN importados do ficheiro da Vodafone (xlsx).</div>`; ligaMes(()=>cmsValid(box)); return; }
@@ -3715,8 +3778,13 @@ function cmsValid(box){
       if (!ln) { o.dif.push('linha não encontrada no PN'); return o; }
       const pN=natNorm(ln.natureza), pR=+ln.rlmc||0, pP=+ln.prazo||0, pT=String(ln.tier||'').toUpperCase(), pE=scoreLinha(ln, x.r);
       o.pl = {nat:pN, rlmc:pR, prazo:pP, tier:pT, ev:pE};
-      if (pN!==vN) o.dif.push('natureza'); if (Math.abs(pR-vR)>0.01) o.dif.push('RLMC'); if (vP && pP!==vP) o.dif.push('prazo');
-      if (vT && pT && pT!==vT) o.dif.push('tier'); if (vE!=null && Math.abs(pE-vE)>0.005) o.dif.push('eventos');
+      o.idx = lsP.indexOf(ln);
+      // RLMC e eventos: tolerância de VAL_TOL % (diferenças pequenas não contam como divergência; aparecem a amarelo)
+      const fora = (a,b) => Math.abs(a-b) > Math.max(0.01, Math.abs(b)*VAL_TOL/100), perto = (a,b) => Math.abs(a-b) > 0.01 && !fora(a,b);
+      if (pN!==vN) o.dif.push('natureza'); if (fora(pR,vR)) o.dif.push('RLMC'); else if (perto(pR,vR)) o.tol=(o.tol||[]).concat('RLMC');
+      if (vP && pP!==vP) o.dif.push('prazo');
+      if (vT && pT && pT!==vT) o.dif.push('tier');
+      if (vE!=null) { if (fora(pE,vE)) o.dif.push('eventos'); else if (perto(pE,vE)) o.tol=(o.tol||[]).concat('eventos'); }
       return o; });
     const comPN = rows.filter(o=>o.pn), sem = rows.filter(o=>!o.pn), nDif = comPN.filter(o=>o.dif.length).length;
     const L = VAL_FILTRO==='dif' ? comPN.filter(o=>o.dif.length) : VAL_FILTRO==='sem' ? sem : [...comPN.filter(o=>o.dif.length), ...comPN.filter(o=>!o.dif.length), ...sem];
@@ -3730,13 +3798,16 @@ function cmsValid(box){
         <div><b style="font-size:22px">${n3(evTot(o=>o.pl?.ev))}</b><div class="muted" style="font-size:12px">eventos nos PN (linhas ligadas)</div></div>
         <div><b style="font-size:22px">${n3(evTot(o=>o.vdf.ev))}</b><div class="muted" style="font-size:12px">eventos considerados pela Vodafone (mesmas linhas)</div></div></div></div>
       <div class="card scroll"><table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th>Divergência</th></tr></thead>
-      <tbody>${L.slice(0,800).map(o=>{ const d=k=>o.dif.includes(k), p=o.pl||{};
+      <tbody>${L.slice(0,800).map((o,ix)=>{ const d=k=>o.dif.includes(k), p=o.pl||{};
         return `<tr><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
         ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier)}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v))}
-        <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}</td></tr>`; }).join('')||'<tr><td colspan="10" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
+        <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}${(o.tol||[]).map(t=>` <span class="badge" style="background:#fff4d6;color:#8a5a00" title="Diferença dentro da tolerância">${esc(t)} ≈</span>`).join('')}
+          ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}</td></tr>`; }).join('')||'<tr><td colspan="10" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
       ${L.length>800?`<p class="muted">Mostradas 800 de ${L.length} linhas.</p>`:''}</div>`;
     ligaMes(()=>cmsValid(box));
     $('#vl-d').onchange = e => { VAL_FILTRO = e.target.value; cmsValid(box); };
+    $('#vl-tol').onchange = e => { VAL_TOL = Math.max(0, +e.target.value||0); try { localStorage.setItem('cms-val-tol', String(VAL_TOL)); } catch(_){} cmsValid(box); };
+    box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ()=>{ CMS_CASA=null; cmsValid(box); }));
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
 // ===== Performance do Agente perante a Vodafone (objetivos trimestrais da Redemóvel) =====
