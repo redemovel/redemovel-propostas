@@ -2680,13 +2680,13 @@ function parseCatalogo(txt){
     if(!line.trim()) return;
     let c = line.includes('\t') ? line.split('\t') : line.split(/\s{2,}/);
     c = c.map(x=>x.trim()); while(c.length && c[0]==='') c.shift(); while(c.length && c.at(-1)==='') c.pop();
-    if (c.length<6) return;
+    if (c.length<3) return; while (c.length<6) c.push('');
     const [sub,ref,des,tier,pp,dsc] = c;
     if (/^sub_?famil/i.test(sub) || !ref) return;
     const ppn = parseFloat(String(pp).replace(/\./g,'').replace(',','.'))||0;
     const T = {gold:'Gold',silver:'Silver',bronze:'Bronze',estanho:'Estanho'}[tier.toLowerCase()]||tier;
     const key = ref.toUpperCase(); if (seen.has(key)) return; seen.add(key);
-    out.push({ref, designacao:des, subfamilia:sub, tier:T, pricingPlan: ppn?String(Math.round(ppn)):'', descontinuado:/^s/i.test(dsc), categoria: /^fixo/i.test(sub)?'Fixo':'Móvel'});
+    out.push({ref, designacao:des, subfamilia:sub, tier:T, pricingPlan: ppn?String(Math.round(ppn)):'', descontinuado:/^s/i.test(dsc), categoria: /^fixo/i.test(sub)?'Fixo':'Móvel', _dscVazio:!dsc});
   });
   return out;
 }
@@ -2745,7 +2745,10 @@ function admCat(el){
       toast(`${cz.ok.length} bundle(s) importados · ${cz.novas.length} filha(s) criadas.`); await loadProdutos(true); await catalogoMudou(); admCat(el);
     } catch(e){ toast(errTxt(e),true); $('#bi').disabled=false; } };
   $('#ci').onclick=async()=>{ $('#ci').disabled=true;
-    try { for (let i=0;i<parsed.length;i+=400){ const b=writeBatch(db); parsed.slice(i,i+400).forEach(p=>b.set(doc(db,'produtos',prodId(p.ref)),{...p,atualizadoEm:serverTimestamp()},{merge:true})); await b.commit(); }
+    try { for (let i=0;i<parsed.length;i+=400){ const b=writeBatch(db); parsed.slice(i,i+400).forEach(p0=>{ const {_dscVazio, ...p}=p0, ex=S.prodMap[p.ref.toUpperCase()];
+        if (ex) { if (!String(p.tier||'').trim() && !String(p.pricingPlan||'').trim()) { delete p.designacao; delete p.subfamilia; }   // lista sem tier/pricing (não é export do PHC): só acrescenta referências novas
+          ['tier','pricingPlan','subfamilia','designacao'].forEach(k=>{ if (!String(p[k]||'').trim()) delete p[k]; }); if (!p.subfamilia) delete p.categoria; if (_dscVazio) delete p.descontinuado; }
+        b.set(doc(db,'produtos',prodId(p.ref)),{...p,atualizadoEm:serverTimestamp()},{merge:true}); }); await b.commit(); }
       toast(`${parsed.length} referências importadas.`); await loadProdutos(true); await catalogoMudou(); admCat(el);
     } catch(e){ toast(errTxt(e),true); $('#ci').disabled=false; } };
 }
