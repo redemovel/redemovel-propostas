@@ -363,7 +363,7 @@ function tabFiltra(t, q){ q=String(q||'').toLowerCase().trim(); let n=0;
 document.addEventListener('click', e=>{
   const th=e.target instanceof Element ? e.target.closest('thead th') : null; if (!th || e.target.closest('input,button,a,select')) return;
   const t=th.closest('table'); if (!tabOk(t) || th.parentElement!==t.tHead.rows[0]) return;
-  const col=[...th.parentElement.cells].indexOf(th), sig=tabSig(t), st=TAB_ORD[sig], dir = st && st.col===col ? -st.dir : 1;
+  const col=[...th.parentElement.cells].indexOf(th), sig=tabSig(t), st=TAB_ORD[sig], ehData=/^(data|alerta|fim|ativ|criad|dia|mês|mes)/i.test(th.textContent.trim()), dir = st && st.col===col ? -st.dir : (ehData ? -1 : 1);   // datas: 1.º clique = mais recentes primeiro
   TAB_ORD[sig]={col, dir}; tabOrdena(t, col, dir);
 });
 (()=>{ const st=document.createElement('style');
@@ -1967,10 +1967,11 @@ function atDesenhaLista(){
     && (!t || semAcento([atNum(r), r.numero, r.cliente?.nome, r.cliente?.nif, r.assunto, r.subAssunto, r.conta, r.msisdns, r.vendedorNome, r.descricao].join(' ')).includes(t)));
   const cnt={}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
   const atChave = r => String(r.estado==='Agendada' && r.dataEfetiva ? r.dataEfetiva : (r.data||'')).slice(0,10);
-  const rows=base.filter(r=>!f.estado || r.estado===f.estado).sort((a,b)=>atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
+  if (!f.estados) { try { f.estados=JSON.parse(localStorage.getItem('at-estados')||'[]'); } catch(_){ f.estados=[]; } }
+  const rows=base.filter(r=>!f.estados.length || f.estados.includes(r.estado)).sort((a,b)=>atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
   $('#main').innerHTML=`
-    <div class="chips"><div class="chip ${!f.estado?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
-      ${AT_ESTADOS.map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
+    <div class="chips" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)"><div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
+      ${AT_ESTADOS.map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
         <input id="at-q" type="search" autocomplete="off" name="pesquisa-at" placeholder="Procurar nº, cliente, NIF, conta, número, assunto…" value="${esc(f.txt)}" style="max-width:340px">
@@ -1983,7 +1984,8 @@ function atDesenhaLista(){
       </div>
       <div class="scroll"><table id="at-t"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Assunto</th><th>Vendedor</th><th>BO</th><th>Estado</th><th class="num">Dias em aberto</th></tr></thead>
         <tbody>${rows.map(r=>{ const dd=atDias(r), ab=AT_ABERTAS.includes(r.estado); return `<tr class="click" data-id="${esc(r.id)}"><td><b>${atNum(r)}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}</td><td data-v="${esc(atChave(r))}">${r.estado==='Agendada' && r.dataEfetiva ? `<b>${fmtD(String(r.dataEfetiva).slice(0,10))}</b><div class="muted" style="font-size:11px">agendada</div>` : fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}<div class="muted" style="font-size:11px">${esc(r.cliente?.nif)}</div></td><td>${esc(r.assunto)}<div class="muted" style="font-size:11px">${esc(r.subAssunto)}</div></td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${esc((r.estado||'').replace(/ /g,'-'))}">${esc(r.estado)}</span>${r.motivo&&!['Concluído'].includes(r.estado)?` <span class="muted" style="font-size:11px">${esc(String(r.motivo).slice(0,60))}</span>`:''}</td><td class="num" ${ab&&dd>=AT_DIAS_ALERTA?'style="color:var(--red-d);font-weight:700"':''}>${r.submetidoEm?dd:'—'}</td></tr>`; }).join('')||`<tr><td colspan="8" class="muted">Sem Atividades.</td></tr>`}</tbody></table></div></div>`;
-  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ f.estado=c.dataset.e; atDesenhaLista(); });
+  document.querySelectorAll('.chip[data-e]').forEach(c=>c.onclick=()=>{ const e=c.dataset.e; if (!e) f.estados=[]; else { const st=new Set(f.estados); st.has(e)?st.delete(e):st.add(e); f.estados=AT_ESTADOS.filter(x=>st.has(x)); }
+    try { localStorage.setItem('at-estados', JSON.stringify(f.estados)); } catch(_){} atDesenhaLista(); });
   const q=$('#at-q'); q.oninput=()=>{ f.txt=q.value; clearTimeout(q._h); q._h=setTimeout(()=>{ atDesenhaLista(); const n=$('#at-q'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
   $('#at-r').onclick=()=>atLista(true);
   $('#at-m').onchange=e=>{ if(e.target.value){ AT.mes=e.target.value; atLista(); } };
