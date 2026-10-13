@@ -284,6 +284,45 @@ function render(){
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
   return viewLista();
 }
+// contactos da ficha do cliente (1 leitura): email geral (ou do Contacto 1) e telefone do Contacto 1
+async function contactosFicha(nif){
+  nif=String(nif||'').replace(/\s/g,''); if (nif.length<5) return null;
+  try { const s=await getDoc(doc(db,'clientesFicha',nif)); if (!s.exists()) return null; const c=s.data();
+    return {email:String(c.email||c.c1email||''), tel:String(c.c1tele||c.tlmvl||c.telefone||''), nome:String(c.contacto||'')}; } catch(e){ return null; }
+}
+// duplo clique: ficha do cliente (NIF) ou da referência do catálogo, em qualquer sítio que os mostre
+function abrirFichaCliente(nif){
+  nif=String(nif||'').replace(/\s/g,''); if (!nif) return toast('Sem NIF para abrir a ficha do cliente.', true);
+  const h='#/clientes/'+encodeURIComponent(nif), sujo=S.dirty || AT?.dirty;
+  if (sujo) { window.open(location.pathname+h, '_blank'); return; }   // há alterações por guardar: abre noutro separador
+  document.querySelectorAll('.modal-bg').forEach(x=>x.remove()); location.hash=h;
+}
+function abrirFichaRef(ref){
+  ref=String(ref||'').trim(); const p=S.prodMap[ref.toUpperCase()]; if (!p) return toast(`A referência ${ref||'—'} não está no catálogo.`, true);
+  const comp=(p.composicao||[]);
+  modal(`<h2>${esc(p.ref)}</h2><p style="margin-top:0">${esc(p.designacao||'')}</p>
+    <table><tbody>
+      <tr><td class="muted">Sub-família</td><td>${esc(p.subfamilia||'—')}</td></tr><tr><td class="muted">Categoria</td><td>${esc(p.categoria||'—')}</td></tr>
+      <tr><td class="muted">Tier</td><td><b>${esc(p.tier||'—')}</b></td></tr><tr><td class="muted">Pricing plan</td><td>${esc(p.pricingPlan||'—')}</td></tr>
+      <tr><td class="muted">Estado</td><td>${p.inativo?'inativa':p.descontinuado?'descontinuada':'ativa'}</td></tr>
+      ${comp.length?`<tr><td class="muted">Bundle</td><td>${comp.map(c=>`${esc(c.ref)}${c.pct!=null?` <span class="muted">(${esc(c.pct)} %)</span>`:''}`).join('<br>')}</td></tr>`:''}
+    </tbody></table>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{ m.querySelector('#c').onclick=close; });
+}
+document.addEventListener('dblclick', e=>{
+  const t=e.target; if (!(t instanceof Element)) return;
+  const dc=t.closest('[data-dcli]'); if (dc) { e.preventDefault(); return abrirFichaCliente(dc.dataset.dcli); }
+  const dr=t.closest('[data-dref]'); if (dr) { e.preventDefault(); return abrirFichaRef(dr.dataset.dref); }
+  if (t.matches('[data-l="ref"],[data-l="designacao"]')) { const ref=t.closest('tr')?.querySelector('[data-l="ref"]')?.value; if (ref) abrirFichaRef(ref); return; }
+  if (t.matches('[data-f="cliente.nome"],[data-f="cliente.nif"]')) return abrirFichaCliente(S.cur?.cliente?.nif);
+  if (t.matches('[data-a="cliente.nome"],[data-a="cliente.nif"]')) return abrirFichaCliente(AT?.cur?.cliente?.nif);
+});
+// RPN aberto a partir de outra página (Comissionamento, ficha do cliente, Projetos…): o «← Lista» volta lá
+document.addEventListener('click', e=>{
+  const a=e.target instanceof Element ? e.target.closest('a[href^="#/rpn/"]') : null; if (!a) return;
+  const de=location.hash; if (!de || de.startsWith('#/rpn/') || de==='#/lista' || de==='#/') return;
+  S.voltar={h:de, y:window.scrollY, de:a.getAttribute('href')};
+}, true);
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -485,7 +524,10 @@ function drawFicha(){
     ${(r.motivos||[]).length && !FECHADOS.includes(r.estado) && r.estado!=='Em Conferência'?`<div class="warnbox"><b>Pendente:</b> ${esc(r.motivos.join(', '))}</div>`:''}
     <div class="tabs">${tabs.map(([k,t])=>`<a data-t="${k}" class="${S.tab===k?'on':''}">${t}${k==='msg'&&msgPorLer(r)?' <b style="color:var(--red)">● nova</b>':''}</a>`).join('')}</div>
     <div id="tabc"></div>`;
-  $('#back').onclick=()=>go('#/lista');
+  if (S.voltar && S.voltar.de===location.hash) $('#back').textContent='← Voltar';
+  $('#back').onclick=()=>{ const v=S.voltar && S.voltar.de===location.hash ? S.voltar : null; S.voltar=null;
+    if (!go(v ? v.h : '#/lista')) return;
+    if (v) [300,900,1800].forEach(t=>setTimeout(()=>{ if (location.hash===v.h && document.body.scrollHeight>v.y) window.scrollTo(0, v.y); }, t)); };
   document.querySelectorAll('.tabs a').forEach(a=>a.onclick=()=>{ S.tab=a.dataset.t; clearSubs(); drawFicha(); });
   $('#a-save')?.addEventListener('click',()=>guardar());
   $('#a-canc')?.addEventListener('click',()=>{ if (S.dirty && !confirm('Descartar as alterações que não foram guardadas?')) return; S.dirty=false; if (S.cur?.id) viewFicha(S.cur.id); else location.hash='#/lista'; });
@@ -1276,7 +1318,7 @@ async function preencherCliente(r, substituir){
     const s = await getDoc(doc(db,'clientesFicha',nif)); if(!s.exists()) return false;
     const c = s.data(), k = r.cliente; let n = 0;
     const put = (o,f,v) => { if (substituir ? (String(o[f]||'')!==String(v||'')) : (v && !o[f])) { o[f]=String(v||''); n++; } };
-    put(k,'nome',c.nome); put(k,'nCliente',c.no); put(k,'email',c.email); put(k,'interlocutor',c.contacto); put(k,'telefone',c.tlmvl||c.telefone);
+    put(k,'nome',c.nome); put(k,'nCliente',c.no); put(k,'email',c.email||c.c1email); put(k,'interlocutor',c.contacto); put(k,'telefone',c.c1tele||c.tlmvl||c.telefone);
     put(k,'morada1',c.morada); put(k,'localidade',c.local); put(k,'codPostal',c.codpost);
     r.contas = r.contas||{}; put(r.contas,'gsm',c.contaA);
     return n>0;
@@ -1493,6 +1535,8 @@ function novoProjeto(){
     <p class="muted" style="margin-top:0">Para um cliente visitado — com ou sem negócio connosco — onde há um potencial negócio a seguir no futuro. Na data de alerta aparece em «Para tratar», como os Projetos de renegociação.</p>
     <div class="grid g2"><div><label>NIF do cliente</label><div class="row" style="gap:6px"><input id="np-nif" inputmode="numeric" maxlength="9" placeholder="9 dígitos"><button class="btn sm" id="np-b" type="button">Procurar ficha</button></div></div>
       <div><label>Nome do cliente</label><input id="np-n" placeholder="Nome / empresa"></div>
+      <div><label>Email</label><input id="np-e" type="email" placeholder="email do cliente / contacto"></div>
+      <div><label>Telefone (Contacto 1)</label><input id="np-tl" type="tel"></div>
       ${stf?`<div><label>Vendedor</label><select id="np-v"><option value="">— por atribuir —</option>${vends.map(v=>`<option value="${v.uid}" ${v.uid===S.me.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select></div>`:''}
       <div><label>Data de alerta (quando voltar ao cliente)</label><input type="date" id="np-d" min="${hj}" value="${hj}"></div>
       <div><label>Natureza principal</label><select id="np-nat"><option value="">—</option>${['Nova Móvel','Nova Fixo','Nova SS','Ref Móvel','Ref Fixo'].map(n=>`<option>${n}</option>`).join('')}</select></div>
@@ -1501,7 +1545,7 @@ function novoProjeto(){
     <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Criar Projeto</button></div>`, (m,close)=>{
     m.querySelector('#c').onclick=close;
     m.querySelector('#np-b').onclick=async()=>{ const nif=m.querySelector('#np-nif').value.replace(/\D/g,''); if(nif.length!==9) return toast('O NIF tem 9 dígitos.',true);
-      try { const f=await getDoc(doc(db,'clientesFicha',nif)); if(f.exists()&&f.data().nome){ m.querySelector('#np-n').value=f.data().nome; toast('Ficha encontrada.'); } else toast('Sem ficha com este NIF (ou de outra carteira). Escreva o nome.'); }
+      try { const f=await getDoc(doc(db,'clientesFicha',nif)); if(f.exists()&&f.data().nome){ const c=f.data(); m.querySelector('#np-n').value=c.nome; if(!m.querySelector('#np-e').value) m.querySelector('#np-e').value=c.email||c.c1email||''; if(!m.querySelector('#np-tl').value) m.querySelector('#np-tl').value=c.c1tele||c.tlmvl||c.telefone||''; toast('Ficha encontrada.'); } else toast('Sem ficha com este NIF (ou de outra carteira). Escreva o nome.'); }
       catch(e){ toast('Sem acesso a esta ficha (é de outra carteira). Escreva o nome.'); } };
     m.querySelector('#ok').onclick=async()=>{ const nif=m.querySelector('#np-nif').value.replace(/\D/g,''), nome=m.querySelector('#np-n').value.trim(), d=m.querySelector('#np-d').value, t=m.querySelector('#np-t').value.trim();
       const uid=stf?(m.querySelector('#np-v').value||null):S.me.uid, rl=Math.max(0,+m.querySelector('#np-r').value||0), nat=m.querySelector('#np-nat').value;
@@ -1509,7 +1553,7 @@ function novoProjeto(){
       if(!nome) return toast('Escreva o nome do cliente.',true); if(!d || d<hj) return toast('A data de alerta não pode ser no passado.',true); if(t.length<5) return toast('Descreva o potencial negócio.',true);
       const u=uid?S.users[uid]:null, ref=doc(collection(db,'projetos'));
       const pj={nif, clienteNome:nome, mes:d.slice(0,7), alertaEm:d, fimEm:'', vendedorUid:uid, vendedorNome:u?.nome||'', vendedorPHC:String(u?.vendedorPHC||''),
-        linhas:[], nLinhas:0, totRLMC:Math.round(rl*100)/100, totScore:Math.round(rl/SCORE_BASE*1000)/1000, natureza:nat, descricao:t, origem:'manual',
+        linhas:[], nLinhas:0, totRLMC:Math.round(rl*100)/100, totScore:Math.round(rl/SCORE_BASE*1000)/1000, natureza:nat, descricao:t, origem:'manual', contactoEmail:m.querySelector('#np-e').value.trim(), contactoTel:m.querySelector('#np-tl').value.trim(),
         estado:'Por tratar', propostaId:'', rpnId:'', rpnNumero:'', motivoPerda:'', criadoEm:serverTimestamp(), criadoPor:S.me.uid, criadoPorNome:S.me.nome};
       try { await setDoc(ref, pj); close(); toast(d===hj?'Projeto criado. Está em «Para tratar».':`Projeto criado. Aparece em «Para tratar» a ${fmtD(d)}.`); PJ.mes=d.slice(0,7); viewProjetos(); }
       catch(e){ toast(errTxt(e),true); } };
@@ -1582,13 +1626,14 @@ function abrirProjeto(p, apos){
   if(!p) return; const stf=isStaff(), aberto=['Por tratar','Em negociação','Adiado'].includes(p.estado), meu=p.vendedorUid===S.me.uid;
   const orig=p.alertaOriginal||p.alertaEm, dMax=(()=>{ const d=new Date(orig+'T12:00:00'); d.setDate(d.getDate()+PROJ_ADIA_MAX); return d.toISOString().slice(0,10); })(), dMin=(()=>{ const d=new Date(hojeLocal()+'T12:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
   const vends=vendedoresProj([p.vendedorUid]);
-  modal(`<h2>${esc(p.clienteNome)} <span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span></h2>
+  modal(`<h2><span data-dcli="${esc(p.nif||'')}" title="Duplo clique: ficha do cliente" style="cursor:pointer">${esc(p.clienteNome)}</span> <span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span></h2>
     <p class="muted" style="margin-top:0">NIF ${esc(p.nif)} · vendedor: <b>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</b> · alerta ${fmtD(p.alertaEm)}${p.fimEm?` · primeiro fim de contrato ${fmtD(p.fimEm)}`:''}${p.propostaId?` · proposta <b>${esc(p.propostaId)}</b>`:''}${p.motivoPerda?`<br>Motivo: ${esc(p.motivoPerda)}`:''}</p>
+    <p id="pj-ct" style="margin:-4px 0 10px;font-size:13px">${p.contactoEmail||p.contactoTel?`✉ ${esc(p.contactoEmail||'—')} · ☎ ${esc(p.contactoTel||'—')}`:''}</p>
     ${(p.adiamentos||[]).length?`<div class="warnbox" id="pj-ad-h" style="background:#f5f3ff;border-color:#ddd6fe"><b>Adiado ${p.adiamentos.length}×</b> (alerta original ${fmtD(orig)})${p.adiamentos.map(a=>`<br>${fmtD(String(a.em).slice(0,10))} · ${esc(a.porNome)}: ${fmtD(a.de)} → <b>${fmtD(a.para)}</b> — ${esc(a.motivo)}`).join('')}</div>`:''}
     ${p.origem==='manual'?`<div class="warnbox" style="background:#f0f7ff;border-color:#cfe3ff"><b>Projeto criado à mão</b>${p.criadoPorNome?` por ${esc(p.criadoPorNome)}`:''}${p.natureza?` · ${esc(p.natureza)}`:''}${p.totRLMC?` · RLMC potencial ${eur(p.totRLMC)} €`:''}<br>${esc(p.descricao||'')}</div>`:''}
     ${p.rpnId?`<p style="margin:6px 0">Ligado ao ${stf||meu?`<a href="#/rpn/${esc(p.rpnId)}" data-pn><b>RPN ${esc(p.rpnNumero||'')}</b></a>`:`<b>RPN ${esc(p.rpnNumero||'')}</b>`}</p>`:''}
     ${(p.linhas||[]).length?'':'<!--sem-linhas-->'}<div class="scroll" style="max-height:320px;${(p.linhas||[]).length?'':'display:none'}"><table id="pj-l"><thead><tr><th>Referência</th><th>Designação</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>PN de origem</th></tr></thead>
-      <tbody>${(p.linhas||[]).map(l=>`<tr><td><b>${esc(l.ref)}</b></td><td>${esc(l.designacao)}</td><td>${l.confirmar?'<span style="color:#b45309">sem MSISDN · confirmar</span>':esc(l.msisdn)}</td><td class="num">${l.prazo}</td><td class="num">${eur(l.rlmc)}</td><td class="num">${n3(l.score)}</td><td>${fmtD(l.fim)}</td><td>${stf||meu?`<a href="#/rpn/${esc(l.pnId)}" data-pn>PN ${esc(l.pnNumero)}</a>`:`PN ${esc(l.pnNumero)}`} <span class="muted" style="font-size:11px">${fmtD(l.pnData)}</span></td></tr>`).join('')}</tbody>
+      <tbody>${(p.linhas||[]).map(l=>`<tr><td><b data-dref="${esc(l.ref)}" title="Duplo clique: ficha da referência" style="cursor:pointer">${esc(l.ref)}</b></td><td>${esc(l.designacao)}</td><td>${l.confirmar?'<span style="color:#b45309">sem MSISDN · confirmar</span>':esc(l.msisdn)}</td><td class="num">${l.prazo}</td><td class="num">${eur(l.rlmc)}</td><td class="num">${n3(l.score)}</td><td>${fmtD(l.fim)}</td><td>${stf||meu?`<a href="#/rpn/${esc(l.pnId)}" data-pn>PN ${esc(l.pnNumero)}</a>`:`PN ${esc(l.pnNumero)}`} <span class="muted" style="font-size:11px">${fmtD(l.pnData)}</span></td></tr>`).join('')}</tbody>
       <tfoot><tr class="tot"><td colspan="4">${p.nLinhas} linha(s)</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td colspan="2"></td></tr></tfoot></table></div>
     ${stf&&aberto?`<div class="row" style="margin-top:12px"><label style="margin:0">Vendedor</label><select id="pj-av" style="max-width:240px"><option value="">— por atribuir —</option>${vends.map(v=>`<option value="${v.uid}" ${p.vendedorUid===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select><button class="btn sm" id="pj-as">Atribuir</button></div>`:''}
     <div class="row" style="margin-top:14px"><span class="sp"></span><button class="btn" id="c">Fechar</button>
@@ -1599,6 +1644,7 @@ function abrirProjeto(p, apos){
       ${(stf||meu)&&p.estado!=='Perdido'&&(!p.propostaId||!p.rpnId)?`<button class="btn" id="pj-lg" title="Ligar este Projeto a uma proposta ou a um RPN que já existam">Ligar a proposta / RPN</button>`:''}
       ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}</div>`, (m,close)=>{
     m.style.width='min(980px,94vw)';
+    if (p.nif) contactosFicha(p.nif).then(x=>{ const el=m.querySelector('#pj-ct'); if (el && x && (x.email||x.tel)) el.innerHTML=`✉ ${x.email?`<a href="mailto:${esc(x.email)}">${esc(x.email)}</a>`:'—'} · ☎ ${x.tel?`<a href="tel:${esc(x.tel)}">${esc(x.tel)}</a>`:'—'}${x.nome?` <span class="muted">(${esc(x.nome)})</span>`:''}`; });
     const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); apos(); }catch(e){ toast(errTxt(e),true); } };
     m.querySelector('#c').onclick=close;
     m.querySelectorAll('[data-pn]').forEach(a=>a.onclick=()=>close());
@@ -1818,7 +1864,7 @@ function desenharCliente(){
   $('#cl-rpn')?.addEventListener('click',()=>{ const r=rpnVazio(); r.cliente.nif=String(f.ncont); r.cliente.nome=f.nome||''; preencherCliente(r).then(()=>{ S.pendingNovo=r; location.hash='#/novo'; }); });
   m.querySelectorAll('#cl-rt [data-id]').forEach(tr=>tr.onclick=()=>{ location.hash='#/rpn/'+tr.dataset.id; });
   m.querySelectorAll('#cl-at [data-id]').forEach(tr=>tr.onclick=()=>{ location.hash='#/atividades/'+tr.dataset.id; });
-  $('#cl-atn')?.addEventListener('click',()=>{ const a=atVazia(); a.cliente={nif:String(f.ncont), nome:f.nome||''}; a.conta=f.contaA||''; AT.pend=a; location.hash='#/atividades/novo'; });
+  $('#cl-atn')?.addEventListener('click',()=>{ const a=atVazia(); a.cliente={nif:String(f.ncont), nome:f.nome||'', email:String(f.email||f.c1email||''), telefone:String(f.c1tele||f.tlmvl||f.telefone||'')}; a.conta=f.contaA||''; AT.pend=a; location.hash='#/atividades/novo'; });
   m.querySelectorAll('#cl-pt [data-pj]').forEach(tr=>tr.onclick=()=>abrirProjeto(d.proj.find(p=>p.id===tr.dataset.pj), ()=>{ CL.d.proj=null; if (location.hash.startsWith('#/clientes/')) desenharCliente(); }));
   if (tab!=='ficha') return;
   if (CL.edit) m.querySelectorAll('#cl-form [data-k]').forEach(el=>el.addEventListener('input',()=>{ S.dirty=true; }));
@@ -1985,7 +2031,7 @@ function atFicha(){
     const cred=r.subAssunto==='Créditos', corr=r.assunto==='Correcção Implementação';
     tc.innerHTML=`<div class="card">${podeCli?`<div class="cli-box" style="margin-bottom:14px"><label>Escolher cliente</label><input id="t-cq" type="search" autocomplete="off" name="procura-cli-at" placeholder="Escreva as primeiras letras do nome ou o início do NIF…"><div class="cli-res" id="t-cr"></div></div>`:''}
       <div class="grid g4">
-        ${fa('Cliente','cliente.nome',podeCli?'':'disabled')}${fa('NIF','cliente.nif',podeCli?'':'disabled')}${fa('Data','data','disabled','date')}
+        ${fa('Cliente','cliente.nome',podeCli?'':'disabled','text','title="Duplo clique: ficha do cliente"')}${fa('NIF','cliente.nif',podeCli?'':'disabled','text','title="Duplo clique: ficha do cliente"')}${fa('Email','cliente.email',podeCli?'':'disabled','email')}${fa('Telefone (Contacto 1)','cliente.telefone',podeCli?'':'disabled','tel')}${fa('Data','data','disabled','date')}
         ${isBO()?sa('Vendedor','vendedorUid',vendOpts,dB):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
         ${sa('Assunto','assunto',AT_ASSUNTOS,dV)}${sa('Sub-assunto','subAssunto',AT_SUBS,dV)}
         ${fa('Conta Vodafone','conta',dV)}${fa('Número(s) afetado(s)','msisdns',dV,'text','placeholder="separados por vírgula"')}
@@ -2007,7 +2053,7 @@ function atFicha(){
     const cq=$('#t-cq'), cr=$('#t-cr');
     if (cq) { carregarClientes().catch(()=>{});
       cq.oninput=()=>{ const res=procurarClientes(cq.value); cr.innerHTML=res.map((c,i)=>`<div data-i="${i}"><b>${esc(c.nome)}</b><br><small>${esc(c.nif)} · ${esc(c.local)}</small></div>`).join(''); cr.classList.toggle('on',!!res.length);
-        cr.querySelectorAll('[data-i]').forEach(d=>d.onmousedown=e=>{ e.preventDefault(); const c=res[+d.dataset.i]; r.cliente={nif:c.nif, nome:c.nome}; S.dirty=true; atFicha(); }); };
+        cr.querySelectorAll('[data-i]').forEach(d=>d.onmousedown=e=>{ e.preventDefault(); const c=res[+d.dataset.i]; r.cliente={nif:c.nif, nome:c.nome, email:'', telefone:''}; S.dirty=true; atFicha(); contactosFicha(c.nif).then(x=>{ if (x && AT.cur===r && r.cliente?.nif===c.nif) { r.cliente.email=x.email; r.cliente.telefone=x.tel; atFicha(); } }); }); };
       cq.onblur=()=>setTimeout(()=>cr.classList.remove('on'),150); }
   } else if (!r.id) tc.innerHTML=`<div class="card muted">Guarde a Atividade primeiro.</div>`;
   else if (AT.tab==='anexos') atAnexos(tc, p);
@@ -2045,7 +2091,7 @@ async function atGuardar(acao, arg){
   document.querySelectorAll('#main .row .btn').forEach(b=>b.disabled=true);
   const isNew=!r.id, ref=isNew?doc(collection(db,'atividades')):doc(db,'atividades',r.id);
   const data=JSON.parse(JSON.stringify(r)); ['id','criadoEm','atualizadoEm','msgUlt','msgLido','_msgVistas'].forEach(k=>delete data[k]);
-  data.cliente={nif:String(data.cliente?.nif||'').replace(/\s/g,''), nome:String(data.cliente?.nome||'').trim()}; data.msisdnsL=atMsisdns(data.msisdns);
+  data.cliente={nif:String(data.cliente?.nif||'').replace(/\s/g,''), nome:String(data.cliente?.nome||'').trim(), email:String(data.cliente?.email||'').trim(), telefone:String(data.cliente?.telefone||'').trim()}; data.msisdnsL=atMsisdns(data.msisdns);
   let old=null;
   try {
     await runTransaction(db, async tx=>{
