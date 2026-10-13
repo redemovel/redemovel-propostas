@@ -328,6 +328,13 @@ document.addEventListener('click', e=>{
   const de=location.hash; if (!de || de.startsWith('#/rpn/') || de==='#/lista' || de==='#/') return;
   S.voltar={h:de, y:window.scrollY, de:a.getAttribute('href')};
 }, true);
+// mensagem com «pend»: o processo aparece nas listas (mesmo arquivado) até todas as partes a lerem; quem lê por último tira a marca
+function msgPendFim(r){
+  const u=r?.msgUlt; if (!u?.pend) return {};
+  const partes=(u.auto?[r.vendedorUid]:[r.vendedorUid,r.boUid,r.confUid]).filter(x=>x && x!==u.porUid);
+  if (!partes.every(x=>String(r.msgLido?.[x]||'') >= String(u.em||''))) return {};
+  u.pend=false; return {msgUlt:{pend:false}};
+}
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -347,8 +354,8 @@ async function viewLista(forcar){
   try {
     // economia de leituras: os processos em curso + os fechados do mês escolhido (o histórico procura-se à parte)
     const col = collection(db,'rpn'), meu = isStaff() ? [] : [where('vendedorUid','==',S.me.uid)];
-    const [a, f] = await Promise.all([getDocs(query(col, ...meu, where('estado','in',EM_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',S.filtros.mes)))]);
-    const m2 = {}; [...a.docs, ...f.docs, ...(S.extra||[])].forEach(d=>{ const r = typeof d.data==='function' ? {id:d.id,...d.data()} : d; m2[r.id]=r; });
+    const [a, f, mp] = await Promise.all([getDocs(query(col, ...meu, where('estado','in',EM_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',S.filtros.mes))), getDocs(query(col, ...meu, where('msgUlt.pend','==',true))).catch(()=>({docs:[]}))]);
+    const m2 = {}; [...a.docs, ...f.docs, ...mp.docs.filter(d=>msgPorLer({id:d.id,...d.data()})), ...(S.extra||[])].forEach(d=>{ const r = typeof d.data==='function' ? {id:d.id,...d.data()} : d; m2[r.id]=r; });
     Object.values(m2).forEach(normEspera);
     S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0)); S.listMes = S.filtros.mes; LISTA_EM = Date.now();
   } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
@@ -793,7 +800,7 @@ function marcarMsgLidas(r, ult){   // ult = última mensagem no ecrã; apanha ta
   if (ult) r._msgVistas=ult._n;
   if (!msgPorLer(r) && !chegou) return;
   const agora=new Date().toISOString(); r.msgLido={...(r.msgLido||{}),[S.me.uid]:agora};
-  setDoc(doc(db,'rpn',r.id),{msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgLido',e));
+  setDoc(doc(db,'rpn',r.id),{msgLido:{[S.me.uid]:agora}, ...msgPendFim(r)},{merge:true}).catch(e=>console.warn('msgLido',e));
   const t=document.querySelector('.tabs a[data-t="msg"]'); if(t) t.textContent='Mensagens';
 }
 const msgPara = r => r.vendedorUid===S.me.uid ? 'a BackOffice' : [r.boUid,r.confUid].includes(S.me.uid) ? 'o Comercial' : 'o Comercial ou a BackOffice';
@@ -811,7 +818,7 @@ function tabMsg(tc){
   }, e=>toast(errTxt(e),true));
   S.unsub.push(un);
   $('#ms').onclick = async ()=>{ const t=$('#mt').value.trim(); if(!t) return; try{ await addDoc(collection(db,'rpn',r.id,'mensagens'),{texto:t,porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()});
-      const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome,auto:false};   // assinala «por ler» à outra parte, na lista
+      const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome,auto:false,pend:true};   // assinala «por ler» à outra parte, na lista
       await setDoc(doc(db,'rpn',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e));
       $('#mt').value=''; }catch(e){ toast(errTxt(e),true); } };
 }
@@ -1901,8 +1908,8 @@ async function atLista(forcar){
   m.innerHTML=`<div class="card muted">A carregar Atividades…</div>`;
   try {
     const col=collection(db,'atividades'), meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)];
-    const [a,f]=await Promise.all([getDocs(query(col, ...meu, where('estado','in',AT_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',AT.mes)))]);
-    const mp={}; [...a.docs, ...f.docs].forEach(d=>mp[d.id]={id:d.id, ...d.data()}); (AT.extra||[]).forEach(x=>{ if(!mp[x.id]) mp[x.id]=x; });
+    const [a,f,pm]=await Promise.all([getDocs(query(col, ...meu, where('estado','in',AT_CURSO))), getDocs(query(col, ...meu, where('mesRef','==',AT.mes))), getDocs(query(col, ...meu, where('msgUlt.pend','==',true))).catch(()=>({docs:[]}))]);
+    const mp={}; [...a.docs, ...f.docs, ...pm.docs.filter(d=>msgPorLer({id:d.id,...d.data()}))].forEach(d=>mp[d.id]={id:d.id, ...d.data()}); (AT.extra||[]).forEach(x=>{ if(!mp[x.id]) mp[x.id]=x; });
     AT.lista=Object.values(mp).sort((x,y)=>(y.numero||0)-(x.numero||0)); AT.listaMes=AT.mes; AT_EM=Date.now();
   } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
   if (AT.f.meus===null) AT.f.meus = perfil()==='backoffice';
@@ -2168,13 +2175,13 @@ function atMsgs(tc){
     <textarea id="t-mt" rows="3" placeholder="Escrever mensagem para ${msgPara(r)}…"></textarea>
     <div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn pri" id="t-ms">Enviar</button></div></div>`;
   const lida=()=>{ if (!parte || !msgPorLer(r)) return; const agora=new Date().toISOString(); r.msgLido={...(r.msgLido||{}),[S.me.uid]:agora};
-    setDoc(doc(db,'atividades',r.id),{msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgLido',e)); const t=document.querySelector('.tabs a[data-tt="msg"]'); if(t) t.textContent='Mensagens'; };
+    setDoc(doc(db,'atividades',r.id),{msgLido:{[S.me.uid]:agora}, ...msgPendFim(r)},{merge:true}).catch(e=>console.warn('msgLido',e)); const t=document.querySelector('.tabs a[data-tt="msg"]'); if(t) t.textContent='Mensagens'; };
   S.unsub.push(onSnapshot(query(collection(db,'atividades',r.id,'mensagens'),orderBy('em')), s=>{ const el=$('#t-ml'); if(!el) return;
     el.innerHTML=s.docs.map(d=>{ const x=d.data(); return `<div class="msg ${x.auto?'auto':x.porUid===S.me.uid?'mine':''}"><small>${x.auto?'Aviso automático · ':''}${esc(x.porNome)} · ${tsTxt(x.em)}</small>${esc(x.texto).replace(/\n/g,'<br>')}</div>`; }).join('')||`<span class="muted">Sem mensagens.</span>`;
     el.scrollTop=el.scrollHeight; lida(); }, e=>toast(errTxt(e),true)));
   $('#t-ms').onclick=async()=>{ const t=$('#t-mt').value.trim(); if(!t) return;
     try { await addDoc(collection(db,'atividades',r.id,'mensagens'),{texto:t, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
-      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:false};
+      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:false, pend:true};
       await setDoc(doc(db,'atividades',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e)); $('#t-mt').value=''; } catch(e){ toast(errTxt(e),true); } };
 }
 function atHistorico(tc){
