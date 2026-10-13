@@ -3139,8 +3139,8 @@ function cmsVend(box){
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
     let casa;
     if (R.fechado && R.calcN) casa = (await casaDoFecho(R)).casa;
-    else if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R) casa = CMS_CASA.casa;
-    else if (CMS_CONC===CMS_MES || CMS_CASA?.mes===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; CMS_CONC = VAL_CONC = CMS_MES; }
+    else if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R && !CMS_CASA.velho) casa = CMS_CASA.casa;
+    else if (CMS_CONC===CMS_MES || CMS_CASA?.mes===CMS_MES) { const cr = await conciliarRun(R); casa = cr.casa; CMS_CASA = {mes:CMS_MES, run:R, casa, tier:cr.tier}; CMS_CONC = VAL_CONC = CMS_MES; }
     else { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
       box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span><button class="btn pri" id="cms-conc">Conciliar RUN com os PN</button></div>
         <p class="muted" style="font-size:13px;margin-bottom:0">RUN de ${mesTxt(CMS_MES)}: ${R.linhas.length} linhas, ${eur(R.linhas.reduce((a,l)=>a+l[RL.val],0))} €. Para obter o cálculo por vendedor, as linhas por imputar, as diferenças com o PHC e o botão «Fechar RUN», carregue em <b>«Conciliar RUN com os PN»</b> (lê os PN da plataforma).</p></div>
@@ -3200,11 +3200,11 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     $('#cms-reab')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, false)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'), nx=tr.nextElementSibling?.classList.contains('lpi-x')?tr.nextElementSibling:null;
       const ok = !t || (tr.textContent+' '+(nx?.textContent||'')).toLowerCase().includes(t); tr.style.display = ok ? '' : 'none'; if (nx) nx.style.display = ok ? '' : 'none'; }); });
-    box.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>atribuirLinha(casa.find(x=>x.i===+b.dataset.at), R, ()=>cmsVend(box)));
-    box.querySelectorAll('[data-ag]').forEach(b=>b.onclick=()=>linhaNaAgencia(casa.find(x=>x.i===+b.dataset.ag), R, ()=>manterScroll(()=>{ CMS_RUN=null; CMS_CASA=null; cmsVend(box); })));
-    box.querySelectorAll('[data-agx]').forEach(b=>b.onclick=()=>linhaNaAgenciaDesfazer(casa.find(x=>x.i===+b.dataset.agx), R, ()=>manterScroll(()=>{ CMS_RUN=null; CMS_CASA=null; cmsVend(box); })));
+    box.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>atribuirLinha(casa.find(x=>x.i===+b.dataset.at), R, ev=>refazer(ev, box, cmsVend)));
+    box.querySelectorAll('[data-ag]').forEach(b=>b.onclick=()=>linhaNaAgencia(casa.find(x=>x.i===+b.dataset.ag), R, ev=>refazer(ev, box, cmsVend)));
+    box.querySelectorAll('[data-agx]').forEach(b=>b.onclick=()=>linhaNaAgenciaDesfazer(casa.find(x=>x.i===+b.dataset.agx), R, ev=>refazer(ev, box, cmsVend)));
     box.querySelectorAll('[data-desf]').forEach(b=>b.onclick=async()=>{ const man={...(R.manual||{})}; delete man[b.dataset.desf];
-      try { await updateDoc(doc(db,'runs',CMS_MES), {manual:man}); await logAlt({tipo:'Atribuição manual desfeita', desde:CMS_MES, resumo:b.dataset.desf.split('#')[0]}); CMS_RUN=null; cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+      try { await updateDoc(doc(db,'runs',CMS_MES), {manual:man}); await logAlt({tipo:'Atribuição manual desfeita', desde:CMS_MES, resumo:b.dataset.desf.split('#')[0]}); R.manual=man; refazer({tipo:'solta', chave:b.dataset.desf}, box, cmsVend); } catch(e){ toast(errTxt(e), true); } });
     cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
@@ -3256,6 +3256,29 @@ async function procurarPN(tipo, v){
   return Object.values(mp).sort((a,b)=>String(b.mesRef||'').localeCompare(String(a.mesRef||'')));
 }
 // linha sem PN que fica na agência (sem comissão a vendedor); opcionalmente todas as linhas do mesmo POS, neste e nos próximos RUN
+// atualiza a conciliação em memória depois de uma ação numa linha (sem voltar a ler o RUN nem os PN todos: poupa leituras).
+// Se não der (ex.: falta o escalão de um vendedor/mês), faz a conciliação completa como antes.
+async function refazer(ev, box, view){
+  let ok=false;
+  try { const C=CMS_CASA; if (ev && C && C.mes===CMS_MES && C.run===CMS_RUN && C.tier) { const R=C.run, casa=C.casa, ch=chavesLinhas(R.linhas);
+      const P=String(ev.pos||'').trim().toUpperCase(), doPOS=x=>P && String(x.l[RL.pos]||'').trim().toUpperCase()===P, daChave=k=>casa.find(x=>ch[x.i]===k);
+      const pnDoPOS=async pos=>{ const col=collection(db,'rpn'), q=String(pos||'').trim().toUpperCase(); if (!q) return null; let best=null;
+        for (const f of ['contratos','contratosAntigos']) (await getDocs(query(col, where(f,'array-contains',q)))).docs.forEach(d=>{ const r={id:d.id,...d.data()}; if (!best || (r.estado==='PN' && best.estado!=='PN')) best=r; }); return best; };
+      ok=true;
+      if (ev.tipo==='agencia') { R.manual={...(R.manual||{}), [ev.chave]:ev.info}; casa.filter(x=>x.i===ev.x.i || (ev.porPOS && doPOS(x) && !x.manualR)).forEach(x=>{ x.agencia = x.i===ev.x.i ? ev.info : {...ev.info, porPOS:true}; x.r=null; }); }
+      else if (ev.tipo==='solta') { const m={...(R.manual||{})}; delete m[ev.chave]; R.manual=m; const x0=daChave(ev.chave); const alvo=casa.filter(x=>x===x0 || (ev.porPOS && doPOS(x) && x.agencia?.porPOS));
+        const P0=String(x0?.l[RL.pos]||'').trim().toUpperCase(), r=P0 ? await pnDoPOS(P0) : null; alvo.forEach(x=>{ x.agencia=null; x.manualR=null; x.manual=null; x.r = String(x.l[RL.pos]||'').trim().toUpperCase()===P0 ? r : null; }); }
+      else if (ev.tipo==='manual') { R.manual={...(R.manual||{}), [ev.chave]:ev.info}; const x=casa.find(y=>y.i===ev.x.i); if (x) { x.manualR=ev.r; x.manual=ev.info; x.r=ev.r; x.agencia=null; } }
+      else if (ev.tipo==='pos') casa.filter(x=>doPOS(x) && !x.manualR && !x.agencia).forEach(x=>{ x.r=ev.r; });
+      else if (ev.tipo==='pn') casa.forEach(x=>{ if (x.r?.id===ev.r.id) x.r=ev.r; if (x.manualR?.id===ev.r.id) x.manualR=ev.r; });
+      else ok=false;
+      if (ok) casa.forEach(x=>{ x.uid=x.r?.vendedorUid||null; x.mesPN=x.r?.mesRef||null; x.prm=SEM_COMISSAO.test(String(x.l[RL.cod]||''));
+        if (x.uid && x.mesPN && x.f!=='ag' && !x.prm) { const t=C.tier[x.uid+'|'+x.mesPN]; if (!t) { ok=false; return; } x.t=t; x.com=Math.round(x.l[RL.val]*t.pct/100*(1+t.maj)*100)/100; }
+        else { x.com=0; x.t = x.uid && x.mesPN ? (C.tier[x.uid+'|'+x.mesPN]||null) : null; } });
+      if (ev.tipo==='pn') C.velho=true;   // os eventos do PN mudaram: as comissões (escalões) refazem-se ao abrir «Comissões por vendedor»
+    } } catch(e){ console.warn('refazer', e); ok=false; }
+  manterScroll(()=>{ if (!ok) { CMS_RUN=null; CMS_CASA=null; } view(box); });
+}
 // volta a desenhar e repõe a posição da página (a conciliação demora um pouco)
 function manterScroll(fn){ const y=window.scrollY; fn(); let n=0; const t=setInterval(()=>{ n++; const pronto=document.querySelector('tr.vl-r, [data-at], #lpi-f') && !document.querySelector('#cms .card.muted:only-child'); if ((pronto && document.body.scrollHeight>y+300) || n>40) { clearInterval(t); if (pronto) window.scrollTo(0,y); } }, 300); }
 function linhaNaAgencia(x, R, depois){
@@ -3272,7 +3295,7 @@ function linhaNaAgencia(x, R, depois){
       try { await setDoc(doc(db,'runs',R.mes), {manual:{[chave]:info}}, {merge:true});
         if (porPOS) await setDoc(doc(db,'comissoes','posAgencia'), {pos:{[pos]:{motivo:mo, mes:R.mes, por:S.me.nome, em:info.em}}}, {merge:true});
         await logAlt({tipo:'Linha do RUN fica na agência', desde:R.mes, resumo:`RUN ${mesTxt(R.mes)}: ${l[RL.cod]} POS ${pos||'—'} ${eur(l[RL.val])} €${porPOS?' (e próximas do mesmo POS)':''} · ${mo}`});
-        close(); toast('A linha fica na agência.'); depois(); } catch(e){ toast(errTxt(e), true); } };
+        close(); toast('A linha fica na agência.'); depois({tipo:'agencia', x, chave, info, porPOS, pos}); } catch(e){ toast(errTxt(e), true); } };
   });
 }
 async function linhaNaAgenciaDesfazer(x, R, depois){
@@ -3281,7 +3304,7 @@ async function linhaNaAgenciaDesfazer(x, R, depois){
   try { if (man[chave]?.agencia) { delete man[chave]; await updateDoc(doc(db,'runs',R.mes), {manual:man}); }
     if (x.agencia?.porPOS || x.agencia?.pos) { const sa=await getDoc(doc(db,'comissoes','posAgencia')), p={...(sa.data()?.pos||{})}; delete p[pos]; await setDoc(doc(db,'comissoes','posAgencia'), {pos:p}); }
     await logAlt({tipo:'Linha do RUN volta a imputar', desde:R.mes, resumo:`RUN ${mesTxt(R.mes)}: ${x.l[RL.cod]} POS ${pos||'—'}`});
-    toast('Desfeito.'); depois(); } catch(e){ toast(errTxt(e), true); }
+    toast('Desfeito.'); depois({tipo:'solta', chave, pos, porPOS:!!(x.agencia?.porPOS || x.agencia?.pos), x}); } catch(e){ toast(errTxt(e), true); }
 }
 function atribuirLinha(x, R, depois){
   const l = x.l, chave = chavesLinhas(R.linhas)[x.i], fechado = !!R.fechado;
@@ -3305,9 +3328,9 @@ function atribuirLinha(x, R, depois){
           try { await setDoc(doc(db,'runs',R.mes), {manual:{[chave]:{rpnId:r.id, numero:r.numero||'', por:S.me.nome, em:new Date().toISOString()}}}, {merge:true});
             await logAlt({tipo:'Atribuição manual', desde:R.mes, resumo:`RUN ${mesTxt(R.mes)}: ${l[RL.cod]} POS ${l[RL.pos]||'—'} MSISDN ${l[RL.msisdn]||'—'} → PN ${r.numero} (${r.vendedorNome||''})`});
             await hist('Comissão atribuída manualmente', `RUN ${mesTxt(R.mes)}: ${l[RL.cod]} POS ${l[RL.pos]||'—'} MSISDN ${l[RL.msisdn]||'—'}`, r.id);
-            close(); toast(`Linha atribuída ao PN ${r.numero}.`); CMS_RUN=null; depois(); } catch(e){ toast(errTxt(e), true); } });
+            close(); toast(`Linha atribuída ao PN ${r.numero}.`); depois({tipo:'manual', x, chave, r, info:{rpnId:r.id, numero:r.numero||'', por:S.me.nome, em:new Date().toISOString()}}); } catch(e){ toast(errTxt(e), true); } });
         box.querySelectorAll('[data-pos]').forEach(b=>b.onclick=async()=>{ const r=rs.find(y=>y.id===b.dataset.pos);
-          try { await associarAoPN(r, {pos:l[RL.pos]}, `linha do RUN de ${mesTxt(R.mes)} (${l[RL.cod]})`); close(); toast(`POS ${l[RL.pos]} associado ao PN ${r.numero}.`); CMS_RUN=null; depois(); } catch(e){ toast(errTxt(e), true); } });
+          try { await associarAoPN(r, {pos:l[RL.pos]}, `linha do RUN de ${mesTxt(R.mes)} (${l[RL.cod]})`); close(); toast(`POS ${l[RL.pos]} associado ao PN ${r.numero}.`); depois({tipo:'pos', pos:l[RL.pos], r}); } catch(e){ toast(errTxt(e), true); } });
       } catch(e){ box.innerHTML=`<p>Erro: ${esc(errTxt(e))}</p>`; } };
     m.querySelector('#ap-go').onclick = ir; m.querySelector('#ap-v').onkeydown = e => { if (e.key==='Enter') ir(); };
     m.querySelector('#ap-r').innerHTML = '<p class="muted">Escolha o critério e carregue em «Procurar».</p>';
@@ -3965,8 +3988,8 @@ function atualizarPNdoRUN(o, depois){
         agDelta(d, {...d, ...u});
         // a reimportação dos PN do PHC não volta a escrever as linhas deste PN (ficam as correções feitas aqui)
         try { await setDoc(doc(db,'comissoes','pnCorrigidos'), {pns:{[o.pn.id]:{numero:o.pn.numero||'', em:new Date().toISOString(), por:S.me.nome}}}, {merge:true}); } catch(_){}
-        Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); delete CVPN_MEM[o.pn.id]; CMS_RUN=null;
-        close(); toast('PN atualizado. A validação vai ser refeita.'); depois&&depois();
+        Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); delete CVPN_MEM[o.pn.id];
+        close(); toast('PN atualizado.'); depois&&depois({tipo:'pn', r:{...o.pn, ...d, ...u, id:o.pn.id}});
       } catch(e){ toast(errTxt(e), true); } };
   });
 }
@@ -3986,7 +4009,7 @@ function cmsValid(box){
     if (R.origem==='PHC') { box.innerHTML = topo+`<div class="card muted">Este RUN veio do histórico PHC, que não traz prazo, tier nem RLMC ajustada. A validação funciona com os RUN importados do ficheiro da Vodafone (xlsx).</div>`; ligaMes(()=>cmsValid(box)); return; }
     let casa;
     if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R) casa = CMS_CASA.casa;
-    else if (VAL_CONC===CMS_MES || CMS_CASA?.mes===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; CMS_CONC = VAL_CONC = CMS_MES; }
+    else if (VAL_CONC===CMS_MES || CMS_CASA?.mes===CMS_MES) { const cr = await conciliarRun(R); casa = cr.casa; CMS_CASA = {mes:CMS_MES, run:R, casa, tier:cr.tier}; CMS_CONC = VAL_CONC = CMS_MES; }
     else { box.innerHTML = topo+`<div class="card"><p class="muted" style="margin-top:0">Para obter as divergências, carregue em «Validar» (lê os PN da plataforma).</p><button class="btn pri" id="vl-go">Validar RUN de ${mesTxt(CMS_MES)}</button></div>`;
       $('#vl-go').onclick = () => { VAL_CONC = CMS_MES; cmsValid(box); }; ligaMes(()=>cmsValid(box)); return; }
     // comissão esperada: calibrada no próprio RUN (nada de multiplicadores Vodafone no código) — fator RLMC ajustada ÷ RLMC
@@ -4068,8 +4091,8 @@ function cmsValid(box){
     $('#vl-k').onchange = e => { VAL_K = e.target.value; vlFiltra(); };
     vlFiltra();
     $('#vl-tol').onchange = e => { VAL_TOL = Math.max(0, +e.target.value||0); try { localStorage.setItem('cms-val-tol2', String(VAL_TOL)); } catch(_){} cmsValid(box); };
-    box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ()=>manterScroll(()=>{ CMS_CASA=null; cmsValid(box); })));
-    box.querySelectorAll('[data-vag]').forEach(b=>b.onclick=()=>linhaNaAgencia(L[+b.dataset.vag].x, R, ()=>manterScroll(()=>{ CMS_RUN=null; CMS_CASA=null; cmsValid(box); })));
+    box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ev=>refazer(ev, box, cmsValid)));
+    box.querySelectorAll('[data-vag]').forEach(b=>b.onclick=()=>linhaNaAgencia(L[+b.dataset.vag].x, R, ev=>refazer(ev, box, cmsValid)));
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
 // ===== Performance do Agente perante a Vodafone (objetivos trimestrais da Redemóvel) =====
