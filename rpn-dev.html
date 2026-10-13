@@ -2022,8 +2022,10 @@ function atDesenhaLista(){
     && (!t || semAcento([atNum(r), r.numero, r.cliente?.nome, r.cliente?.nif, r.assunto, r.subAssunto, r.conta, r.msisdns, r.vendedorNome, r.descricao].join(' ')).includes(t)));
   const cnt={}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
   const atChave = r => String(r.estado==='Agendada' && r.dataEfetiva ? r.dataEfetiva : (r.data||'')).slice(0,10);
+  // em cima as datas mais perto de hoje: as de hoje, depois ontem/amanhã… (as agendadas para daqui a meses ficam mais abaixo)
+  const atHoje = new Date(hojeLocal()+'T12:00:00'), atPerto = r => { const d=atChave(r); return d ? Math.abs(Math.round((new Date(d+'T12:00:00')-atHoje)/864e5)) : 99999; };
   if (!f.estados) { try { f.estados=JSON.parse(localStorage.getItem('at-estados')||'[]'); } catch(_){ f.estados=[]; } }
-  const rows=base.filter(r=>!f.estados.length || f.estados.includes(r.estado)).sort((a,b)=>atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
+  const rows=base.filter(r=>!f.estados.length || f.estados.includes(r.estado)).sort((a,b)=>atPerto(a)-atPerto(b) || atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
   $('#main').innerHTML=`
     <div class="chips" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)"><div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
       ${AT_ESTADOS.map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
