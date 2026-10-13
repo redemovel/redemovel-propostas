@@ -4387,10 +4387,16 @@ function admCat(el){
     <textarea id="bt" rows="6" placeholder="Colar aqui…"></textarea>
     <div class="row" style="margin-top:8px"><button class="btn" id="bp">Pré-visualizar</button><button class="btn pri" id="bi" disabled>Importar</button><span id="bs" class="muted"></span></div>
     <div id="bprev" style="margin-top:8px;font-size:13px"></div></div>
-    <div class="card"><div class="row" style="margin-bottom:8px"><h2 style="margin:0">Catálogo atual (${S.prodList.length})</h2><span class="sp"></span><input id="cf" placeholder="Filtrar…" style="max-width:260px"></div>
+    <div class="card"><div class="row" style="margin-bottom:8px"><h2 style="margin:0">Catálogo atual (${S.prodList.length})</h2><span class="sp"></span><label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink);font-size:13px"><input type="checkbox" id="cf0"> Só sem tier ou sem pricing plan</label><input id="cf" placeholder="Filtrar…" style="max-width:260px"><button class="btn sm" id="cfx" title="Descarrega a lista que está a ver (abre no Excel)">⬇ Excel</button></div><div class="muted" id="cfn" style="font-size:12px;margin-bottom:6px"></div>
     <div class="scroll" style="max-height:480px" id="clist"></div></div>`;
   const tbl = rows => `<table><thead><tr><th>Sub-fam.</th><th>Referência</th><th>Designação</th><th>Tier</th><th>PricingPlan</th><th>Desc.</th><th>Categoria</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(p.subfamilia)}</td><td>${esc(p.ref)}</td><td>${esc(p.designacao)}</td><td>${esc(p.tier)}</td><td>${esc(p.pricingPlan)||'<span style="color:var(--red-d)">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td><td>${esc(p.categoria)}</td></tr>`).join('')}</tbody></table>`;
-  const drawList = () => { const f=($('#cf').value||'').toLowerCase(); $('#clist').innerHTML = tbl(S.prodList.filter(p=>!f||(p.ref+' '+p.designacao+' '+p.tier).toLowerCase().includes(f))); };
+  const semDados = p => !String(p.tier||'').trim() || !String(p.pricingPlan||'').trim();
+  const listaCat = () => { const f=($('#cf').value||'').toLowerCase(), so=$('#cf0')?.checked; return S.prodList.filter(p=>(!so || semDados(p)) && (!f||(p.ref+' '+p.designacao+' '+p.tier).toLowerCase().includes(f))); };
+  const drawList = () => { const L=listaCat(); $('#clist').innerHTML = tbl(L); const n=$('#cfn'); if (n) n.textContent = `${L.length} referência(s)${$('#cf0')?.checked?` · ${L.filter(p=>!String(p.tier||'').trim()).length} sem tier · ${L.filter(p=>!String(p.pricingPlan||'').trim()).length} sem pricing plan`:''}`; };
+  $('#cf0').onchange = drawList;
+  $('#cfx').onclick = () => { const L=listaCat(), q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+    const csv='\ufeff'+['Sub_familia;Referencia;Designacao;Tipo_tarif;Pricingplan;Descontinuado;Inativo;Categoria', ...L.map(p=>[p.subfamilia,p.ref,p.designacao,p.tier,p.pricingPlan,p.descontinuado?'Sim':'Não',p.inativo?'Sim':'Não',p.categoria].map(q).join(';'))].join('\r\n');
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); a.download=`catalogo${$('#cf0').checked?'-sem-tier-ou-pricing':''}-${hojeLocal()}.csv`; document.body.appendChild(a); a.click(); a.remove(); };
   $('#cf').oninput = drawList; drawList();
   let parsed=[];
   $('#cp').onclick=()=>{ parsed=parseCatalogo($('#ct').value); const novos=parsed.filter(p=>!S.prodMap[p.ref.toUpperCase()]).length, semPP=parsed.filter(p=>!p.pricingPlan).length;
