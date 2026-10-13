@@ -3861,8 +3861,13 @@ function atualizarPNdoRUN(o, depois){
       } catch(e){ toast(errTxt(e), true); } };
   });
 }
-function natVDF(l){ const nova = !/REFIDELIZ/i.test(l[RL.neg]||''), c=String(l[RL.cod]||'').toUpperCase(), ss=/_SS/.test(c), fx=/FIXO|_FX/.test(c);
-  return nova ? (ss ? 'Nova SS' : fx ? 'Nova Fixo' : 'Nova Móvel') : (fx ? 'Ref Fixo' : 'Ref Móvel'); }
+// natureza segundo a Vodafone: Nova/Refidelização pelo Revenue Type (ou Business Type nos RUN antigos);
+// Smart Solutions = só as NOVAS ativações dos grupos IoT e ICT (RLMC 5). Refidelização IoT conta como Móvel (RLMC 2), ICT como Fixo (RLMC 4).
+// Fora disso, Fixo/Móvel pelo código (CTRA_FIXO, CTRA_SS_FX → Fixo; CTRA, CTRA_SS → Móvel): um aditivo de voz pago em CTRA_SS é Móvel.
+function natVDF(l){ const rec=String(l[RLX.receita]||'').toUpperCase(), nova = rec ? !/REFID/.test(rec) : !/REFIDELIZ/i.test(l[RL.neg]||''),
+    g=String(l[RL.grp]||'').toUpperCase(), c=String(l[RL.cod]||'').toUpperCase(), iot=/IOT/.test(g), ict=/ICT/.test(g), fx=/FIXO|_FX/.test(c);
+  if (iot||ict) return nova ? 'Nova SS' : (ict ? 'Ref Fixo' : 'Ref Móvel');
+  return nova ? (fx ? 'Nova Fixo' : 'Nova Móvel') : (fx ? 'Ref Fixo' : 'Ref Móvel'); }
 function cmsValid(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
