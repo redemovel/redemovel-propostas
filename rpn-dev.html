@@ -572,6 +572,8 @@ function drawFicha(){
   else if (S.tab==='msg') tabMsg(tc);
   else if (S.tab==='com') tabComissao(tc);
   else tabHist(tc);
+  if (S.tab==='principal') { const r=S.cur; if (r?.cliente?.nif) contactosFicha(r.cliente.nif).then(x=>{ if (S.cur!==r || S.tab!=='principal') return; const b=document.querySelector('#r-ct'); if (b) b.innerHTML='<div class="muted" style="font-size:12px">Contactos do cliente (ficha)</div>'+contactosHTML(x);
+      if (x && !dis) [['cliente.telefone',x.tel],['cliente.interlocutor',x.nome],['cliente.email',x.email]].forEach(([k,v])=>{ if (v && !String(getPath(r,k)||'').trim()) { setPath(r,k,v); const el=document.querySelector(`[data-f="${k}"]`); if (el) el.value=v; } }); }); }
   // binding genérico data-f
   tc.querySelectorAll('[data-f]').forEach(el=>{
     const ev = el.type==='checkbox'||el.tagName==='SELECT' ? 'change' : 'input';
@@ -760,7 +762,7 @@ function tabOutros(tc, dis){
     <div class="card"><h2>Contacto e prazos</h2><div class="grid g4">
       ${fld('Interlocutor','cliente.interlocutor',dis)}${fld('Telefone','cliente.telefone',dis)}${sel('Loja','loja',LOJAS,dis)}
       ${fld('Data ativação','dtAtivacao',dis,'date')}${fld('Data fim equipamento','dtFimEquip',dis,'date')}${fld('Classificação cliente','classificacao',dis,'text','placeholder="Prospect, Cliente…"')}
-    </div></div>`;
+    </div><div id="r-ct" style="margin-top:10px;font-size:13px;line-height:1.6"></div></div>`;
 }
 function tabCond(tc, dis){
   tc.innerHTML = `<div class="card"><h2>Condições comerciais</h2><div class="grid g4">
