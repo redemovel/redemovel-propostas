@@ -3201,8 +3201,8 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     $('#lpi-f')?.addEventListener('input', e=>{ const t=e.target.value.toLowerCase().trim(); box.querySelectorAll('[data-at]').forEach(b=>{ const tr=b.closest('tr'), nx=tr.nextElementSibling?.classList.contains('lpi-x')?tr.nextElementSibling:null;
       const ok = !t || (tr.textContent+' '+(nx?.textContent||'')).toLowerCase().includes(t); tr.style.display = ok ? '' : 'none'; if (nx) nx.style.display = ok ? '' : 'none'; }); });
     box.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>atribuirLinha(casa.find(x=>x.i===+b.dataset.at), R, ()=>cmsVend(box)));
-    box.querySelectorAll('[data-ag]').forEach(b=>b.onclick=()=>linhaNaAgencia(casa.find(x=>x.i===+b.dataset.ag), R, ()=>{ CMS_RUN=null; CMS_CASA=null; cmsVend(box); }));
-    box.querySelectorAll('[data-agx]').forEach(b=>b.onclick=()=>linhaNaAgenciaDesfazer(casa.find(x=>x.i===+b.dataset.agx), R, ()=>{ CMS_RUN=null; CMS_CASA=null; cmsVend(box); }));
+    box.querySelectorAll('[data-ag]').forEach(b=>b.onclick=()=>linhaNaAgencia(casa.find(x=>x.i===+b.dataset.ag), R, ()=>manterScroll(()=>{ CMS_RUN=null; CMS_CASA=null; cmsVend(box); })));
+    box.querySelectorAll('[data-agx]').forEach(b=>b.onclick=()=>linhaNaAgenciaDesfazer(casa.find(x=>x.i===+b.dataset.agx), R, ()=>manterScroll(()=>{ CMS_RUN=null; CMS_CASA=null; cmsVend(box); })));
     box.querySelectorAll('[data-desf]').forEach(b=>b.onclick=async()=>{ const man={...(R.manual||{})}; delete man[b.dataset.desf];
       try { await updateDoc(doc(db,'runs',CMS_MES), {manual:man}); await logAlt({tipo:'Atribuição manual desfeita', desde:CMS_MES, resumo:b.dataset.desf.split('#')[0]}); CMS_RUN=null; cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
@@ -3256,12 +3256,14 @@ async function procurarPN(tipo, v){
   return Object.values(mp).sort((a,b)=>String(b.mesRef||'').localeCompare(String(a.mesRef||'')));
 }
 // linha sem PN que fica na agência (sem comissão a vendedor); opcionalmente todas as linhas do mesmo POS, neste e nos próximos RUN
+// volta a desenhar e repõe a posição da página (a conciliação demora um pouco)
+function manterScroll(fn){ const y=window.scrollY; fn(); let n=0; const t=setInterval(()=>{ n++; const pronto=document.querySelector('tr.vl-r, [data-at], #lpi-f') && !document.querySelector('#cms .card.muted:only-child'); if ((pronto && document.body.scrollHeight>y+300) || n>40) { clearInterval(t); if (pronto) window.scrollTo(0,y); } }, 300); }
 function linhaNaAgencia(x, R, depois){
   const l=x.l, chave=chavesLinhas(R.linhas)[x.i], pos=String(l[RL.pos]||'').trim().toUpperCase();
   modal(`<h2>Fica na agência, sem PN</h2>
     <div class="card" style="background:#fafafa;font-size:13px"><b>${esc(l[RL.cod])}</b> · POS <b>${esc(pos||'—')}</b> · NIF <b>${esc(l[RL.nif]||'')}</b> · MSISDN <b>${esc(l[RL.msisdn]||'—')}</b> · <b>${eur(l[RL.val])} €</b><br>${esc(descVDF(l))} · ativação ${fmtD(l[RL.cri])}</div>
     <label>Motivo (obrigatório)</label><input id="ag-m" style="width:100%" placeholder="Ex.: negócio anulado, vai haver charge-back">
-    ${pos?`<label style="display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--ink)"><input type="checkbox" id="ag-p" checked> Todas as linhas do POS ${esc(pos)}, neste e nos próximos RUN (o charge-back também fica na agência)</label>`:''}
+    ${pos?`<label style="display:flex;gap:8px;align-items:center;margin-top:10px;color:var(--ink)"><input type="checkbox" id="ag-p"> Também as outras linhas do POS ${esc(pos)}, neste e nos próximos RUN (ex.: o charge-back que vai chegar). Sem esta opção, só a linha escolhida fica na agência.</label>`:''}
     <p class="muted" style="font-size:12px">A linha sai de «Linhas por imputar» e não entra nas comissões de nenhum vendedor. Pode desfazer enquanto o RUN não estiver finalizado.</p>
     <div class="row"><span class="sp"></span><button class="btn" id="ag-c">Cancelar</button><button class="btn pri" id="ag-ok">Fica na agência</button></div>`, (m, close) => {
     m.querySelector('#ag-c').onclick=close;
@@ -3927,7 +3929,7 @@ function cmsHist(box){
   };
 }
 // ===== Validação: o que a Vodafone considerou no RUN vs. o que está no PN (natureza, RLMC, prazo, tier, eventos) =====
-let VAL_FILTRO = 'dif', VAL_TOL = (()=>{ try { const v=localStorage.getItem('cms-val-tol2'); return v!=null ? +v : 2; } catch(_){ return 2; } })();
+let VAL_Q = '', VAL_V = '', VAL_K = '', VAL_FILTRO = 'dif', VAL_TOL = (()=>{ try { const v=localStorage.getItem('cms-val-tol2'); return v!=null ? +v : 2; } catch(_){ return 2; } })();
 const tierTxt = t => { t=String(t||'').trim(); return t ? t.charAt(0).toUpperCase()+t.slice(1).toLowerCase() : ''; };
 // «Atualizar PN» a partir da Validação: escolhe que campos passam a ter o valor que a Vodafone considerou
 function atualizarPNdoRUN(o, depois){
@@ -4042,18 +4044,32 @@ function cmsValid(box){
         <div><b style="font-size:22px">${eur(evTot(o=>o.pl?.val))} €</b><div class="muted" style="font-size:12px">comissão esperada pelos PN</div></div>
         <div><b style="font-size:22px">${eur(evTot(o=>o.pl?o.vdf.val:0))} €</b><div class="muted" style="font-size:12px">paga pela Vodafone (mesmas linhas)</div></div></div>
         <p class="muted" style="font-size:12px;margin-bottom:0">Comissão esperada = RLMC do PN × fator de ajuste (tier, prazo, incentivada, tipo de cliente) × nº de mensalidades (Nova/Refidelização), com os fatores que a Vodafone aplicou nas linhas deste RUN. Se a Vodafone pagar fora da tolerância, a linha aparece com «comissão».</p></div>
-      <div class="card scroll"><table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th class="num" title="Esperada: RLMC e tier/prazo do PN × fatores e mensalidades que a Vodafone aplicou neste RUN. Em baixo: o que a Vodafone pagou.">Comissão VDF</th><th>Divergência</th></tr></thead>
+      <div class="card scroll"><div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+        <div style="flex:1;min-width:240px"><label>Procurar</label><input id="vl-q" value="${esc(VAL_Q)}" placeholder="PN, cliente, NIF, conta, MSISDN, POS, plano, código…" style="width:100%"></div>
+        <div><label>Vendedor</label><select id="vl-v"><option value="">Todos</option>${[...new Set(L.map(o=>o.pn?.vendedorNome||'').filter(Boolean))].sort().map(v=>`<option ${VAL_V===v?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
+        <div><label>Tipo</label><select id="vl-k"><option value="">Todos</option>${['natureza','RLMC','prazo','tier','eventos','comissão','sem PN','agência','linha não encontrada no PN'].map(k=>`<option ${VAL_K===k?'selected':''}>${esc(k)}</option>`).join('')}</select></div>
+        <span class="muted" id="vl-n" style="font-size:12px"></span></div>
+      <table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th class="num" title="Esperada: RLMC e tier/prazo do PN × fatores e mensalidades que a Vodafone aplicou neste RUN. Em baixo: o que a Vodafone pagou.">Comissão VDF</th><th>Divergência</th></tr></thead>
       <tbody>${L.slice(0,800).map((o,ix)=>{ const d=k=>o.dif.includes(k), p=o.pl||(o.pn?{}:{nat:o.vdf.nat, rlmc:o.vdf.rlmc, prazo:o.vdf.prazo, tier:o.vdf.tier, ev:o.vdf.ev}), lv=o.x.l, xv=k=>lv[RLX[k]]||'';
-        return `<tr><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a><div class="muted" style="font-size:10px;white-space:nowrap" title="Como a linha do RUN foi ligada a este PN">${(()=>{ const P=String(o.x.l[RL.pos]||'').toUpperCase(), up=a=>(a||[]).map(x=>String(x).trim().toUpperCase()); return o.x.manual?'atribuição manual':up(o.pn.contratosAntigos).includes(P)?'pelo POS associado':up(o.pn.contratos).includes(P)?'pelo POS do PN':'pelo MSISDN + NIF'; })()}</div>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
+        return `<tr class="vl-r" data-v="${esc(o.pn?.vendedorNome||'')}" data-k="|${esc(o.dif.concat(o.tol||[]).join('|'))}|" data-x="${esc([o.pn?.cliente?.nome, o.pn?.cliente?.nif, o.x.l[RL.nif], o.x.l[RLX.conta], o.x.l[RL.cod], o.x.l[RL.neg]].filter(Boolean).join(' '))}"><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a><div class="muted" style="font-size:10px;white-space:nowrap" title="Como a linha do RUN foi ligada a este PN">${(()=>{ const P=String(o.x.l[RL.pos]||'').toUpperCase(), up=a=>(a||[]).map(x=>String(x).trim().toUpperCase()); return o.x.manual?'atribuição manual':up(o.pn.contratosAntigos).includes(P)?'pelo POS associado':up(o.pn.contratos).includes(P)?'pelo POS do PN':'pelo MSISDN + NIF'; })()}</div>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
         ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier).replace('</td>', p.tCat?'<div class="muted" style="font-size:11px;font-weight:400" title="A linha do PN não tem tier; usado o da referência no catálogo">(catálogo)</div></td>':'</td>')}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v)).replace('</td>', p.evV!=null && Math.abs(p.evV-p.ev)>0.001 ? `<div class="muted" style="font-size:11px;font-weight:400" title="Eventos que a Vodafone devia considerar por este PN, com os fatores deste RUN (até set/2026 o Score penalizava o Bronze em 40 %)">esperado VDF: ${n3(p.evV)}</div></td>` : '</td>')}<td class="num" style="${d('comissão')?'background:#fde8e8;font-weight:600':''}">${p.val!=null?eur(p.val):'—'}<div class="muted" style="font-size:11px;font-weight:400">VDF: ${eur(o.vdf.val)}</div></td>
         <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}${(o.tol||[]).map(t=>` <span class="badge" style="background:#fff4d6;color:#8a5a00" title="Diferença dentro da tolerância">${esc(t)} ≈</span>`).join('')}
           ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}${!o.pn && !o.agencia && !R.fechado ? `<div><button class="btn sm" data-vag="${L.indexOf(o)}" style="margin-top:4px" title="Não vai ter PN (negócio anulado, charge-back a caminho…): fica na agência">Fica na agência</button></div>`:''}</td></tr>${!o.pn?`<tr class="lpi-x"><td colspan="11" class="muted" style="font-size:11px;padding-top:0">Dados da Vodafone (sem PN na plataforma): <b>${esc(lv[RL.cod])}</b> · ${esc(lv[RL.neg]||'')}${lv[RL.grp]?' · '+esc(lv[RL.grp]):''} · NIF <b>${esc(lv[RL.nif]||'—')}</b>${xv('conta')?' · conta <b>'+esc(xv('conta'))+'</b>':''} · MSISDN <b>${esc(lv[RL.msisdn]||'—')}</b> · ${esc(lv[RL.pp]||'')} · ativação ${fmtD(lv[RL.cri])}${lv[RL.des]?' · desativação '+fmtD(lv[RL.des]):''} · RLMC aj. ${lv[RL.rlmcA]?eur(lv[RL.rlmcA]):'—'} · SFID ${esc(lv[RL.sfid]||'—')}${RUN_EXTRA.filter(([k])=>xv(k) && !['conta','cid'].includes(k)).map(([k,,t])=>` · ${t}: ${esc(xFmt(k,xv(k)))}`).join('')}${o.agencia?` · <b>fica na agência</b>: ${esc(o.agencia.motivo||'')}`:''}</td></tr>`:''}`; }).join('')||'<tr><td colspan="11" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
       ${L.length>800?`<p class="muted">Mostradas 800 de ${L.length} linhas.</p>`:''}</div>`;
     ligaMes(()=>cmsValid(box));
     $('#vl-d').onchange = e => { VAL_FILTRO = e.target.value; cmsValid(box); };
+    const vlFiltra = () => { const q=VAL_Q.toLowerCase().trim(); let n=0;
+      box.querySelectorAll('tr.vl-r').forEach(tr=>{ const nx=tr.nextElementSibling?.classList.contains('lpi-x')?tr.nextElementSibling:null;
+        const ok=(!VAL_V || tr.dataset.v===VAL_V) && (!VAL_K || tr.dataset.k.includes('|'+VAL_K+'|')) && (!q || (tr.textContent+' '+(nx?.textContent||'')+' '+(tr.dataset.x||'')).toLowerCase().includes(q));
+        tr.style.display=ok?'':'none'; if (nx) nx.style.display=ok?'':'none'; if (ok) n++; });
+      const el=$('#vl-n'); if (el) el.textContent = (VAL_Q||VAL_V||VAL_K) ? `${n} linha(s)` : ''; };
+    $('#vl-q').oninput = e => { VAL_Q = e.target.value; vlFiltra(); };
+    $('#vl-v').onchange = e => { VAL_V = e.target.value; vlFiltra(); };
+    $('#vl-k').onchange = e => { VAL_K = e.target.value; vlFiltra(); };
+    vlFiltra();
     $('#vl-tol').onchange = e => { VAL_TOL = Math.max(0, +e.target.value||0); try { localStorage.setItem('cms-val-tol2', String(VAL_TOL)); } catch(_){} cmsValid(box); };
-    box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ()=>{ CMS_CASA=null; cmsValid(box); }));
-    box.querySelectorAll('[data-vag]').forEach(b=>b.onclick=()=>linhaNaAgencia(L[+b.dataset.vag].x, R, ()=>{ CMS_RUN=null; CMS_CASA=null; cmsValid(box); }));
+    box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ()=>manterScroll(()=>{ CMS_CASA=null; cmsValid(box); })));
+    box.querySelectorAll('[data-vag]').forEach(b=>b.onclick=()=>linhaNaAgencia(L[+b.dataset.vag].x, R, ()=>manterScroll(()=>{ CMS_RUN=null; CMS_CASA=null; cmsValid(box); })));
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
 // ===== Performance do Agente perante a Vodafone (objetivos trimestrais da Redemóvel) =====
