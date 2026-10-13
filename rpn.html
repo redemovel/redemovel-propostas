@@ -335,6 +335,48 @@ function msgPendFim(r){
   if (!partes.every(x=>String(r.msgLido?.[x]||'') >= String(u.em||''))) return {};
   u.pend=false; return {msgUlt:{pend:false}};
 }
+// ===== tabelas: ordenar por coluna e filtrar (genérico; a ordem escolhida mantém-se quando a tabela é redesenhada) =====
+const TAB_ORD = {};
+const tabSig = t => [...(t.tHead?.rows[0]?.cells||[])].map(c=>c.textContent.replace(/[▲▼]/g,'').trim()).join('|');
+const tabOk = t => !!(t && t.tHead && t.tBodies[0] && t.tBodies[0].rows.length>1 && !t.closest('#lines') && !t.dataset.noord && !t.tBodies[0].querySelector('input:not([type=checkbox]),select,textarea'));
+function celVal(td){ const s=String(td?.dataset?.v ?? td?.textContent ?? '').trim();
+  let m=s.match(/^(\d{2})[./](\d{2})[./](\d{4})/); if (m) return {n:+(m[3]+m[2]+m[1])};
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return {n:+(m[1]+m[2]+m[3])};
+  const t=s.split(/\s{2,}|\n/)[0].replace(/[€%\s~]/g,''); if (/^[-+]?[\d.]*,?\d+$/.test(t)) { const n=parseFloat(t.replace(/\./g,'').replace(',','.')); if (!isNaN(n)) return {n}; }
+  return {s:s.toLowerCase()}; }
+function tabGrupos(tb){ const segs=[[]]; let cur=null;   // linha + linhas «companheiras» (.lpi-x); uma linha só com uma célula larga separa grupos
+  [...tb.rows].forEach(r=>{ if (r.classList.contains('lpi-x') && cur) { cur.push(r); return; }
+    if (r.cells.length===1 && r.cells[0].colSpan>1) { segs.push({sep:r}, []); cur=null; return; }
+    cur=[r]; segs[segs.length-1].push(cur); });
+  return segs; }
+function tabOrdena(t, col, dir){
+  const tb=t.tBodies[0], segs=tabGrupos(tb), K=new Map(); segs.forEach(sg=>{ if (Array.isArray(sg)) sg.forEach(g=>K.set(g, celVal(g[0].cells[col]))); });
+  const cmp=(a,b)=>{ const x=K.get(a), y=K.get(b);
+    if (x.n!=null && y.n!=null) return (x.n-y.n)*dir; if (x.n!=null) return -1; if (y.n!=null) return 1; return String(x.s).localeCompare(String(y.s),'pt',{numeric:true})*dir; };
+  const fr=document.createDocumentFragment(); segs.forEach(sg=>{ if (Array.isArray(sg)) { sg.sort(cmp).forEach(g=>g.forEach(r=>fr.appendChild(r))); } else fr.appendChild(sg.sep); });
+  tb.appendChild(fr);
+  [...t.tHead.rows[0].cells].forEach((c,i)=>{ c.dataset.ord = i===col ? (dir>0?'a':'d') : ''; });
+}
+function tabFiltra(t, q){ q=String(q||'').toLowerCase().trim(); let n=0;
+  tabGrupos(t.tBodies[0]).forEach(sg=>{ if (!Array.isArray(sg)) return; sg.forEach(g=>{ const ok=!q || g.map(r=>r.textContent).join(' ').toLowerCase().includes(q); g.forEach(r=>r.style.display=ok?'':'none'); if (ok) n++; }); });
+  return n; }
+document.addEventListener('click', e=>{
+  const th=e.target instanceof Element ? e.target.closest('thead th') : null; if (!th || e.target.closest('input,button,a,select')) return;
+  const t=th.closest('table'); if (!tabOk(t) || th.parentElement!==t.tHead.rows[0]) return;
+  const col=[...th.parentElement.cells].indexOf(th), sig=tabSig(t), st=TAB_ORD[sig], dir = st && st.col===col ? -st.dir : 1;
+  TAB_ORD[sig]={col, dir}; tabOrdena(t, col, dir);
+});
+(()=>{ const st=document.createElement('style');
+  st.textContent='table thead th{cursor:pointer;user-select:none} thead th[data-ord="a"]::after{content:" ▲";font-size:9px} thead th[data-ord="d"]::after{content:" ▼";font-size:9px} .tab-f{max-width:260px;margin:0 0 6px;padding:5px 8px;font-size:12px}';
+  document.head.appendChild(st);
+  let tm=null; new MutationObserver(()=>{ clearTimeout(tm); tm=setTimeout(()=>{
+    document.querySelectorAll('#main table, .modal table').forEach(t=>{ if (t.dataset.tabOk==='1' || !tabOk(t)) return; t.dataset.tabOk='1';
+      const st0=TAB_ORD[tabSig(t)]; if (st0) tabOrdena(t, st0.col, st0.dir);
+      const caixa=t.closest('.card')||t.parentElement, temFiltro=caixa && caixa.querySelector('input[type=search], input[id$="-f"], input[id$="-q"], #cf, .tab-f');
+      if (t.tBodies[0].rows.length>=12 && !temFiltro) { const f=document.createElement('input'); f.className='tab-f'; f.type='search'; f.placeholder='Filtrar esta tabela…';
+        const alvo=t.parentElement && t.parentElement.classList.contains('scroll') ? t.parentElement : t; alvo.parentElement.insertBefore(f, alvo); f.oninput=()=>tabFiltra(t, f.value); }
+    }); }, 120); }).observe(document.body, {childList:true, subtree:true});
+})();
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 

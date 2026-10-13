@@ -344,6 +344,48 @@ function msgPendFim(r){
   if (!partes.every(x=>String(r.msgLido?.[x]||'') >= String(u.em||''))) return {};
   u.pend=false; return {msgUlt:{pend:false}};
 }
+// ===== tabelas: ordenar por coluna e filtrar (genérico; a ordem escolhida mantém-se quando a tabela é redesenhada) =====
+const TAB_ORD = {};
+const tabSig = t => [...(t.tHead?.rows[0]?.cells||[])].map(c=>c.textContent.replace(/[▲▼]/g,'').trim()).join('|');
+const tabOk = t => !!(t && t.tHead && t.tBodies[0] && t.tBodies[0].rows.length>1 && !t.closest('#lines') && !t.dataset.noord && !t.tBodies[0].querySelector('input:not([type=checkbox]),select,textarea'));
+function celVal(td){ const s=String(td?.dataset?.v ?? td?.textContent ?? '').trim();
+  let m=s.match(/^(\d{2})[./](\d{2})[./](\d{4})/); if (m) return {n:+(m[3]+m[2]+m[1])};
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return {n:+(m[1]+m[2]+m[3])};
+  const t=s.split(/\s{2,}|\n/)[0].replace(/[€%\s~]/g,''); if (/^[-+]?[\d.]*,?\d+$/.test(t)) { const n=parseFloat(t.replace(/\./g,'').replace(',','.')); if (!isNaN(n)) return {n}; }
+  return {s:s.toLowerCase()}; }
+function tabGrupos(tb){ const segs=[[]]; let cur=null;   // linha + linhas «companheiras» (.lpi-x); uma linha só com uma célula larga separa grupos
+  [...tb.rows].forEach(r=>{ if (r.classList.contains('lpi-x') && cur) { cur.push(r); return; }
+    if (r.cells.length===1 && r.cells[0].colSpan>1) { segs.push({sep:r}, []); cur=null; return; }
+    cur=[r]; segs[segs.length-1].push(cur); });
+  return segs; }
+function tabOrdena(t, col, dir){
+  const tb=t.tBodies[0], segs=tabGrupos(tb), K=new Map(); segs.forEach(sg=>{ if (Array.isArray(sg)) sg.forEach(g=>K.set(g, celVal(g[0].cells[col]))); });
+  const cmp=(a,b)=>{ const x=K.get(a), y=K.get(b);
+    if (x.n!=null && y.n!=null) return (x.n-y.n)*dir; if (x.n!=null) return -1; if (y.n!=null) return 1; return String(x.s).localeCompare(String(y.s),'pt',{numeric:true})*dir; };
+  const fr=document.createDocumentFragment(); segs.forEach(sg=>{ if (Array.isArray(sg)) { sg.sort(cmp).forEach(g=>g.forEach(r=>fr.appendChild(r))); } else fr.appendChild(sg.sep); });
+  tb.appendChild(fr);
+  [...t.tHead.rows[0].cells].forEach((c,i)=>{ c.dataset.ord = i===col ? (dir>0?'a':'d') : ''; });
+}
+function tabFiltra(t, q){ q=String(q||'').toLowerCase().trim(); let n=0;
+  tabGrupos(t.tBodies[0]).forEach(sg=>{ if (!Array.isArray(sg)) return; sg.forEach(g=>{ const ok=!q || g.map(r=>r.textContent).join(' ').toLowerCase().includes(q); g.forEach(r=>r.style.display=ok?'':'none'); if (ok) n++; }); });
+  return n; }
+document.addEventListener('click', e=>{
+  const th=e.target instanceof Element ? e.target.closest('thead th') : null; if (!th || e.target.closest('input,button,a,select')) return;
+  const t=th.closest('table'); if (!tabOk(t) || th.parentElement!==t.tHead.rows[0]) return;
+  const col=[...th.parentElement.cells].indexOf(th), sig=tabSig(t), st=TAB_ORD[sig], dir = st && st.col===col ? -st.dir : 1;
+  TAB_ORD[sig]={col, dir}; tabOrdena(t, col, dir);
+});
+(()=>{ const st=document.createElement('style');
+  st.textContent='table thead th{cursor:pointer;user-select:none} thead th[data-ord="a"]::after{content:" ▲";font-size:9px} thead th[data-ord="d"]::after{content:" ▼";font-size:9px} .tab-f{max-width:260px;margin:0 0 6px;padding:5px 8px;font-size:12px}';
+  document.head.appendChild(st);
+  let tm=null; new MutationObserver(()=>{ clearTimeout(tm); tm=setTimeout(()=>{
+    document.querySelectorAll('#main table, .modal table').forEach(t=>{ if (t.dataset.tabOk==='1' || !tabOk(t)) return; t.dataset.tabOk='1';
+      const st0=TAB_ORD[tabSig(t)]; if (st0) tabOrdena(t, st0.col, st0.dir);
+      const caixa=t.closest('.card')||t.parentElement, temFiltro=caixa && caixa.querySelector('input[type=search], input[id$="-f"], input[id$="-q"], #cf, .tab-f');
+      if (t.tBodies[0].rows.length>=12 && !temFiltro) { const f=document.createElement('input'); f.className='tab-f'; f.type='search'; f.placeholder='Filtrar esta tabela…';
+        const alvo=t.parentElement && t.parentElement.classList.contains('scroll') ? t.parentElement : t; alvo.parentElement.insertBefore(f, alvo); f.oninput=()=>tabFiltra(t, f.value); }
+    }); }, 120); }).observe(document.body, {childList:true, subtree:true});
+})();
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -3258,13 +3300,14 @@ async function procurarPN(tipo, v){
 // linha sem PN que fica na agência (sem comissão a vendedor); opcionalmente todas as linhas do mesmo POS, neste e nos próximos RUN
 // atualiza a conciliação em memória depois de uma ação numa linha (sem voltar a ler o RUN nem os PN todos: poupa leituras).
 // Se não der (ex.: falta o escalão de um vendedor/mês), faz a conciliação completa como antes.
-async function refazer(ev, box, view){
+async function refazer(EV, box, view){
   let ok=false;
-  try { const C=CMS_CASA; if (ev && C && C.mes===CMS_MES && C.run===CMS_RUN && C.tier) { const R=C.run, casa=C.casa, ch=chavesLinhas(R.linhas);
-      const P=String(ev.pos||'').trim().toUpperCase(), doPOS=x=>P && String(x.l[RL.pos]||'').trim().toUpperCase()===P, daChave=k=>casa.find(x=>ch[x.i]===k);
+  try { const C=CMS_CASA; if (EV && C && C.mes===CMS_MES && C.run===CMS_RUN && C.tier) { const R=C.run, casa=C.casa, ch=chavesLinhas(R.linhas);
+      const daChave=k=>casa.find(x=>ch[x.i]===k);
       const pnDoPOS=async pos=>{ const col=collection(db,'rpn'), q=String(pos||'').trim().toUpperCase(); if (!q) return null; let best=null;
         for (const f of ['contratos','contratosAntigos']) (await getDocs(query(col, where(f,'array-contains',q)))).docs.forEach(d=>{ const r={id:d.id,...d.data()}; if (!best || (r.estado==='PN' && best.estado!=='PN')) best=r; }); return best; };
       ok=true;
+      for (const ev of (EV.tipo==='lote' ? EV.evs : [EV])) { const P=String(ev.pos||'').trim().toUpperCase(), doPOS=x=>P && String(x.l[RL.pos]||'').trim().toUpperCase()===P;
       if (ev.tipo==='agencia') { R.manual={...(R.manual||{}), [ev.chave]:ev.info}; casa.filter(x=>x.i===ev.x.i || (ev.porPOS && doPOS(x) && !x.manualR)).forEach(x=>{ x.agencia = x.i===ev.x.i ? ev.info : {...ev.info, porPOS:true}; x.r=null; }); }
       else if (ev.tipo==='solta') { const m={...(R.manual||{})}; delete m[ev.chave]; R.manual=m; const x0=daChave(ev.chave); const alvo=casa.filter(x=>x===x0 || (ev.porPOS && doPOS(x) && x.agencia?.porPOS));
         const P0=String(x0?.l[RL.pos]||'').trim().toUpperCase(), r=P0 ? await pnDoPOS(P0) : null; alvo.forEach(x=>{ x.agencia=null; x.manualR=null; x.manual=null; x.r = String(x.l[RL.pos]||'').trim().toUpperCase()===P0 ? r : null; }); }
@@ -3272,10 +3315,10 @@ async function refazer(ev, box, view){
       else if (ev.tipo==='pos') casa.filter(x=>doPOS(x) && !x.manualR && !x.agencia).forEach(x=>{ x.r=ev.r; });
       else if (ev.tipo==='pn') casa.forEach(x=>{ if (x.r?.id===ev.r.id) x.r=ev.r; if (x.manualR?.id===ev.r.id) x.manualR=ev.r; });
       else ok=false;
+      if (ev.tipo==='pn') C.velho=true; }
       if (ok) casa.forEach(x=>{ x.uid=x.r?.vendedorUid||null; x.mesPN=x.r?.mesRef||null; x.prm=SEM_COMISSAO.test(String(x.l[RL.cod]||''));
         if (x.uid && x.mesPN && x.f!=='ag' && !x.prm) { const t=C.tier[x.uid+'|'+x.mesPN]; if (!t) { ok=false; return; } x.t=t; x.com=Math.round(x.l[RL.val]*t.pct/100*(1+t.maj)*100)/100; }
         else { x.com=0; x.t = x.uid && x.mesPN ? (C.tier[x.uid+'|'+x.mesPN]||null) : null; } });
-      if (ev.tipo==='pn') C.velho=true;   // os eventos do PN mudaram: as comissões (escalões) refazem-se ao abrir «Comissões por vendedor»
     } } catch(e){ console.warn('refazer', e); ok=false; }
   manterScroll(()=>{ if (!ok) { CMS_RUN=null; CMS_CASA=null; } view(box); });
 }
@@ -3954,6 +3997,32 @@ function cmsHist(box){
 // ===== Validação: o que a Vodafone considerou no RUN vs. o que está no PN (natureza, RLMC, prazo, tier, eventos) =====
 let VAL_Q = '', VAL_V = '', VAL_K = '', VAL_FILTRO = 'dif', VAL_TOL = (()=>{ try { const v=localStorage.getItem('cms-val-tol2'); return v!=null ? +v : 2; } catch(_){ return 2; } })();
 const tierTxt = t => { t=String(t||'').trim(); return t ? t.charAt(0).toUpperCase()+t.slice(1).toLowerCase() : ''; };
+// aplica à linha do PN os campos escolhidos com o valor da Vodafone (usado pelo «Atualizar PN» de uma linha e pela ação em lote)
+async function aplicarPNdoRUN(o, ks){
+  const v=o.vdf, l=o.x.l;
+  { const sn = await getDoc(doc(db,'rpn',o.pn.id)), d = sn.data(), ls = JSON.parse(JSON.stringify(d.linhas||[]));
+        let i = o.idx; if (!(i>=0 && ls[i])) i = ls.findIndex(y=>String(y.contratoVDF||'').toUpperCase()===String(o.ln.contratoVDF||'').toUpperCase() && String(y.msisdn||'')===String(o.ln.msisdn||'') && natNorm(y.natureza)===natNorm(o.ln.natureza));
+        if (i<0) { toast(`PN ${o.pn.numero}: não encontrei a linha (foi alterado entretanto?). Volte a validar.`, true); return null; }
+        const y = ls[i], txt = [];
+        const tem = k => ks.includes(k) && v[{natureza:'nat',rlmc:'rlmc',prazo:'prazo',tier:'tier',eventos:'ev'}[k]]!=null && v[{natureza:'nat',rlmc:'rlmc',prazo:'prazo',tier:'tier',eventos:'ev'}[k]]!=='';
+        if (tem('natureza')) { txt.push(`natureza ${y.natureza||'—'} → ${v.nat}`); y.natureza = v.nat; }
+        if (tem('rlmc')) { txt.push(`RLMC ${y.rlmc} → ${v.rlmc}`); y.rlmc = +v.rlmc; }
+        if (tem('prazo')) { txt.push(`prazo ${y.prazo||'—'} → ${v.prazo}`); y.prazo = +v.prazo; }
+        if (tem('tier')) { txt.push(`tier ${y.tier||'—'} → ${tierTxt(v.tier)}`); y.tier = tierTxt(v.tier); }
+        if (tem('eventos')) { txt.push(`eventos ${n3(scoreLinha(y,d))} → ${n3(v.ev)} (da Vodafone)`); y.scorePHC = Math.round(v.ev*1000)/1000; }
+        if (!txt.length) return null;
+        const rr = {...d, linhas:ls}; ls.forEach(z=>{ z.score = scoreLinha(z, rr); });
+        const u = {linhas:ls, nLinhas:ls.length, totRLMC:Math.round(ls.reduce((a,z)=>a+(+z.rlmc||0),0)*100)/100, totScore:Math.round(ls.reduce((a,z)=>a+scoreLinha(z,rr),0)*1000)/1000, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
+        await updateDoc(doc(db,'rpn',o.pn.id), u);
+        await hist('Atualizado pelo RUN', `RUN de ${mesTxt(CMS_MES)} (${l[RL.cod]} ${l[RL.pos]||''}): ${txt.join('; ')}`, o.pn.id);
+        await logAlt({tipo:'PN atualizado pelo RUN', desde:CMS_MES, resumo:`PN ${o.pn.numero}: ${txt.join('; ')}`});
+        agDelta(d, {...d, ...u});
+        // a reimportação dos PN do PHC não volta a escrever as linhas deste PN (ficam as correções feitas aqui)
+        try { await setDoc(doc(db,'comissoes','pnCorrigidos'), {pns:{[o.pn.id]:{numero:o.pn.numero||'', em:new Date().toISOString(), por:S.me.nome}}}, {merge:true}); } catch(_){}
+        Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); delete CVPN_MEM[o.pn.id];
+        return {tipo:'pn', r:{...o.pn, ...d, ...u, id:o.pn.id}};
+  }
+}
 // «Atualizar PN» a partir da Validação: escolhe que campos passam a ter o valor que a Vodafone considerou
 function atualizarPNdoRUN(o, depois){
   const p=o.pl||{}, v=o.vdf, l=o.x.l, campos=[
@@ -3971,25 +4040,8 @@ function atualizarPNdoRUN(o, depois){
     m.querySelector('#up-c').onclick = close;
     m.querySelector('#up-ok').onclick = async () => {
       const ks = [...m.querySelectorAll('[data-c]:checked')].map(e=>e.dataset.c); if (!ks.length) return toast('Escolha pelo menos um campo.', true);
-      try { const sn = await getDoc(doc(db,'rpn',o.pn.id)), d = sn.data(), ls = JSON.parse(JSON.stringify(d.linhas||[]));
-        let i = o.idx; if (!(i>=0 && ls[i])) i = ls.findIndex(y=>String(y.contratoVDF||'').toUpperCase()===String(o.ln.contratoVDF||'').toUpperCase() && String(y.msisdn||'')===String(o.ln.msisdn||'') && natNorm(y.natureza)===natNorm(o.ln.natureza));
-        if (i<0) return toast('Não encontrei a linha no PN (foi alterado entretanto?). Volte a validar.', true);
-        const y = ls[i], txt = [];
-        if (ks.includes('natureza')) { txt.push(`natureza ${y.natureza||'—'} → ${v.nat}`); y.natureza = v.nat; }
-        if (ks.includes('rlmc')) { txt.push(`RLMC ${y.rlmc} → ${v.rlmc}`); y.rlmc = +v.rlmc; }
-        if (ks.includes('prazo')) { txt.push(`prazo ${y.prazo||'—'} → ${v.prazo}`); y.prazo = +v.prazo; }
-        if (ks.includes('tier')) { txt.push(`tier ${y.tier||'—'} → ${tierTxt(v.tier)}`); y.tier = tierTxt(v.tier); }
-        if (ks.includes('eventos')) { txt.push(`eventos ${n3(scoreLinha(y,d))} → ${n3(v.ev)} (da Vodafone)`); y.scorePHC = Math.round(v.ev*1000)/1000; }
-        const rr = {...d, linhas:ls}; ls.forEach(z=>{ z.score = scoreLinha(z, rr); });
-        const u = {linhas:ls, nLinhas:ls.length, totRLMC:Math.round(ls.reduce((a,z)=>a+(+z.rlmc||0),0)*100)/100, totScore:Math.round(ls.reduce((a,z)=>a+scoreLinha(z,rr),0)*1000)/1000, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
-        await updateDoc(doc(db,'rpn',o.pn.id), u);
-        await hist('Atualizado pelo RUN', `RUN de ${mesTxt(CMS_MES)} (${l[RL.cod]} ${l[RL.pos]||''}): ${txt.join('; ')}`, o.pn.id);
-        await logAlt({tipo:'PN atualizado pelo RUN', desde:CMS_MES, resumo:`PN ${o.pn.numero}: ${txt.join('; ')}`});
-        agDelta(d, {...d, ...u});
-        // a reimportação dos PN do PHC não volta a escrever as linhas deste PN (ficam as correções feitas aqui)
-        try { await setDoc(doc(db,'comissoes','pnCorrigidos'), {pns:{[o.pn.id]:{numero:o.pn.numero||'', em:new Date().toISOString(), por:S.me.nome}}}, {merge:true}); } catch(_){}
-        Object.keys(TIER_MEM).forEach(k=>delete TIER_MEM[k]); delete CVPN_MEM[o.pn.id];
-        close(); toast('PN atualizado.'); depois&&depois({tipo:'pn', r:{...o.pn, ...d, ...u, id:o.pn.id}});
+      try { const ev = await aplicarPNdoRUN(o, ks); if (!ev) return;
+        close(); toast('PN atualizado.'); depois&&depois(ev);
       } catch(e){ toast(errTxt(e), true); } };
   });
 }
@@ -4072,12 +4124,14 @@ function cmsValid(box){
         <div><label>Vendedor</label><select id="vl-v"><option value="">Todos</option>${[...new Set(L.map(o=>o.pn?.vendedorNome||'').filter(Boolean))].sort().map(v=>`<option ${VAL_V===v?'selected':''}>${esc(v)}</option>`).join('')}</select></div>
         <div><label>Tipo</label><select id="vl-k"><option value="">Todos</option>${['natureza','RLMC','prazo','tier','eventos','comissão','sem PN','agência','linha não encontrada no PN'].map(k=>`<option ${VAL_K===k?'selected':''}>${esc(k)}</option>`).join('')}</select></div>
         <span class="muted" id="vl-n" style="font-size:12px"></span></div>
-      <table><thead><tr><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th class="num" title="Esperada: RLMC e tier/prazo do PN × fatores e mensalidades que a Vodafone aplicou neste RUN. Em baixo: o que a Vodafone pagou.">Comissão VDF</th><th>Divergência</th></tr></thead>
+      <div id="vl-lote" style="display:none;position:sticky;top:0;z-index:5;background:#fff4d6;border:1px solid #f1d38a;border-radius:8px;padding:8px 10px;margin-bottom:8px;gap:8px;align-items:center;flex-wrap:wrap"><b id="vl-ln"></b>
+        ${R.fechado?'':'<button class="btn sm" id="vl-lup">Atualizar PN (selecionadas)…</button><button class="btn sm" id="vl-lag">Fica na agência (selecionadas sem PN)…</button>'}<button class="btn sm" id="vl-lx">Limpar seleção</button></div>
+      <table><thead><tr><th style="width:24px"><input type="checkbox" id="vl-all" title="Selecionar todas as visíveis"></th><th>PN</th><th>Vendedor</th><th>MSISDN / POS</th><th>Plano (Vodafone)</th><th>Natureza</th><th class="num">RLMC</th><th class="num">Prazo</th><th>Tier</th><th class="num">Eventos</th><th class="num" title="Esperada: RLMC e tier/prazo do PN × fatores e mensalidades que a Vodafone aplicou neste RUN. Em baixo: o que a Vodafone pagou.">Comissão VDF</th><th>Divergência</th></tr></thead>
       <tbody>${L.slice(0,800).map((o,ix)=>{ const d=k=>o.dif.includes(k), p=o.pl||(o.pn?{}:{nat:o.vdf.nat, rlmc:o.vdf.rlmc, prazo:o.vdf.prazo, tier:o.vdf.tier, ev:o.vdf.ev}), lv=o.x.l, xv=k=>lv[RLX[k]]||'';
-        return `<tr class="vl-r" data-v="${esc(o.pn?.vendedorNome||'')}" data-k="|${esc(o.dif.concat(o.tol||[]).join('|'))}|" data-x="${esc([o.pn?.cliente?.nome, o.pn?.cliente?.nif, o.x.l[RL.nif], o.x.l[RLX.conta], o.x.l[RL.cod], o.x.l[RL.neg]].filter(Boolean).join(' '))}"><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a><div class="muted" style="font-size:10px;white-space:nowrap" title="Como a linha do RUN foi ligada a este PN">${(()=>{ const P=String(o.x.l[RL.pos]||'').toUpperCase(), up=a=>(a||[]).map(x=>String(x).trim().toUpperCase()); return o.x.manual?'atribuição manual':up(o.pn.contratosAntigos).includes(P)?'pelo POS associado':up(o.pn.contratos).includes(P)?'pelo POS do PN':'pelo MSISDN + NIF'; })()}</div>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
+        return `<tr class="vl-r" data-v="${esc(o.pn?.vendedorNome||'')}" data-k="|${esc(o.dif.concat(o.tol||[]).join('|'))}|" data-x="${esc([o.pn?.cliente?.nome, o.pn?.cliente?.nif, o.x.l[RL.nif], o.x.l[RLX.conta], o.x.l[RL.cod], o.x.l[RL.neg]].filter(Boolean).join(' '))}"><td><input type="checkbox" class="vl-s" data-i="${L.indexOf(o)}"></td><td>${o.pn?`<a href="#/rpn/${esc(o.pn.id)}"><b>${esc(o.pn.numero||'')}</b></a><div class="muted" style="font-size:10px;white-space:nowrap" title="Como a linha do RUN foi ligada a este PN">${(()=>{ const P=String(o.x.l[RL.pos]||'').toUpperCase(), up=a=>(a||[]).map(x=>String(x).trim().toUpperCase()); return o.x.manual?'atribuição manual':up(o.pn.contratosAntigos).includes(P)?'pelo POS associado':up(o.pn.contratos).includes(P)?'pelo POS do PN':'pelo MSISDN + NIF'; })()}</div>`:'—'}</td><td>${esc(o.pn?.vendedorNome||'')}</td><td style="font-size:12px">${esc(o.x.l[RL.msisdn])}<br>${esc(o.x.l[RL.pos])}</td><td style="font-size:12px">${esc(o.x.l[RL.ppn])}</td>
         ${c(d('natureza'),p.nat,o.vdf.nat)}${c(d('RLMC'),p.rlmc,o.vdf.rlmc,v=>eur(v))}${c(d('prazo'),p.prazo,o.vdf.prazo)}${c(d('tier'),p.tier,o.vdf.tier).replace('</td>', p.tCat?'<div class="muted" style="font-size:11px;font-weight:400" title="A linha do PN não tem tier; usado o da referência no catálogo">(catálogo)</div></td>':'</td>')}${c(d('eventos'),p.ev,o.vdf.ev,v=>n3(v)).replace('</td>', p.evV!=null && Math.abs(p.evV-p.ev)>0.001 ? `<div class="muted" style="font-size:11px;font-weight:400" title="Eventos que a Vodafone devia considerar por este PN, com os fatores deste RUN (até set/2026 o Score penalizava o Bronze em 40 %)">esperado VDF: ${n3(p.evV)}</div></td>` : '</td>')}<td class="num" style="${d('comissão')?'background:#fde8e8;font-weight:600':''}">${p.val!=null?eur(p.val):'—'}<div class="muted" style="font-size:11px;font-weight:400">VDF: ${eur(o.vdf.val)}</div></td>
         <td>${o.dif.length?o.dif.map(t=>`<span class="badge b-Cancelado">${esc(t)}</span>`).join(' '):'<span class="badge b-PN">✓</span>'}${(o.tol||[]).map(t=>` <span class="badge" style="background:#fff4d6;color:#8a5a00" title="Diferença dentro da tolerância">${esc(t)} ≈</span>`).join('')}
-          ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}${!o.pn && !o.agencia && !R.fechado ? `<div><button class="btn sm" data-vag="${L.indexOf(o)}" style="margin-top:4px" title="Não vai ter PN (negócio anulado, charge-back a caminho…): fica na agência">Fica na agência</button></div>`:''}</td></tr>${!o.pn?`<tr class="lpi-x"><td colspan="11" class="muted" style="font-size:11px;padding-top:0">Dados da Vodafone (sem PN na plataforma): <b>${esc(lv[RL.cod])}</b> · ${esc(lv[RL.neg]||'')}${lv[RL.grp]?' · '+esc(lv[RL.grp]):''} · NIF <b>${esc(lv[RL.nif]||'—')}</b>${xv('conta')?' · conta <b>'+esc(xv('conta'))+'</b>':''} · MSISDN <b>${esc(lv[RL.msisdn]||'—')}</b> · ${esc(lv[RL.pp]||'')} · ativação ${fmtD(lv[RL.cri])}${lv[RL.des]?' · desativação '+fmtD(lv[RL.des]):''} · RLMC aj. ${lv[RL.rlmcA]?eur(lv[RL.rlmcA]):'—'} · SFID ${esc(lv[RL.sfid]||'—')}${RUN_EXTRA.filter(([k])=>xv(k) && !['conta','cid'].includes(k)).map(([k,,t])=>` · ${t}: ${esc(xFmt(k,xv(k)))}`).join('')}${o.agencia?` · <b>fica na agência</b>: ${esc(o.agencia.motivo||'')}`:''}</td></tr>`:''}`; }).join('')||'<tr><td colspan="11" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
+          ${o.pn && o.ln && (o.dif.length || (o.tol||[]).length) && !CMS_RUN?.fechado ? `<div><button class="btn sm" data-upd="${L.indexOf(o)}" style="margin-top:4px">Atualizar PN</button></div>`:''}${!o.pn && !o.agencia && !R.fechado ? `<div><button class="btn sm" data-vag="${L.indexOf(o)}" style="margin-top:4px" title="Não vai ter PN (negócio anulado, charge-back a caminho…): fica na agência">Fica na agência</button></div>`:''}</td></tr>${!o.pn?`<tr class="lpi-x"><td></td><td colspan="11" class="muted" style="font-size:11px;padding-top:0">Dados da Vodafone (sem PN na plataforma): <b>${esc(lv[RL.cod])}</b> · ${esc(lv[RL.neg]||'')}${lv[RL.grp]?' · '+esc(lv[RL.grp]):''} · NIF <b>${esc(lv[RL.nif]||'—')}</b>${xv('conta')?' · conta <b>'+esc(xv('conta'))+'</b>':''} · MSISDN <b>${esc(lv[RL.msisdn]||'—')}</b> · ${esc(lv[RL.pp]||'')} · ativação ${fmtD(lv[RL.cri])}${lv[RL.des]?' · desativação '+fmtD(lv[RL.des]):''} · RLMC aj. ${lv[RL.rlmcA]?eur(lv[RL.rlmcA]):'—'} · SFID ${esc(lv[RL.sfid]||'—')}${RUN_EXTRA.filter(([k])=>xv(k) && !['conta','cid'].includes(k)).map(([k,,t])=>` · ${t}: ${esc(xFmt(k,xv(k)))}`).join('')}${o.agencia?` · <b>fica na agência</b>: ${esc(o.agencia.motivo||'')}`:''}</td></tr>`:''}`; }).join('')||'<tr><td colspan="12" class="muted">Sem divergências neste RUN. 👍</td></tr>'}</tbody></table>
       ${L.length>800?`<p class="muted">Mostradas 800 de ${L.length} linhas.</p>`:''}</div>`;
     ligaMes(()=>cmsValid(box));
     $('#vl-d').onchange = e => { VAL_FILTRO = e.target.value; cmsValid(box); };
@@ -4090,6 +4144,36 @@ function cmsValid(box){
     $('#vl-v').onchange = e => { VAL_V = e.target.value; vlFiltra(); };
     $('#vl-k').onchange = e => { VAL_K = e.target.value; vlFiltra(); };
     vlFiltra();
+    const selecionadas = () => [...box.querySelectorAll('.vl-s:checked')].map(c=>L[+c.dataset.i]).filter(Boolean);
+    const vlLote = () => { const n=selecionadas().length, b=$('#vl-lote'); if (!b) return; b.style.display = n ? 'flex' : 'none'; $('#vl-ln').textContent = `${n} linha(s) selecionada(s)`; };
+    box.querySelectorAll('.vl-s').forEach(c=>c.onchange=vlLote);
+    $('#vl-all').onchange = e => { box.querySelectorAll('tr.vl-r').forEach(tr=>{ if (tr.style.display!=='none') { const c=tr.querySelector('.vl-s'); if (c) c.checked=e.target.checked; } }); vlLote(); };
+    $('#vl-lx').onclick = () => { box.querySelectorAll('.vl-s').forEach(c=>c.checked=false); $('#vl-all').checked=false; vlLote(); };
+    $('#vl-lup')?.addEventListener('click', () => { const S0=selecionadas().filter(o=>o.pn && o.ln); if (!S0.length) return toast('Nenhuma das linhas selecionadas tem PN.', true);
+      const conta = k => S0.filter(o=>o.dif.includes(k) || (o.tol||[]).includes(k)).length;
+      modal(`<h2>Atualizar ${S0.length} linha(s) de PN com o que a Vodafone considerou</h2>
+        <p class="muted" style="margin-top:0;font-size:13px">Escolha os campos. Em cada linha só muda o que for diferente do valor da Vodafone. Fica no histórico de cada PN.</p>
+        <table><tbody>${[['natureza','Natureza','natureza'],['rlmc','RLMC','RLMC'],['prazo','Prazo','prazo'],['tier','Tier','tier'],['eventos','Eventos (fixar os da Vodafone)','eventos']].map(([k,t,d])=>`<tr><td><input type="checkbox" data-c="${k}"></td><td>${t}</td><td class="muted" style="font-size:12px">${conta(d)} com divergência</td></tr>`).join('')}</tbody></table>
+        <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="lu-c">Cancelar</button><button class="btn pri" id="lu-ok">Atualizar</button></div>`, (m, close) => {
+        m.querySelector('#lu-c').onclick = close;
+        m.querySelector('#lu-ok').onclick = async () => { const ks=[...m.querySelectorAll('[data-c]:checked')].map(e=>e.dataset.c); if (!ks.length) return toast('Escolha pelo menos um campo.', true);
+          const bt=m.querySelector('#lu-ok'); bt.disabled=true; const evs=[]; let k=0;
+          for (const o of S0) { bt.textContent=`A atualizar ${++k}/${S0.length}…`; try { const ev=await aplicarPNdoRUN(o, ks); if (ev) evs.push(ev); } catch(e){ toast(`PN ${o.pn.numero}: ${errTxt(e)}`, true); } }
+          close(); toast(`${evs.length} linha(s) de PN atualizada(s).`); refazer({tipo:'lote', evs}, box, cmsValid); };
+      }); });
+    $('#vl-lag')?.addEventListener('click', () => { const S0=selecionadas().filter(o=>!o.pn && !o.agencia); if (!S0.length) return toast('Nenhuma das linhas selecionadas está sem PN.', true);
+      modal(`<h2>${S0.length} linha(s) ficam na agência, sem PN</h2>
+        <p class="muted" style="margin-top:0;font-size:13px">Total ${eur(S0.reduce((a,o)=>a+(+o.vdf.val||0),0))} €. Só as linhas selecionadas (não as outras linhas dos mesmos POS).</p>
+        <label>Motivo (obrigatório)</label><input id="la-m" style="width:100%" placeholder="Ex.: negócios anulados, charge-back a caminho">
+        <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="la-c">Cancelar</button><button class="btn pri" id="la-ok">Fica na agência</button></div>`, (m, close) => {
+        m.querySelector('#la-c').onclick = close;
+        m.querySelector('#la-ok').onclick = async () => { const mo=m.querySelector('#la-m').value.trim(); if (mo.length<4) return toast('Escreva o motivo.', true);
+          const ch=chavesLinhas(R.linhas), em=new Date().toISOString(), man={}, evs=[];
+          S0.forEach(o=>{ const chave=ch[o.x.i], info={agencia:true, motivo:mo, por:S.me.nome, em}; man[chave]=info; evs.push({tipo:'agencia', x:o.x, chave, info, porPOS:false}); });
+          try { await setDoc(doc(db,'runs',R.mes), {manual:man}, {merge:true});
+            await logAlt({tipo:'Linhas do RUN ficam na agência', desde:R.mes, resumo:`RUN ${mesTxt(R.mes)}: ${S0.length} linha(s), ${eur(S0.reduce((a,o)=>a+(+o.vdf.val||0),0))} € · ${mo}`});
+            close(); toast(`${S0.length} linha(s) na agência.`); refazer({tipo:'lote', evs}, box, cmsValid); } catch(e){ toast(errTxt(e), true); } };
+      }); });
     $('#vl-tol').onchange = e => { VAL_TOL = Math.max(0, +e.target.value||0); try { localStorage.setItem('cms-val-tol2', String(VAL_TOL)); } catch(_){} cmsValid(box); };
     box.querySelectorAll('[data-upd]').forEach(b=>b.onclick=()=>atualizarPNdoRUN(L[+b.dataset.upd], ev=>refazer(ev, box, cmsValid)));
     box.querySelectorAll('[data-vag]').forEach(b=>b.onclick=()=>linhaNaAgencia(L[+b.dataset.vag].x, R, ev=>refazer(ev, box, cmsValid)));
