@@ -347,7 +347,7 @@ function msgPendFim(r){
 // ===== tabelas: ordenar por coluna e filtrar (genérico; a ordem escolhida mantém-se quando a tabela é redesenhada) =====
 const TAB_ORD = {};
 const tabSig = t => [...(t.tHead?.rows[0]?.cells||[])].map(c=>c.textContent.replace(/[▲▼]/g,'').trim()).join('|');
-const tabOk = t => !!(t && t.tHead && t.tBodies[0] && t.tBodies[0].rows.length>1 && !t.closest('#lines') && !t.dataset.noord && !t.tBodies[0].querySelector('input:not([type=checkbox]),select,textarea'));
+const tabOk = t => !!(t && t.tHead && t.tBodies[0] && t.tBodies[0].rows.length>0 && !t.closest('#lines') && !t.dataset.noord && !t.tBodies[0].querySelector('input:not([type=checkbox]),select,textarea'));
 function celVal(td){ const s=String(td?.dataset?.v ?? td?.textContent ?? '').trim();
   let m=s.match(/^(\d{2})[./](\d{2})[./](\d{4})/); if (m) return {n:+(m[3]+m[2]+m[1])};
   m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return {n:+(m[1]+m[2]+m[3])};
@@ -366,9 +366,56 @@ function tabOrdena(t, col, dir){
   tb.appendChild(fr);
   [...t.tHead.rows[0].cells].forEach((c,i)=>{ c.dataset.ord = i===col ? (dir>0?'a':'d') : ''; });
 }
-function tabFiltra(t, q){ q=String(q||'').toLowerCase().trim(); let n=0;
-  tabGrupos(t.tBodies[0]).forEach(sg=>{ if (!Array.isArray(sg)) return; sg.forEach(g=>{ const ok=!q || g.map(r=>r.textContent).join(' ').toLowerCase().includes(q); g.forEach(r=>r.style.display=ok?'':'none'); if (ok) n++; }); });
+// ----- filtros por coluna (como no Excel): ▾ no título abre a lista de valores com caixas de escolha -----
+const TAB_FIL = (()=>{ try { return JSON.parse(localStorage.getItem('tab-fil')||'{}')||{}; } catch(_){ return {}; } })();   // assinatura da tabela -> {coluna: [valores escolhidos]}
+const tabFilGuarda = () => { try { localStorage.setItem('tab-fil', JSON.stringify(TAB_FIL)); } catch(_){} };
+function celTxt(td){ if (!td) return ''; const b=td.querySelector('.badge'); if (b) return b.textContent.replace(/\s+/g,' ').trim();
+  const c=td.cloneNode(true); c.querySelectorAll('.muted,button,input,select,.rp-m,.gp-par,.pn-pe,div').forEach(x=>x.remove()); return c.textContent.replace(/\s+/g,' ').trim(); }
+function tfPopup(btn, vals, sel, aplica){   // vals=[{v,n}], sel=[valores] ou null (= todos); aplica(lista|null)
+  document.querySelector('.tf-pop')?.remove();
+  const p=document.createElement('div'); p.className='tf-pop';
+  p.innerHTML=`<input type="search" class="tf-q" placeholder="Procurar valor…" autocomplete="off"><label class="tf-i" style="border-bottom:1px solid var(--line);padding-bottom:4px;margin-bottom:2px"><input type="checkbox" class="tf-all"> <b>(Selecionar tudo)</b></label>
+    <div class="tf-l">${vals.map((o,i)=>`<label class="tf-i" data-t="${esc(String(o.v).toLowerCase())}"><input type="checkbox" data-i="${i}" ${!sel||sel.includes(o.v)?'checked':''}> <span>${o.v===''?'<i class="muted">(vazio)</i>':esc(o.l??o.v)}</span> <span class="muted" style="margin-left:auto">${o.n}</span></label>`).join('')}</div>
+    <div class="muted" style="font-size:11px;margin:4px 0">Duplo clique num valor = só esse.</div>
+    <div class="row" style="gap:6px"><button class="btn sm pri tf-ok">OK</button><button class="btn sm tf-cl">Limpar filtro</button><button class="btn sm ghost tf-x">Cancelar</button></div>`;
+  document.body.appendChild(p);
+  const r=btn.getBoundingClientRect(); p.style.left=Math.max(4, Math.min(r.left+scrollX-10, scrollX+innerWidth-290))+'px'; p.style.top=(r.bottom+scrollY+4)+'px';
+  const cbs=[...p.querySelectorAll('.tf-l input')], all=p.querySelector('.tf-all'), vis=()=>cbs.filter(c=>c.closest('label').style.display!=='none');
+  const sincr=()=>{ const v=vis(); all.checked=v.length>0 && v.every(c=>c.checked); all.indeterminate=!all.checked && v.some(c=>c.checked); };
+  cbs.forEach(c=>c.onchange=sincr); sincr();
+  all.onchange=()=>vis().forEach(c=>c.checked=all.checked);
+  p.querySelectorAll('.tf-l label').forEach(l=>l.ondblclick=e=>{ e.preventDefault(); cbs.forEach(c=>c.checked=false); l.querySelector('input').checked=true; sincr(); });
+  const q=p.querySelector('.tf-q'); q.oninput=()=>{ const t=q.value.toLowerCase().trim(); p.querySelectorAll('.tf-l label').forEach(l=>l.style.display=!t||l.dataset.t.includes(t)?'':'none'); sincr(); };
+  const fecha=()=>{ p.remove(); document.removeEventListener('mousedown', fora, true); document.removeEventListener('keydown', tecla, true); };
+  const fora=e=>{ if (!p.contains(e.target) && e.target!==btn) fecha(); }, tecla=e=>{ if (e.key==='Escape') fecha(); if (e.key==='Enter' && p.contains(e.target)) { e.preventDefault(); p.querySelector('.tf-ok').click(); } };
+  setTimeout(()=>{ document.addEventListener('mousedown', fora, true); document.addEventListener('keydown', tecla, true); q.focus(); });
+  p.querySelector('.tf-x').onclick=fecha;
+  p.querySelector('.tf-cl').onclick=()=>{ fecha(); aplica(null); };
+  p.querySelector('.tf-ok').onclick=()=>{ const esc0=q.value.trim() ? vis() : cbs, ch=esc0.filter(c=>c.checked).map(c=>vals[+c.dataset.i].v);
+    if (!ch.length) return toast('Escolha pelo menos um valor.',true);
+    fecha(); aplica(ch.length===vals.length ? null : ch); };
+}
+function tabAplica(t){ if (!t || !t.tBodies[0]) return 0; const F=TAB_FIL[tabSig(t)]||{}, ks=Object.keys(F), q=String(t._tq||'').toLowerCase().trim(); let n=0, tot=0;
+  tabGrupos(t.tBodies[0]).forEach(sg=>{ if (!Array.isArray(sg)) return; sg.forEach(g=>{ tot++;
+    const okF=ks.every(c=>F[c].includes(celTxt(g[0].cells[c]))), okQ=!q || g.map(r=>r.textContent).join(' ').toLowerCase().includes(q);
+    g.forEach(r=>{ r.classList.toggle('tf-off',!okF); r.classList.toggle('tq-off',!okQ); }); if (okF && okQ) n++; }); });
+  [...t.tHead.rows[0].cells].forEach((c,i)=>c.classList.toggle('tf-on', !!F[i] || (!!c.dataset.estf && !!document.querySelector('.chips.multi .chip.on[data-e]:not([data-e=""])'))));
+  let nota=t._tfNota; if (ks.length) { if (!nota || !nota.isConnected) { nota=t._tfNota=document.createElement('div'); nota.className='tf-nota'; const alvo=t.parentElement && t.parentElement.classList.contains('scroll') ? t.parentElement : t; alvo.parentElement.insertBefore(nota, alvo); }
+    nota.innerHTML=`Filtro por coluna (${ks.map(c=>esc(t.tHead.rows[0].cells[c]?.textContent.trim()||'')).join(', ')}): a mostrar <b>${n}</b> de ${tot} · <a href="javascript:void 0" class="tf-lx">limpar filtros</a>`;
+    nota.querySelector('.tf-lx').onclick=()=>{ delete TAB_FIL[tabSig(t)]; tabFilGuarda(); tabAplica(t); };
+  } else if (nota) nota.remove();
   return n; }
+function tabFiltra(t, q){ t._tq=q; return tabAplica(t); }
+document.addEventListener('click', e=>{ const b=e.target instanceof Element ? e.target.closest('th .tf-btn') : null; if (!b || b.dataset.cf) return; e.preventDefault(); e.stopPropagation();
+  const th=b.closest('th');
+  if (th.dataset.estf) { const ehAt=th.dataset.estf==='at', f=ehAt?AT.f:S.filtros, chs=[...document.querySelectorAll('.chips.multi .chip[data-e]')].filter(c=>c.dataset.e);   // coluna Estado = os mesmos estados dos contadores de cima
+    const vals=chs.map(c=>({v:c.dataset.e, l:c.querySelector('span')?.textContent.trim(), n:+(c.querySelector('b')?.textContent||0)})).filter(o=>o.n || (f.estados||[]).includes(o.v));
+    return tfPopup(b, vals, (f.estados||[]).length ? f.estados : null, ch=>{ f.estados=ch||[]; try { localStorage.setItem(ehAt?'at-estados':'rpn-estados', JSON.stringify(f.estados)); } catch(_){} ehAt ? atDesenhaLista() : drawLista(); }); }
+  const t=th.closest('table'), col=[...th.parentElement.cells].indexOf(th), sig=tabSig(t), cnt=new Map();
+  tabGrupos(t.tBodies[0]).forEach(sg=>{ if (Array.isArray(sg)) sg.forEach(g=>{ const v=celTxt(g[0].cells[col]); cnt.set(v,(cnt.get(v)||0)+1); }); });
+  const vals=[...cnt].map(([v,n])=>({v,n})).sort((a,b)=>{ const x=celVal({textContent:a.v}), y=celVal({textContent:b.v}); return (x.n!=null&&y.n!=null) ? x.n-y.n : String(a.v).localeCompare(String(b.v),'pt',{numeric:true}); });
+  tfPopup(b, vals, TAB_FIL[sig]?.[col]||null, ch=>{ const F=TAB_FIL[sig]=TAB_FIL[sig]||{}; if (ch) F[col]=ch; else delete F[col]; if (!Object.keys(F).length) delete TAB_FIL[sig]; tabFilGuarda(); tabAplica(t); });
+}, true);
 document.addEventListener('click', e=>{
   const th=e.target instanceof Element ? e.target.closest('thead th') : null; if (!th || e.target.closest('input,button,a,select')) return;
   const t=th.closest('table'); if (!tabOk(t) || th.parentElement!==t.tHead.rows[0]) return;
@@ -376,11 +423,18 @@ document.addEventListener('click', e=>{
   TAB_ORD[sig]={col, dir}; tabOrdena(t, col, dir);
 });
 (()=>{ const st=document.createElement('style');
-  st.textContent='table thead th{cursor:pointer;user-select:none} thead th[data-ord="a"]::after{content:" ▲";font-size:9px} thead th[data-ord="d"]::after{content:" ▼";font-size:9px} .tab-f{max-width:260px;margin:0 0 6px;padding:5px 8px;font-size:12px}';
+  st.textContent='table thead th{cursor:pointer;user-select:none} thead th[data-ord="a"]::after{content:" ▲";font-size:9px} thead th[data-ord="d"]::after{content:" ▼";font-size:9px} .tab-f{max-width:260px;margin:0 0 6px;padding:5px 8px;font-size:12px}'
+    +' tr.tf-off,tr.tq-off{display:none!important} .tf-btn{border:0;background:transparent;cursor:pointer;padding:0 3px;margin-left:3px;color:#9aa1ab;font-size:11px;line-height:1;vertical-align:middle} .tf-btn::after{content:"▾"} .tf-btn:hover{color:var(--ink)} th.tf-on{color:var(--red-d)} th.tf-on .tf-btn{color:#fff;background:var(--red);border-radius:3px}'
+    +' .tf-pop{position:absolute;z-index:9999;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px;width:280px;font-size:13px;color:var(--ink)} .tf-pop .tf-q{width:100%;padding:5px 8px;font-size:12px;margin-bottom:6px} .tf-pop .tf-l{max-height:260px;overflow:auto} .tf-pop .tf-i{display:flex;gap:6px;align-items:center;margin:0;padding:2px 2px;color:var(--ink);font-weight:400;cursor:pointer;white-space:nowrap} .tf-pop .tf-i:hover{background:#f4f5f7} .tf-pop .tf-i span:first-of-type{overflow:hidden;text-overflow:ellipsis}'
+    +' .tf-nota{font-size:12px;margin:0 0 6px;padding:4px 8px;background:#fff4f4;border:1px solid #f3c4c4;border-radius:6px;color:var(--ink)}'
+    +' .chips{flex-wrap:nowrap!important;overflow-x:auto;gap:6px!important} .chips .chip{flex:1 1 auto;min-width:0;padding:5px 8px;white-space:nowrap} .chips .chip span{display:block;overflow:hidden;text-overflow:ellipsis;font-size:11.5px} .chips .chip b{font-size:17px;white-space:nowrap}'
+    +' .chips.multi .chip:not([data-e=""]) span.muted::before{content:"☐ ";font-size:12px} .chips.multi .chip.on:not([data-e=""]) span.muted::before{content:"☑ ";color:var(--red)}';
   document.head.appendChild(st);
   let tm=null; new MutationObserver(()=>{ clearTimeout(tm); tm=setTimeout(()=>{
     document.querySelectorAll('#main table, .modal table').forEach(t=>{ if (t.dataset.tabOk==='1' || !tabOk(t)) return; t.dataset.tabOk='1';
       const st0=TAB_ORD[tabSig(t)]; if (st0) tabOrdena(t, st0.col, st0.dir);
+      if (!t.dataset.tfdata) [...t.tHead.rows[0].cells].forEach(th=>{ if (th.textContent.trim() && !th.querySelector('.tf-btn')) { const b=document.createElement('button'); b.type='button'; b.className='tf-btn'; b.title='Filtrar por esta coluna (escolher valores)'; th.appendChild(b); } });
+      if (TAB_FIL[tabSig(t)] || t.querySelector('th[data-estf]')) tabAplica(t);
       const caixa=t.closest('.card')||t.parentElement, temFiltro=caixa && caixa.querySelector('input[type=search], input[id$="-f"], input[id$="-q"], #cf, .tab-f');
       if (t.tBodies[0].rows.length>=12 && !temFiltro) { const f=document.createElement('input'); f.className='tab-f'; f.type='search'; f.placeholder='Filtrar esta tabela…';
         const alvo=t.parentElement && t.parentElement.classList.contains('scroll') ? t.parentElement : t; alvo.parentElement.insertBefore(f, alvo); f.oninput=()=>tabFiltra(t, f.value); }
@@ -426,7 +480,7 @@ async function procurarHistorico(){
   if (!docs.length) return toast(r.some(x=>x.status==='rejected') ? 'Não foi possível procurar: '+errTxt(r.find(x=>x.status==='rejected').reason) : 'Nada encontrado no histórico com “'+t+'”.', true);
   S.extra = [...(S.extra||[]).filter(x=>!docs.some(d=>d.id===x.id)), ...docs];
   const m2 = {}; [...S.list, ...docs].forEach(x=>m2[x.id]=x); S.list = Object.values(m2).sort((x,y)=>(y.numero||0)-(x.numero||0));
-  S.filtros.estado=''; toast(docs.length+' processo(s) encontrado(s) no histórico.'); drawLista();
+  S.filtros.estado=''; S.filtros.estados=[]; toast(docs.length+' processo(s) encontrado(s) no histórico.'); drawLista();
 }
 // a lista só se desenha se o utilizador ainda estiver na lista (uma leitura lenta ou a pesquisa a escrever podem terminar depois de mudar de página)
 const naLista = () => { const h=location.hash; return !h || !['#/rpn/','#/novo','#/projetos','#/clientes','#/atividades','#/catalogo','#/producao','#/admin','#/comissao','#/comissionamento'].some(p=>h.startsWith(p)); };
@@ -447,13 +501,14 @@ function drawLista(){
     && (!f.vend || r.vendedorUid===f.vend) && (!f.bo || r.boUid===f.bo)
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.cliente?.email,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
   const cnt = {}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
-  const rows = base.filter(r=>!f.estado || r.estado===f.estado);
+  if (!f.estados) { try { f.estados=JSON.parse(localStorage.getItem('rpn-estados')||'[]'); } catch(_){ f.estados=[]; } }
+  const rows = base.filter(r=>!f.estados.length || f.estados.includes(r.estado));
   const vends = [...new Set(all.map(r=>r.vendedorUid))].map(u=>[u,userNome(u)||all.find(r=>r.vendedorUid===u)?.vendedorNome]).sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
   const tot = rows.reduce((a,r)=>({l:a.l+(r.nLinhas||0),rl:a.rl+(r.totRLMC||0),sc:a.sc+(r.totScore||0)}),{l:0,rl:0,sc:0});
   $('#main').innerHTML = `
-    <div class="chips">
-      <div class="chip ${!f.estado?'on':''}" data-e=""><span class="muted">Todos</span><b>${base.length}</b></div>
-      ${[...ESTADOS,...(cnt['Concluído']?['Concluído']:[])].map(e=>`<div class="chip ${f.estado===e?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(estTxt(e))}</span><b>${cnt[e]||0}</b></div>`).join('')}
+    <div class="chips multi" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)">
+      <div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todos</span><b>${base.length}</b></div>
+      ${[...ESTADOS,...(cnt['Concluído']?['Concluído']:[])].map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}" title="${esc(estTxt(e))}"><span class="muted">${esc(estTxt(e))}</span><b>${cnt[e]||0}</b></div>`).join('')}
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
@@ -471,12 +526,13 @@ function drawLista(){
         <span class="sp"></span>${isBO()?`<button class="btn" id="aus">Ausências · redistribuir</button>`:''}<button class="btn pri" id="nv">+ Novo RPN</button>
       </div>
       <div class="scroll"><table>
-        <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th>Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
+        <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th data-estf="rpn">Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
         <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?(parcial(r)?' <span class="gp-par" title="Grupo com partes por fechar: uns RPN já seguiram, outros ainda estão em aberto" style="color:#b45309;font-size:11px;font-weight:600">⛓ parcial</span>':' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>'):''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
-  document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{ f.estado=c.dataset.e; drawLista(); });
+  document.querySelectorAll('.chip[data-e]').forEach(c=>c.onclick=()=>{ const e=c.dataset.e, ord=[...ESTADOS,'Concluído']; if (!e) f.estados=[]; else { const st=new Set(f.estados); st.has(e)?st.delete(e):st.add(e); f.estados=ord.filter(x=>st.has(x)); }
+    try { localStorage.setItem('rpn-estados', JSON.stringify(f.estados)); } catch(_){} drawLista(); });
   document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
   $('#nv').onclick=()=>go('#/novo');
   $('#fr').onclick=()=>viewLista(true);
@@ -2027,8 +2083,8 @@ function atDesenhaLista(){
   if (!f.estados) { try { f.estados=JSON.parse(localStorage.getItem('at-estados')||'[]'); } catch(_){ f.estados=[]; } }
   const rows=base.filter(r=>!f.estados.length || f.estados.includes(r.estado)).sort((a,b)=>atPerto(a)-atPerto(b) || atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
   $('#main').innerHTML=`
-    <div class="chips" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)"><div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
-      ${AT_ESTADOS.map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
+    <div class="chips multi" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)"><div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
+      ${AT_ESTADOS.map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}" title="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
     <div class="card">
       <div class="row" style="margin-bottom:12px">
         <input id="at-q" type="search" autocomplete="off" name="pesquisa-at" placeholder="Procurar nº, cliente, NIF, conta, número, assunto…" value="${esc(f.txt)}" style="max-width:340px">
@@ -2039,7 +2095,7 @@ function atDesenhaLista(){
         ${isBO()?`<label style="display:flex;gap:6px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="at-me" ${f.meus?'checked':''}> Só as minhas</label>`:''}
         <span class="sp"></span><button class="btn pri" id="at-nv">+ Nova Atividade</button>
       </div>
-      <div class="scroll"><table id="at-t"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Assunto</th><th>Vendedor</th><th>BO</th><th>Estado</th><th class="num">Dias em aberto</th></tr></thead>
+      <div class="scroll"><table id="at-t"><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>Assunto</th><th>Vendedor</th><th>BO</th><th data-estf="at">Estado</th><th class="num">Dias em aberto</th></tr></thead>
         <tbody>${rows.map(r=>{ const dd=atDias(r), ab=AT_ABERTAS.includes(r.estado); return `<tr class="click" data-id="${esc(r.id)}"><td><b>${atNum(r)}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}</td><td data-v="${esc(atChave(r))}">${r.estado==='Agendada' && r.dataEfetiva ? `<b>${fmtD(String(r.dataEfetiva).slice(0,10))}</b><div class="muted" style="font-size:11px">agendada</div>` : fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}<div class="muted" style="font-size:11px">${esc(r.cliente?.nif)}</div></td><td>${esc(r.assunto)}<div class="muted" style="font-size:11px">${esc(r.subAssunto)}</div></td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}</td><td><span class="badge b-${esc((r.estado||'').replace(/ /g,'-'))}">${esc(r.estado)}</span>${r.motivo&&!['Concluído'].includes(r.estado)?` <span class="muted" style="font-size:11px">${esc(String(r.motivo).slice(0,60))}</span>`:''}</td><td class="num" ${ab&&dd>=AT_DIAS_ALERTA?'style="color:var(--red-d);font-weight:700"':''}>${r.submetidoEm?dd:'—'}</td></tr>`; }).join('')||`<tr><td colspan="8" class="muted">Sem Atividades.</td></tr>`}</tbody></table></div></div>`;
   document.querySelectorAll('.chip[data-e]').forEach(c=>c.onclick=()=>{ const e=c.dataset.e; if (!e) f.estados=[]; else { const st=new Set(f.estados); st.has(e)?st.delete(e):st.add(e); f.estados=AT_ESTADOS.filter(x=>st.has(x)); }
     try { localStorage.setItem('at-estados', JSON.stringify(f.estados)); } catch(_){} atDesenhaLista(); });
@@ -2056,7 +2112,7 @@ function atDesenhaLista(){
     const rs=await Promise.allSettled(qs.map(q=>getDocs(q))), docs=rs.filter(y=>y.status==='fulfilled').flatMap(y=>y.value.docs).map(d=>({id:d.id, ...d.data()}));
     if (!docs.length) return toast('Nada encontrado no histórico com “'+x+'”.',true);
     AT.extra=[...(AT.extra||[]).filter(y=>!docs.some(d=>d.id===y.id)), ...docs]; const mp={}; [...AT.lista, ...docs].forEach(y=>mp[y.id]=y); AT.lista=Object.values(mp).sort((a,b)=>(b.numero||0)-(a.numero||0));
-    f.txt=''; f.estado=''; toast(docs.length+' Atividade(s) encontrada(s) no histórico.'); atDesenhaLista(); };
+    f.txt=''; f.estado=''; f.estados=[]; toast(docs.length+' Atividade(s) encontrada(s) no histórico.'); atDesenhaLista(); };
   document.querySelectorAll('#at-t tr[data-id]').forEach(tr=>tr.onclick=()=>go('#/atividades/'+tr.dataset.id));
 }
 async function atAbrir(id){
@@ -2473,20 +2529,29 @@ const PN_IMG = {"vdf":{"w":154,"h":72,"d":"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDA
 
 // ---------- 9a. CATÁLOGO DE REFERÊNCIAS (Coordenador, BackOffice e Master criam, editam e apagam) ----------
 let CAT_Q = '';
+const CAT_F = (()=>{ try { return JSON.parse(localStorage.getItem('cat-fil')||'{}')||{}; } catch(_){ return {}; } })();
+const catV = (p,k) => k==='desc' ? (p.descontinuado?'SIM':'') : String(p[k]||'').trim();
+const catFiltra = (L, sem) => L.filter(p=>Object.keys(CAT_F).every(k=>k===sem || CAT_F[k].includes(catV(p,k))));
 const SUBFAMS = ['GSM','BL','Fixo'];
 function viewCatalogo(){
   const m=$('#main'), t=semAcento(CAT_Q).trim(), pal=t.split(/\s+/).filter(Boolean);
-  const L = S.prodList.filter(p=>!pal.length || pal.every(w=>semAcento(p.ref+' '+p.designacao+' '+(p.tier||'')+' '+(p.pricingPlan||'')+' '+(p.subfamilia||'')+(p.inativo?' inativa':'')+(composicaoDe(p)?' bundle '+p.composicao.map(c=>c.ref).join(' '):'')).includes(w)));
+  const L = catFiltra(S.prodList).filter(p=>!pal.length || pal.every(w=>semAcento(p.ref+' '+p.designacao+' '+(p.tier||'')+' '+(p.pricingPlan||'')+' '+(p.subfamilia||'')+(p.inativo?' inativa':'')+(composicaoDe(p)?' bundle '+p.composicao.map(c=>c.ref).join(' '):'')).includes(w)));
   m.innerHTML = `<div class="card"><div class="row" style="margin-bottom:12px">
       <input id="cq" type="search" autocomplete="off" placeholder="Procurar por referência, designação, tier ou pricing plan…" value="${esc(CAT_Q)}" style="max-width:420px">
-      <span class="muted">${L.length} de ${S.prodList.length} referência(s)</span><span class="sp"></span><button class="btn" id="csim" title="Mostra o que aconteceria a cada tarifário das Propostas ao juntar os dois catálogos. Não grava nada.">Simular união com as Propostas</button><button class="btn pri" id="cn">+ Nova referência</button></div>
-    <div class="scroll"><table id="ctab"><thead><tr><th>Referência</th><th>Designação</th><th>Sub-fam.</th><th>Categoria</th><th>Tier</th><th>Pricing plan</th><th>Desc.</th><th></th></tr></thead>
+      <span class="muted">${L.length} de ${S.prodList.length} referência(s)${Object.keys(CAT_F).length?` · <span style="color:var(--red-d)">filtro por coluna ativo</span> · <a href="javascript:void 0" id="cfl">limpar filtros</a>`:''}</span><span class="sp"></span><button class="btn" id="csim" title="Mostra o que aconteceria a cada tarifário das Propostas ao juntar os dois catálogos. Não grava nada.">Simular união com as Propostas</button><button class="btn pri" id="cn">+ Nova referência</button></div>
+    <div class="scroll"><table id="ctab" data-tfdata="1"><thead><tr><th>Referência</th><th>Designação</th>${[['subfamilia','Sub-fam.'],['categoria','Categoria'],['tier','Tier'],['pricingPlan','Pricing plan'],['desc','Desc.']].map(([k,n])=>`<th class="${CAT_F[k]?'tf-on':''}">${n}<button type="button" class="tf-btn" data-cf="${k}" title="Filtrar por esta coluna (escolher valores)"></button></th>`).join('')}<th></th></tr></thead>
       <tbody>${L.slice(0,300).map(p=>`<tr data-ref="${esc(p.ref)}"><td><b>${esc(p.ref)}</b>${p.inativo?' <span class="muted" style="font-size:11px">· inativa</span>':''}</td><td>${esc(p.designacao)}${composicaoDe(p)?`<div class="muted" style="font-size:11px">📦 ${p.composicao.map(c=>esc(c.ref)+' '+(Math.round(c.pct*1000)/10).toLocaleString('pt-PT')+'%').join(' + ')}</div>`:''}</td><td>${esc(p.subfamilia||'')}</td><td>${esc(p.categoria||'')}</td><td>${esc(p.tier||'')}</td><td>${p.pricingPlan?esc(p.pricingPlan):'<span class="muted">em falta</span>'}</td><td>${p.descontinuado?'SIM':''}</td>
         <td style="white-space:nowrap"><button class="btn sm" data-ed>Editar</button> <button class="btn sm" data-dp title="Cria uma referência nova a partir desta">Duplicar</button> <button class="btn sm ghost" data-rm style="color:var(--red-d)">Apagar</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Nenhuma referência.</td></tr>'}</tbody></table></div>
     ${L.length>300?'<p class="muted" style="font-size:12px;margin-bottom:0">A mostrar as primeiras 300. Afine a pesquisa.</p>':''}</div>`;
   const cq=$('#cq'); cq.oninput=()=>{ CAT_Q=cq.value; clearTimeout(cq._h); cq._h=setTimeout(()=>{ if(!location.hash.startsWith('#/catalogo')) return; viewCatalogo(); const n=$('#cq'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },200); };
   $('#cn').onclick=()=>editarRef(null);
   $('#csim').onclick=simularUniao;
+  const catGuarda=()=>{ try { localStorage.setItem('cat-fil', JSON.stringify(CAT_F)); } catch(_){} };
+  if ($('#cfl')) $('#cfl').onclick=()=>{ Object.keys(CAT_F).forEach(k=>delete CAT_F[k]); catGuarda(); viewCatalogo(); };
+  m.querySelectorAll('.tf-btn[data-cf]').forEach(b=>b.onclick=e=>{ e.preventDefault(); e.stopPropagation(); const k=b.dataset.cf, cnt=new Map();
+    catFiltra(S.prodList, k).forEach(p=>{ const v=catV(p,k); cnt.set(v,(cnt.get(v)||0)+1); });
+    const vals=[...cnt].map(([v,n])=>({v,n})).sort((a,b)=>String(a.v).localeCompare(String(b.v),'pt',{numeric:true}));
+    tfPopup(b, vals, CAT_F[k]||null, ch=>{ if (ch) CAT_F[k]=ch; else delete CAT_F[k]; catGuarda(); viewCatalogo(); }); });
   m.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>editarRef(S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-dp]').forEach(b=>b.onclick=()=>editarRef(null, S.prodMap[b.closest('tr').dataset.ref.toUpperCase()]));
   m.querySelectorAll('[data-rm]').forEach(b=>b.onclick=async()=>{ const ref=b.closest('tr').dataset.ref;
