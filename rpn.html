@@ -278,8 +278,22 @@ function render(){
 // contactos da ficha do cliente (1 leitura): email geral (ou do Contacto 1) e telefone do Contacto 1
 async function contactosFicha(nif){
   nif=String(nif||'').replace(/\s/g,''); if (nif.length<5) return null;
-  try { const s=await getDoc(doc(db,'clientesFicha',nif)); if (!s.exists()) return null; const c=s.data();
-    return {email:String(c.email||c.c1email||''), tel:String(c.c1tele||c.tlmvl||c.telefone||''), nome:String(c.contacto||'')}; } catch(e){ return null; }
+  S.ctCache=S.ctCache||{}; if (S.ctCache[nif]!==undefined) return S.ctCache[nif];
+  try { const sn=await getDoc(doc(db,'clientesFicha',nif)); if (!sn.exists()) return (S.ctCache[nif]=null); const c=sn.data(), t=v=>String(v||'').trim();
+    const cts=[['contacto','c1func','c1tele','c1email'],['c2tacto','c2func','c2tele','c2email'],['c3tacto','c3func','c3tele','c3email']]
+      .map(([n,f,te,em])=>({nome:t(c[n]), func:t(c[f]), tel:t(c[te]), email:t(c[em])})).filter(x=>x.nome||x.func||x.tel||x.email);
+    const c1=cts[0]||{};
+    return (S.ctCache[nif]={email:t(c.email)||c1.email||'', tel:c1.tel||t(c.tlmvl)||t(c.telefone), nome:c1.nome||'', cts, geral:{email:t(c.email), tel:t(c.telefone), tlm:t(c.tlmvl)}});
+  } catch(e){ return null; }
+}
+// contactos da ficha: os 3 contactos (função primeiro) e os contactos gerais
+function contactosHTML(x){
+  if (!x) return '<span class="muted">Sem ficha de cliente (ou sem acesso a ela).</span>';
+  const tl=v=>v?`<a href="tel:${esc(v)}">${esc(v)}</a>`:'', ml=v=>v?`<a href="mailto:${esc(v)}">${esc(v)}</a>`:'';
+  const L=x.cts.map((c,i)=>`<div><b>${esc(c.func||'Contacto '+(i+1))}</b>${c.nome?` — ${esc(c.nome)}`:''}${c.tel?` · ☎ ${tl(c.tel)}`:''}${c.email?` · ✉ ${ml(c.email)}`:''}</div>`);
+  const g=[x.geral.tel&&'☎ '+tl(x.geral.tel), x.geral.tlm&&'📱 '+tl(x.geral.tlm), x.geral.email&&'✉ '+ml(x.geral.email)].filter(Boolean);
+  if (g.length) L.push(`<div><b>Geral</b> · ${g.join(' · ')}</div>`);
+  return L.join('')||'<span class="muted">A ficha não tem contactos.</span>';
 }
 // duplo clique: ficha do cliente (NIF) ou da referência do catálogo, em qualquer sítio que os mostre
 function abrirFichaCliente(nif){
@@ -1573,7 +1587,7 @@ function abrirProjeto(p, apos){
   const vends=vendedoresProj([p.vendedorUid]);
   modal(`<h2><span data-dcli="${esc(p.nif||'')}" title="Duplo clique: ficha do cliente" style="cursor:pointer">${esc(p.clienteNome)}</span> <span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span></h2>
     <p class="muted" style="margin-top:0">NIF ${esc(p.nif)} · vendedor: <b>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</b> · alerta ${fmtD(p.alertaEm)}${p.fimEm?` · primeiro fim de contrato ${fmtD(p.fimEm)}`:''}${p.propostaId?` · proposta <b>${esc(p.propostaId)}</b>`:''}${p.motivoPerda?`<br>Motivo: ${esc(p.motivoPerda)}`:''}</p>
-    <p id="pj-ct" style="margin:-4px 0 10px;font-size:13px">${p.contactoEmail||p.contactoTel?`✉ ${esc(p.contactoEmail||'—')} · ☎ ${esc(p.contactoTel||'—')}`:''}</p>
+    <div id="pj-ct" style="margin:-4px 0 10px;font-size:13px;line-height:1.6">${p.contactoEmail||p.contactoTel?`✉ ${esc(p.contactoEmail||'—')} · ☎ ${esc(p.contactoTel||'—')}`:''}</div>
     ${(p.adiamentos||[]).length?`<div class="warnbox" id="pj-ad-h" style="background:#f5f3ff;border-color:#ddd6fe"><b>Adiado ${p.adiamentos.length}×</b> (alerta original ${fmtD(orig)})${p.adiamentos.map(a=>`<br>${fmtD(String(a.em).slice(0,10))} · ${esc(a.porNome)}: ${fmtD(a.de)} → <b>${fmtD(a.para)}</b> — ${esc(a.motivo)}`).join('')}</div>`:''}
     ${p.origem==='manual'?`<div class="warnbox" style="background:#f0f7ff;border-color:#cfe3ff"><b>Projeto criado à mão</b>${p.criadoPorNome?` por ${esc(p.criadoPorNome)}`:''}${p.natureza?` · ${esc(p.natureza)}`:''}${p.totRLMC?` · RLMC potencial ${eur(p.totRLMC)} €`:''}<br>${esc(p.descricao||'')}</div>`:''}
     ${p.rpnId?`<p style="margin:6px 0">Ligado ao ${stf||meu?`<a href="#/rpn/${esc(p.rpnId)}" data-pn><b>RPN ${esc(p.rpnNumero||'')}</b></a>`:`<b>RPN ${esc(p.rpnNumero||'')}</b>`}</p>`:''}
@@ -1589,7 +1603,7 @@ function abrirProjeto(p, apos){
       ${(stf||meu)&&p.estado!=='Perdido'&&(!p.propostaId||!p.rpnId)?`<button class="btn" id="pj-lg" title="Ligar este Projeto a uma proposta ou a um RPN que já existam">Ligar a proposta / RPN</button>`:''}
       ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}</div>`, (m,close)=>{
     m.style.width='min(980px,94vw)';
-    if (p.nif) contactosFicha(p.nif).then(x=>{ const el=m.querySelector('#pj-ct'); if (el && x && (x.email||x.tel)) el.innerHTML=`✉ ${x.email?`<a href="mailto:${esc(x.email)}">${esc(x.email)}</a>`:'—'} · ☎ ${x.tel?`<a href="tel:${esc(x.tel)}">${esc(x.tel)}</a>`:'—'}${x.nome?` <span class="muted">(${esc(x.nome)})</span>`:''}`; });
+    if (p.nif) contactosFicha(p.nif).then(x=>{ const el=m.querySelector('#pj-ct'); if (el && x) el.innerHTML=contactosHTML(x); });
     const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); apos(); }catch(e){ toast(errTxt(e),true); } };
     m.querySelector('#c').onclick=close;
     m.querySelectorAll('[data-pn]').forEach(a=>a.onclick=()=>close());
@@ -1985,7 +1999,7 @@ function atFicha(){
         ${cred?fa('Valor do crédito (€, sem IVA) *','valor',dV,'number','step="0.01" min="0"'):''}
         ${r.id?(isBO()?sa('BackOffice','boUid',bos().map(b=>[b.uid,b.nome]).concat(r.boUid&&!bos().some(b=>b.uid===r.boUid)?[[r.boUid,r.boNome]]:[]),AT_ABERTAS.includes(r.estado)&&p.edBO?'':'disabled'):`<div><label>BackOffice</label><input value="${esc(r.boNome||'— por atribuir —')}" disabled></div>`):''}
         ${fa('Ref.ª do pedido na Vodafone','refVDF',dB)}
-      </div></div>
+      </div><div id="t-ct" style="margin-top:10px;font-size:13px;line-height:1.6"></div></div>
       <div class="card"><div class="grid g2">
         <div><label>Descrição do pedido</label><textarea data-a="descricao" rows="9" ${dV} placeholder="O que é preciso fazer. Escolha o sub-assunto para ver o que a BackOffice precisa de saber.">${esc(r.descricao)}</textarea></div>
         <div><label>Relatório BackOffice</label><textarea data-a="resposta" rows="9" ${dB} title="Escrito pela BackOffice. O vendedor só lê." placeholder="${isBO()?'O que foi feito. Obrigatório para concluir.':''}">${esc(r.resposta)}</textarea></div>
@@ -1995,10 +2009,12 @@ function atFicha(){
         if (k==='vendedorUid') r.vendedorNome=S.users[el.value]?.nome||'';
         if (k==='boUid') r.boNome=S.users[el.value]?.nome||'';
         if (k==='subAssunto' || k==='assunto') { const g=AT_GUIA[r.subAssunto], vazio=!String(r.descricao||'').trim() || Object.values(AT_GUIA).includes(String(r.descricao).trim()); if (k==='subAssunto' && vazio) r.descricao=g||''; atFicha(); } }); });
+    if (r.cliente?.nif) contactosFicha(r.cliente.nif).then(x=>{ if (AT.cur!==r || AT.tab!=='pedido') return; const box=$('#t-ct'); if (box) box.innerHTML='<div class="muted" style="font-size:12px">Contactos do cliente (ficha)</div>'+contactosHTML(x);
+      if (x && podeCli) ['email','tel'].forEach(k=>{ const f=k==='email'?'email':'telefone', el=document.querySelector(`[data-a="cliente.${f}"]`); if (el && !el.value && x[k]) { el.value=x[k]; r.cliente[f]=x[k]; } }); });
     const cq=$('#t-cq'), cr=$('#t-cr');
     if (cq) { carregarClientes().catch(()=>{});
       cq.oninput=()=>{ const res=procurarClientes(cq.value); cr.innerHTML=res.map((c,i)=>`<div data-i="${i}"><b>${esc(c.nome)}</b><br><small>${esc(c.nif)} · ${esc(c.local)}</small></div>`).join(''); cr.classList.toggle('on',!!res.length);
-        cr.querySelectorAll('[data-i]').forEach(d=>d.onmousedown=e=>{ e.preventDefault(); const c=res[+d.dataset.i]; r.cliente={nif:c.nif, nome:c.nome, email:'', telefone:''}; S.dirty=true; atFicha(); contactosFicha(c.nif).then(x=>{ if (x && AT.cur===r && r.cliente?.nif===c.nif) { r.cliente.email=x.email; r.cliente.telefone=x.tel; atFicha(); } }); }); };
+        cr.querySelectorAll('[data-i]').forEach(d=>d.onmousedown=e=>{ e.preventDefault(); const c=res[+d.dataset.i]; r.cliente={nif:c.nif, nome:c.nome, email:'', telefone:''}; S.dirty=true; atFicha(); }); };
       cq.onblur=()=>setTimeout(()=>cr.classList.remove('on'),150); }
   } else if (!r.id) tc.innerHTML=`<div class="card muted">Guarde a Atividade primeiro.</div>`;
   else if (AT.tab==='anexos') atAnexos(tc, p);
