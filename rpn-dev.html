@@ -3140,7 +3140,7 @@ function cmsVend(box){
     let casa;
     if (R.fechado && R.calcN) casa = (await casaDoFecho(R)).casa;
     else if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R) casa = CMS_CASA.casa;
-    else if (CMS_CONC===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; }
+    else if (CMS_CONC===CMS_MES || CMS_CASA?.mes===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; CMS_CONC = VAL_CONC = CMS_MES; }
     else { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
       box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span><button class="btn pri" id="cms-conc">Conciliar RUN com os PN</button></div>
         <p class="muted" style="font-size:13px;margin-bottom:0">RUN de ${mesTxt(CMS_MES)}: ${R.linhas.length} linhas, ${eur(R.linhas.reduce((a,l)=>a+l[RL.val],0))} €. Para obter o cálculo por vendedor, as linhas por imputar, as diferenças com o PHC e o botão «Fechar RUN», carregue em <b>«Conciliar RUN com os PN»</b> (lê os PN da plataforma).</p></div>
@@ -3984,7 +3984,7 @@ function cmsValid(box){
     if (R.origem==='PHC') { box.innerHTML = topo+`<div class="card muted">Este RUN veio do histórico PHC, que não traz prazo, tier nem RLMC ajustada. A validação funciona com os RUN importados do ficheiro da Vodafone (xlsx).</div>`; ligaMes(()=>cmsValid(box)); return; }
     let casa;
     if (CMS_CASA?.mes===CMS_MES && CMS_CASA.run===R) casa = CMS_CASA.casa;
-    else if (VAL_CONC===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; }
+    else if (VAL_CONC===CMS_MES || CMS_CASA?.mes===CMS_MES) { casa = (await conciliarRun(R)).casa; CMS_CASA = {mes:CMS_MES, run:R, casa}; CMS_CONC = VAL_CONC = CMS_MES; }
     else { box.innerHTML = topo+`<div class="card"><p class="muted" style="margin-top:0">Para obter as divergências, carregue em «Validar» (lê os PN da plataforma).</p><button class="btn pri" id="vl-go">Validar RUN de ${mesTxt(CMS_MES)}</button></div>`;
       $('#vl-go').onclick = () => { VAL_CONC = CMS_MES; cmsValid(box); }; ligaMes(()=>cmsValid(box)); return; }
     // comissão esperada: calibrada no próprio RUN (nada de multiplicadores Vodafone no código) — fator RLMC ajustada ÷ RLMC
