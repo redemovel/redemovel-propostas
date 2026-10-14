@@ -205,7 +205,8 @@ onAuthStateChanged(auth, async user => {
     handlePropostaParam();
     render();
     projetosAoEntrar();   // não bloqueia a entrada
-    setTimeout(()=>atAgendadasDistribuir(), 2500);   // Atividades agendadas que chegaram à data → BackOffice
+    setTimeout(()=>atAgendadasDistribuir(), 2500);
+    setTimeout(()=>rpnAgendadosDistribuir(), 3500);   // RPN agendados que chegaram à data → BackOffice   // Atividades agendadas que chegaram à data → BackOffice
   } catch(e){ toast(errTxt(e), true); console.error(e); }
 });
 window.addEventListener('hashchange', () => { if (S.me) render(); });
@@ -518,7 +519,7 @@ function drawLista(){
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th data-estf="rpn">Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?(parcial(r)?' <span class="gp-par" title="Grupo com partes por fechar: uns RPN já seguiram, outros ainda estão em aberto" style="color:#b45309;font-size:11px;font-weight:600">⛓ parcial</span>':' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>'):''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?(parcial(r)?' <span class="gp-par" title="Grupo com partes por fechar: uns RPN já seguiram, outros ainda estão em aberto" style="color:#b45309;font-size:11px;font-weight:600">⛓ parcial</span>':' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>'):''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${r.agendadoPara&&!r.boUid?`<span title="Submetido com data futura: vai para uma BackOffice nesse dia" style="color:#8a5a00">⏳ agendado ${fmtD(r.agendadoPara)}</span>`:esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -603,7 +604,9 @@ function drawFicha(){
   if (!tabs.some(t=>t[0]===S.tab)) S.tab='principal';
   const acts = [];
   if (p.edit) acts.push(`<button class="btn" id="a-save">Guardar</button><button class="btn" id="a-canc" title="${r.id?'Repõe o que estava gravado':'Sai sem criar o RPN'}">Cancelar</button>`);
-  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">Submeter à BackOffice</button>`);
+  if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração') acts.push(`<button class="btn pri" id="a-sub">${String(r.data||'').slice(0,10)>hojeLocal()?'Submeter · agendar para '+fmtD(String(r.data).slice(0,10)):'Submeter à BackOffice'}</button>`);
+  if (isBO() && r.id && !r.boUid && r.agendadoPara && ABERTOS.includes(r.estado)) acts.push(`<button class="btn pri" id="a-subja" title="Não esperar pela data: entregar já a uma BackOffice (distribuição automática)">Enviar já à BackOffice</button>`);
+  if (isBO() && r.id && r.boUid && r.estado==='Submetido' && String(r.data||'').slice(0,10)>hojeLocal()) acts.push(`<button class="btn" id="a-agd" title="Tira o RPN da BackOffice e só o entrega no dia da data (${fmtD(String(r.data||'').slice(0,10))})">Agendar para ${fmtD(String(r.data||'').slice(0,10))}</button>`);
   if ((p.own||p.nov||isBO()) && r.estado==='Em Elaboração' && r.origem!=='PHC') acts.push(`<button class="btn" id="a-div" title="Vários processos para o mesmo negócio (ex.: prazos de fidelização diferentes)">Dividir em vários RPN</button>`);
   if (p.own && ['Pendente Comercial','Pendente Documentos'].includes(r.estado)) acts.push(`<button class="btn pri" id="a-resp">Resolvido · devolver à BO</button>`);
   if (r.id && r.origem!=='PHC' && ((p.own && r.estado==='Em Elaboração') || isMaster())) acts.push(`<button class="btn" id="a-del" style="color:var(--red-d)">Eliminar</button>`);
@@ -650,6 +653,15 @@ function drawFicha(){
   $('#a-ok')?.addEventListener('click',()=>{ if(confirm(`Confirma que conferiu a implementação do RPN ${S.cur.numero} na Vodafone?\n\nO RPN fica fechado como PN (Processo de Negócio).${S.grupo?.lista?.length?`\n\nOs outros RPN do grupo em conferência (${S.grupo.lista.filter(x=>x.estado==='Em Conferência').map(x=>x.numero).join(', ')||'nenhum'}) fecham também.`:''}`)) acaoGrupo('conferido',{conferido:true}).then(()=>{ if (S.cur?.estado==='PN' && S.cur.origem!=='PHC') pnEmailPopup(S.cur); }); });
   $('#a-dev')?.addEventListener('click',()=>pedirRazao('Devolver à implementação','', 'Devolver', rz=>acaoGrupo('devolverImpl',{devolverImpl:rz})));
   $('#a-real')?.addEventListener('click',()=>realocar('bo'));
+  $('#a-subja')?.addEventListener('click',async()=>{ if(S.dirty) return toast('Guarde primeiro as alterações.',true); const n=await rpnAgendadosDistribuir([S.cur.id]); if(n) { toast('Entregue a uma BackOffice.'); viewFicha(S.cur.id); } });
+  $('#a-agd')?.addEventListener('click',async()=>{ if(S.dirty) return toast('Guarde primeiro as alterações.',true); const r=S.cur, d0=String(r.data||'').slice(0,10);
+    if(!confirm(`Tirar o RPN ${r.numero} de ${r.boNome} e entregá-lo a uma BackOffice só no dia ${fmtD(d0)}?${r.grupoId?'\n\n(Os outros RPN do grupo ainda em «Submetido» também.)':''}`)) return;
+    try { const ids=[r.id, ...(r.grupoId ? (await irmaos(r)).filter(x=>x.estado==='Submetido' && x.boUid).map(x=>x.id) : [])];
+      for (const id of ids) { await runTransaction(db, async tx=>{ const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO'); const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(); if(o.estado!=='Submetido' || !o.boUid) return;
+          const carga={...((cs.exists()?cs.data():{}).carga||{})}; if (o.cargaContada) carga[o.boUid]=Math.max(0,(carga[o.boUid]||0)-o.cargaContada);
+          tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,{boUid:null, boNome:'', cargaContada:0, agendadoPara:d0, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
+        await hist('Agendado', `Tirado de ${r.boNome} por ${S.me.nome}: vai para uma BackOffice no dia ${fmtD(d0)}`, id); }
+      toast(`Agendado para ${fmtD(d0)}.`); S.grupo=null; viewFicha(r.id); } catch(e){ toast(errTxt(e),true); } });
   $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
   $('#a-pnm')?.addEventListener('click',()=>pnEmailPopup(S.cur));
   $('#a-reab')?.addEventListener('click',()=>{ if(confirm('Reabrir este processo? Volta a “Em Implementação”.')) guardar({reabrir:true}); });
@@ -1117,7 +1129,9 @@ async function guardar(opts={}){
         if (old.boUid===S.me.uid) throw new Error('Quem implementou o RPN não o pode conferir.');
         if (old.confUid!==S.me.uid && !isMaster()) throw new Error('A conferência deste RPN está atribuída a '+(old.confNome||'outra BackOffice')+'.');
       }
-      if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga, aus); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; }
+      if (opts.submeter && !data.boUid && String(data.data||'').slice(0,10) > hojeLocal()) { data.agendadoPara=String(data.data).slice(0,10); data.boUid=null; data.boNome=''; }
+      else if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga, aus); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; data.agendadoPara=null; }
+      if (!opts.submeter && !data.boUid && data.agendadoPara && ABERTOS.includes(data.estado)) { const d0=String(data.data||'').slice(0,10); data.agendadoPara = d0>hojeLocal() ? d0 : hojeLocal(); }   // a BO mudou a data de um agendado
       if (opts.conferencia && opts.confPref && !data.confUid && opts.confPref!==data.boUid && !aus[opts.confPref] && bos().some(b=>b.uid===opts.confPref)) { data.confUid=opts.confPref; data.confNome=userNome(opts.confPref); }
       if (data.estado==='Em Conferência' && (!data.confUid || data.confUid===data.boUid || aus[data.confUid])) {
         const c = escolherConf(conf, aus, [data.boUid]); data.confUid=c?c.uid:null; data.confNome=c?c.nome:''; }
@@ -1148,7 +1162,9 @@ async function guardar(opts={}){
     if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
     // marca a proposta de origem (app Propostas, coleção 'propostas') com o nº do RPN
     if (isNew && r.propostaRef) updateDoc(doc(db,'propostas',r.propostaRef),{rpnId:rpnRef.id,rpnNumero:data.numero}).catch(()=>{});
-    if (opts.submeter) await hist('Submetido', `Atribuído a ${data.boNome} (distribuição automática, ${data.nLinhas} linha(s))`);
+    S.cur.agendadoPara = data.agendadoPara||null;
+    if (opts.submeter && data.agendadoPara) await hist('Submetido · agendado', `Data ${fmtD(data.agendadoPara)}: entregue automaticamente a uma BackOffice nesse dia (${data.nLinhas} linha(s))`);
+    else if (opts.submeter) await hist('Submetido', `Atribuído a ${data.boNome} (distribuição automática, ${data.nLinhas} linha(s))`);
     else if (opts.devolver) await hist('Devolvido à BO', 'Pendência resolvida pelo comercial');
     else if (opts.conferencia) await hist('Concluído · enviado para conferência', data.confUid?`Implementado por ${data.boNome}. Conferência atribuída a ${data.confNome} (distribuição automática, ${data.nLinhas} linha(s))`:`Implementado por ${data.boNome}. Sem BackOffice disponível para conferir — fica em fila`);
     else if (opts.conferido) await hist('Conferido → PN', `Conferido por ${S.me.nome}. O RPN passa a Processo de Negócio.`);
@@ -1156,10 +1172,10 @@ async function guardar(opts={}){
     else if (opts.reabrir) await hist('Reaberto', `De ${estTxt(old?.estado)} para Em Implementação`);
     else if (old) { const d=diffTxt(old,data); if(d) await hist(old.estado!==data.estado?'Mudança de estado':'Alterado', d); }
     if (old) await msgEstado(rpnRef.id, data, old.estado, data.estado);
-    if (!opts.silencioso) toast(opts.submeter?`Submetido. BackOffice: ${data.boNome}` : opts.conferencia?(data.confUid?`Enviado para conferência: ${data.confNome}`:'Enviado para conferência, mas não há BackOffice disponível — fica em fila.') : opts.conferido?`Conferido. O RPN ${data.numero} é agora um PN.` : opts.devolverImpl?`Devolvido a ${data.boNome}.` : 'Guardado.', !!(opts.conferencia&&!data.confUid));
+    if (!opts.silencioso) toast(opts.submeter&&data.agendadoPara?`RPN ${data.numero} agendado para ${fmtD(data.agendadoPara)}: nesse dia vai para uma BackOffice.` : opts.submeter?`Submetido. BackOffice: ${data.boNome}` : opts.conferencia?(data.confUid?`Enviado para conferência: ${data.confNome}`:'Enviado para conferência, mas não há BackOffice disponível — fica em fila.') : opts.conferido?`Conferido. O RPN ${data.numero} é agora um PN.` : opts.devolverImpl?`Devolvido a ${data.boNome}.` : 'Guardado.', !!(opts.conferencia&&!data.confUid));
     if (isNew) history.replaceState(null,'','#/rpn/'+rpnRef.id);
     if (!opts.silencioso) drawFicha();
-    if (opts.submeter && confirm(`RPN ${data.numero} atribuído a ${data.boNome}. Enviar email de aviso?`)) enviarEmail('Novo RPN submetido.');
+    if (opts.submeter && data.boUid && confirm(`RPN ${data.numero} atribuído a ${data.boNome}. Enviar email de aviso?`)) enviarEmail('Novo RPN submetido.');
     return true;
   } catch(e){ console.error(e); toast(errTxt(e), true); return false; }
   finally { btns.forEach(b=>b.disabled=false); }
@@ -1190,7 +1206,7 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(), cd=cs.exists()?cs.data():{};
     const carga={...(cd.carga||{})}, conf={...(cd.conf||{})}, agora=new Date().toISOString();
     const u={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}; let estado=o.estado, bo=o.boUid||null, cf=o.confUid||null;
-    if (tipo==='submeter') { if(o.estado!=='Em Elaboração') return; estado='Submetido'; bo=L.boUid; Object.assign(u,{submetidoEm:agora, boUid:L.boUid, boNome:L.boNome||''}); }
+    if (tipo==='submeter') { if(o.estado!=='Em Elaboração') return; estado='Submetido'; bo=L.boUid||null; Object.assign(u,{submetidoEm:agora, boUid:L.boUid||null, boNome:L.boNome||'', agendadoPara:L.boUid?null:(L.agendadoPara||null)}); }
     else if (tipo==='conferencia') { if(!IMPL.includes(o.estado)) return; estado='Em Conferência'; cf=L.confUid||null;
       Object.assign(u,{motivos:[], confNota:'', implementadoEm:agora, implPorUid:o.boUid||null, implPorNome:o.boNome||'', confUid:cf, confNome:L.confNome||'', esperaMotivo:'', esperaData:'', esperaDesde:''}); }
     else if (tipo==='conferido') { if(o.estado!=='Em Conferência' || o.boUid===S.me.uid) return; estado='PN';
@@ -1209,7 +1225,7 @@ async function aplicarNoIrmao(id, tipo, L, nota){
     tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,u); feito=o.numero; antes={...o, ...u, _de:o.estado};
   });
   if (feito!=null) await hist({submeter:'Submetido',conferencia:'Concluído · enviado para conferência',conferido:'Conferido → PN',devolverImpl:'Devolvido à implementação'}[tipo],
-    `Em conjunto com o RPN ${L.numero} (mesmo grupo)`+(tipo==='submeter'?`. BackOffice: ${L.boNome}`:tipo==='conferencia'?`. Conferência: ${L.confNome||'em fila'}`:tipo==='devolverImpl'?`: ${nota}`:`, por ${S.me.nome}`), id);
+    `Em conjunto com o RPN ${L.numero} (mesmo grupo)`+(tipo==='submeter'?(L.boUid?`. BackOffice: ${L.boNome}`:`. Agendado para ${fmtD(L.agendadoPara)}`):tipo==='conferencia'?`. Conferência: ${L.confNome||'em fila'}`:tipo==='devolverImpl'?`: ${nota}`:`, por ${S.me.nome}`), id);
   if (feito!=null && antes) await msgEstado(id, antes, antes._de, antes.estado);
   return feito;
 }
@@ -2213,6 +2229,27 @@ async function atGuardar(acao, arg){
     if (isNew) { history.replaceState(null,'','#/atividades/'+ref.id); }
     atFicha(); return true;
   } catch(e){ toast(errTxt(e),true); atFicha(); return false; }
+}
+// RPN submetidos com data futura (agendadoPara): no dia, a primeira BackOffice/Master que abre a plataforma distribui-os (os do mesmo grupo vão para a mesma BO)
+async function rpnAgendadosDistribuir(ids){
+  if (!isBO()) return 0; let n=0;
+  try {
+    const lista = ids ? ids.map(id=>({id})) : (await getDocs(query(collection(db,'rpn'), where('agendadoPara','<=',hojeLocal())))).docs.map(d=>({id:d.id, ...d.data()}));
+    const gB={};
+    for (const x of lista) { let bo=null, num=null, de='';
+      try { await runTransaction(db, async tx=>{ const ref=doc(db,'rpn',x.id), cargaRef=doc(db,'config','cargaBO'); const sn=await tx.get(ref), cs=await tx.get(cargaRef); bo=null; if(!sn.exists()) return; const o=sn.data();
+          if (!o.agendadoPara) return; num=o.numero; de=o.agendadoPara;
+          if (o.boUid || !ABERTOS.includes(o.estado)) { tx.update(ref,{agendadoPara:null}); return; }
+          const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, g=o.grupoId, b=(g&&gB[g]) || escolherBO(carga, cd.ausentes||{}), nl=o.nLinhas||0;
+          carga[b.uid]=(carga[b.uid]||0)+nl; if (g) gB[g]=b;
+          tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+          tx.update(ref,{boUid:b.uid, boNome:b.nome, cargaContada:nl, agendadoPara:null, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); bo=b.nome; });
+        if (bo) { n++; await hist('Entregue à BackOffice', ids?`Enviado antes da data agendada (${fmtD(de)}) por ${S.me.nome}: atribuído a ${bo}`:`Chegou a data agendada (${fmtD(de)}): atribuído a ${bo} (distribuição automática)`, x.id); }
+      } catch(e){ console.warn('rpnAgendados', x.id, e); if (ids) toast(errTxt(e),true); }
+    }
+    if (n && !ids) { LISTA_EM=0; if (location.hash.startsWith('#/lista')||!location.hash) viewLista(true); }
+  } catch(e){ console.warn('rpnAgendadosDistribuir', e); }
+  return n;
 }
 async function atAgendadasDistribuir(){
   try {
