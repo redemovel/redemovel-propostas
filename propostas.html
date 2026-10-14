@@ -2707,9 +2707,17 @@ window.FB = {
   // versão do catálogo e estado da união (unido = os tarifários das Propostas vêm do catálogo único)
   async catCfg() { try { return (await getDoc(doc(db, 'config', 'catalogo'))).data() || {}; } catch (e) { return {}; } },
   async produtos(cfg) {
-    let v = ''; if (cfg) v = String(cfg.v || ''); else { try { v = String((await getDoc(doc(db, 'config', 'catalogo'))).data()?.v || ''); } catch (e) {} }
+    if (!cfg) { try { cfg = (await getDoc(doc(db, 'config', 'catalogo'))).data() || {}; } catch (e) { cfg = {}; } }
+    const v = String(cfg.v || '');
     if (v) { try { const c = JSON.parse(localStorage.getItem('rdm-catalogo') || 'null'); if (c && c.v === v && Array.isArray(c.l) && c.l.length) return c.l; } catch (e) {} }
-    const l = (await getDocs(collection(db, 'produtos'))).docs.map(d => d.data());
+    // pacote do catálogo (gravado pelo RPN): 2-3 documentos em vez de todas as referências
+    let l = null;
+    const n = +(cfg.pack && cfg.pack.n || 0);
+    if (v && n && String(cfg.pack.v) === v) {
+      try { const ds = await Promise.all(Array.from({ length: n }, (_, i) => getDoc(doc(db, 'produtos', '__pack_' + i))));
+        if (ds.every(d => d.exists() && String(d.data().v) === v)) l = ds.flatMap(d => JSON.parse(d.data().j || '[]')); } catch (e) { console.warn('pacote do catálogo:', e); l = null; }
+    }
+    if (!l) l = (await getDocs(collection(db, 'produtos'))).docs.map(d => d.data()).filter(p => !p.pack);
     if (v) { try { localStorage.setItem('rdm-catalogo', JSON.stringify({ v, l })); } catch (e) {} }
     return l;
   },

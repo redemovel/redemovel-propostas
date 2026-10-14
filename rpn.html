@@ -217,18 +217,38 @@ function usarProdutos(l){ S.prodMap={}; S.prodList=[]; l.forEach(p=>{ if(!p||!p.
 const CAT_KEY = 'rdm-catalogo';   // partilhado com a app Propostas (mesmo site)
 function guardarCatalogo(v){ try{ localStorage.setItem(CAT_KEY, JSON.stringify({v:String(v), l:S.prodList})); }catch(e){ try{ localStorage.removeItem(CAT_KEY); }catch(_){} } }
 // economia de leituras: o catálogo fica guardado no browser; à entrada lê-se só a versão (config/catalogo) e relê-se tudo apenas quando mudou
+// pacote: o catálogo inteiro em poucos documentos produtos/__pack_N ({pack:true, v, i, n, j:'[...]'}); config/catalogo.pack = {v, n}
+async function catPackGravar(v){
+  const lim=700000, partes=[]; let cur=[], tam=2;
+  const limpa=(k,x)=> (x && typeof x==='object' && !Array.isArray(x) && (typeof x.toDate==='function' || '_methodName' in x || ('seconds' in x && 'nanoseconds' in x))) ? undefined : x;   // sem datas do Firestore
+  S.prodList.forEach(p=>{ const s=JSON.stringify(p,limpa); if (cur.length && tam+s.length+1>lim) { partes.push(cur); cur=[]; tam=2; } cur.push(s); tam+=s.length+1; });
+  if (cur.length) partes.push(cur);
+  const b=writeBatch(db); partes.forEach((c,i)=>b.set(doc(db,'produtos','__pack_'+i),{pack:true, v:String(v), i, n:partes.length, j:'['+c.join(',')+']'})); await b.commit();
+  return partes.length;
+}
+async function catPackLer(cfg){
+  const v=String(cfg?.v||''), n=+(cfg?.pack?.n||0); if (!v || !n || String(cfg.pack.v)!==v) return null;
+  const ds=await Promise.all(Array.from({length:n},(_,i)=>getDoc(doc(db,'produtos','__pack_'+i))));
+  if (!ds.every(d=>d.exists() && String(d.data().v)===v)) return null;
+  return ds.flatMap(d=>JSON.parse(d.data().j||'[]'));
+}
 async function loadProdutos(forcar){
-  let v=''; try{ v=String((await getDoc(doc(db,'config','catalogo'))).data()?.v||''); }catch(e){}
+  let cfg={}; try{ cfg=(await getDoc(doc(db,'config','catalogo'))).data()||{}; }catch(e){}
+  let v=String(cfg.v||'');
   if (!forcar && v) { try{ const c=JSON.parse(localStorage.getItem(CAT_KEY)||'null'); if (c && c.v===v && Array.isArray(c.l) && c.l.length) { usarProdutos(c.l); return; } }catch(e){} }
-  const s=await getDocs(collection(db,'produtos')); usarProdutos(s.docs.map(d=>d.data()));
+  if (!forcar && v) { try{ const l=await catPackLer(cfg); if (l && l.length) { usarProdutos(l); guardarCatalogo(v); return; } }catch(e){ console.warn('pacote do catálogo', e); } }
+  const s=await getDocs(collection(db,'produtos')); usarProdutos(s.docs.map(d=>d.data()).filter(p=>!p.pack));
   if (!v && isStaff()) { v=String(Date.now()); try{ await _setDoc(doc(db,'config','catalogo'),{v},{merge:true}); }catch(e){ v=''; } }   // primeira vez: cria a versão
   if (v) guardarCatalogo(v);
+  // ainda sem pacote desta versão: a staff cria-o (os colegas passam a ler 2-3 documentos em vez do catálogo todo)
+  if (v && isStaff() && !(cfg.pack && String(cfg.pack.v)===v)) catPackGravar(v).then(n=>_setDoc(doc(db,'config','catalogo'),{pack:{v,n}},{merge:true})).catch(e=>console.warn('pacote do catálogo', e));
 }
 // depois de alterar o catálogo: nova versão (os outros utilizadores releem na próxima entrada) e cache local atualizada
-async function catalogoMudou(){
+async function catalogoMudou(extra){
   const v=String(Date.now());
-  try{ await _setDoc(doc(db,'config','catalogo'),{v, por:S.me.nome},{merge:true}); guardarCatalogo(v); }
-  catch(e){ try{ localStorage.removeItem(CAT_KEY); }catch(_){} toast('Catálogo gravado, mas a versão não foi atualizada (regras por publicar?). Os colegas podem continuar a ver o catálogo antigo.', true); }
+  let pack={v:'',n:0}; try{ pack={v, n:await catPackGravar(v)}; }catch(e){ console.warn('pacote do catálogo', e); }
+  try{ await _setDoc(doc(db,'config','catalogo'),{v, por:S.me.nome, pack, ...(extra||{})},{merge:true}); guardarCatalogo(v); }
+  catch(e){ if (extra) throw e; try{ localStorage.removeItem(CAT_KEY); }catch(_){} toast('Catálogo gravado, mas a versão não foi atualizada (regras por publicar?). Os colegas podem continuar a ver o catálogo antigo.', true); }
 }
 function produtoLocal(ref, d){ const l=S.prodList.filter(p=>p.ref.toUpperCase()!==String(ref).toUpperCase()); if (d) l.push(d); usarProdutos(l); }
 
@@ -2559,15 +2579,11 @@ async function unirCatalogos(lista, headers){
     ks.slice(i,i+400).forEach(k=>b.set(doc(db,'produtos',prodId(S.prodMap[k].ref)),{variantes:g[k], atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome},{merge:true}));
     await b.commit(); }
   ks.forEach(k=>{ const p=S.prodMap[k]; produtoLocal(p.ref,{...p, variantes:g[k]}); n+=g[k].length; });
-  const v=String(Date.now());
-  await setDoc(doc(db,'config','catalogo'),{v, por:S.me.nome, unido:true, unidoEm:new Date().toISOString(), unidoPor:S.me.nome, unidoN:n, tfHeaders:headers||null},{merge:true});
-  guardarCatalogo(v);
+  await catalogoMudou({unido:true, unidoEm:new Date().toISOString(), unidoPor:S.me.nome, unidoN:n, tfHeaders:headers||null});
   return {refs:ks.length, n};
 }
 async function desunirCatalogos(){
-  const v=String(Date.now());
-  await setDoc(doc(db,'config','catalogo'),{v, por:S.me.nome, unido:false, desunidoEm:new Date().toISOString(), desunidoPor:S.me.nome},{merge:true});
-  guardarCatalogo(v);
+  await catalogoMudou({unido:false, desunidoEm:new Date().toISOString(), desunidoPor:S.me.nome});
 }
 const unKey=r=>{ const k=String(r||'').trim().toUpperCase(); return /^[.\-]*$/.test(k)?'':k; };
 // lista = tarifários das Propostas; devolve uma linha por tarifário com o que lhe aconteceria
