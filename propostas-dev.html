@@ -1651,17 +1651,20 @@ function editL(id){
   SV=[];SID=0;
   if(p.tarif){
     const parts=p.tarif.split(';').map(s=>s.trim()).filter(Boolean);
-    parts.forEach(part=>{
+    parts.forEach(part0=>{
       const id=++SID;
+      // gravado como "REF TARIFÁRIO [24m] [REF_PHC]": tira a Ref PHC e a duração do nome do tarifário
+      const durM=part0.match(/\[(\d+)m\]/), du=durM?{duracao:durM[1]}:{};
+      const part=part0.replace(/\s*\[(?!\d+m\])[^\]]*\]\s*$/,'').replace(/\s*\[\d+m\]\s*$/,'').trim();
       // Try to match "REF TARIFF_NAME" or "NUMx TARIFF_NAME"
       const qtyMatch=part.match(/^(\d+)×\s*(.+)$/);
       const numMatch=part.match(/^([\d\s]+)\s+(.+)$/);
       if(qtyMatch){
-        SV.push({id,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:''});
+        SV.push({id,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:'',...du});
       } else if(numMatch){
-        SV.push({id,type:'number',ref:numMatch[1].trim(),tariff:numMatch[2].trim(),note:''});
+        SV.push({id,type:'number',ref:numMatch[1].trim(),tariff:numMatch[2].trim(),note:'',...du});
       } else {
-        SV.push({id,type:'number',ref:'',tariff:part,note:''});
+        SV.push({id,type:'number',ref:'',tariff:part,note:'',...du});
       }
     });
   }
@@ -1709,7 +1712,8 @@ function dupL(id){
   SV=[];SID=0;
   if(p.tarif){
     const parts=p.tarif.split(';').map(s=>s.trim()).filter(Boolean);
-    parts.forEach(part=>{
+    parts.forEach(part0=>{
+      const part=part0.replace(/\s*\[(?!\d+m\])[^\]]*\]\s*$/,'');   // tira a Ref PHC gravada no fim
       const id2=++SID;
       const qtyMatch=part.match(/^(\d+)×\s*(.+?)(?:\s*\[\d+m\])?$/);
       const numMatch=part.match(/^([\d\s]+)\s+(.+?)(?:\s*\[\d+m\])?$/);
