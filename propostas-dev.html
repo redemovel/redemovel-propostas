@@ -742,6 +742,7 @@ async function enterApp(user){
     // Verificar expiração de password
     if(calcDiasPassExp(CU.ultimaAlteracao)<=0){showChangePass(true);return;}
     document.getElementById('app').style.display='block';
+    carregando(true,'A preparar…');
     setupApp();
     loadLogAndClients();
     abrirProjetoParam();
@@ -773,8 +774,18 @@ async function doLogin(){
   }
 }
 
+// ampulheta enquanto as propostas carregam (a página não responde bem até lá); os clientes continuam a carregar com um aviso no canto
+function carregando(on,txt){
+  let o=document.getElementById('ld-ov');
+  if(!on){if(o)o.remove();return;}
+  if(!document.getElementById('ld-css')){const st=document.createElement('style');st.id='ld-css';st.textContent='@keyframes ldgira{0%{transform:rotate(0)}45%{transform:rotate(180deg)}50%{transform:rotate(180deg)}95%{transform:rotate(360deg)}100%{transform:rotate(360deg)}}#ld-ov{position:fixed;inset:0;z-index:9000;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;cursor:wait}#ld-ov .bx{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px 26px;box-shadow:0 8px 30px rgba(0,0,0,.15);display:flex;gap:12px;align-items:center;font-family:inherit;font-size:14px;color:#333}#ld-ov .hg,#ld-cli .hg{display:inline-block;animation:ldgira 2s ease-in-out infinite}#ld-ov .hg{font-size:26px}#ld-cli{position:fixed;right:14px;bottom:14px;z-index:8999;background:#fff;border:1px solid #e5e7eb;border-radius:20px;padding:6px 12px;font-size:12px;color:#555;box-shadow:0 4px 14px rgba(0,0,0,.12)}';document.head.appendChild(st);}
+  if(!o){o=document.createElement('div');o.id='ld-ov';document.body.appendChild(o);}
+  o.innerHTML='<div class="bx"><span class="hg">⏳</span><span>'+(txt||'A carregar…')+'</span></div>';
+}
+function carregandoCli(on){let b=document.getElementById('ld-cli');if(!on){if(b)b.remove();return;}if(!b){b=document.createElement('div');b.id='ld-cli';b.innerHTML='<span class="hg">⏳</span> A carregar clientes…';document.body.appendChild(b);}}
 async function loadLogAndClients(){
   const staff=isStaffCU();
+  carregando(true,'A carregar as propostas…');
   try{
     // só as propostas em aberto; as fechadas carregam-se a pedido, de 30 em 30 dias
     LD=await FB.propostasAbertas(staff?null:CU.uid);
@@ -789,11 +800,14 @@ async function loadLogAndClients(){
     renderDB();
     toast('✓',LD.length+' proposta(s) em aberto');
   }catch(e){console.error('Erro ao carregar propostas:',e);toast('⚠','Erro ao carregar propostas: '+fbErr(e));}
+  finally{carregando(false);}
   // Clientes — cada comercial só recebe os da sua carteira (garantido pelas regras da base de dados)
+  carregandoCli(true);
   try{
     CL=await FB.clientes(staff?null:CU.vendedor);
     console.log('Clientes carregados:',CL.length);
   }catch(e){console.error('Erro ao carregar clientes:',e);}
+  finally{carregandoCli(false);}
 }
 
 function setupApp(){
