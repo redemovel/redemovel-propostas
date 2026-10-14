@@ -97,7 +97,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   </div>
   <ul>
     <li><b>Propostas</b>: clientes, criação e acompanhamento de propostas, dashboard e ranking.</li>
-    <li><b>RPN</b>: RPN, clientes (com tudo o que existe de cada um), Projetos, conferência, PN, catálogo de referências e produção da BackOffice.</li>
+    <li><b>RPN</b>: RPN, clientes (com tudo o que existe de cada um), Projetos, conferência, PN, Tarifário (catálogo único de referências e tarifários) e produção da BackOffice.</li>
   </ul>
   <p>No RPN, o menu <span class="bt">Propostas ↗</span> abre a aplicação das Propostas noutro separador. As fichas de cliente são as mesmas nas duas aplicações.</p>
   <p>As duas aplicações estão ligadas: de uma proposta ganha cria-se o RPN com um clique, e de um Projeto cria-se a proposta já preenchida.</p>
@@ -640,13 +640,21 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
 </section>
 
 <section data-p="b" id="b-catalogo">
-  <h2>3.7 Catálogo de referências <span class="tag b">BackOffice</span></h2>
-  <p>No RPN, abra <span class="bt">Catálogo</span>. BackOffice, Coordenador e Master podem criar, alterar e apagar referências.</p>
+  <h2>3.7 Tarifário (catálogo único) <span class="tag b">BackOffice</span></h2>
+  <p>No RPN, abra <span class="bt">Tarifário</span>. É o catálogo único: serve as linhas do RPN e os tarifários que os vendedores escolhem nas Propostas. BackOffice, Coordenador e Master podem criar, alterar e apagar referências.</p>
   <ul>
-    <li><b>Procurar</b>: por referência, designação, tier ou pricing plan.</li>
+    <li><b>Procurar</b>: por referência, designação, nome comercial, tier ou pricing plan. Os títulos das colunas têm ▾ para filtrar por valores.</li>
     <li><span class="bt">+ Nova referência</span>: referência, sub-família, designação, tier, pricing plan e se está descontinuada.</li>
     <li><span class="bt">Editar</span>: tudo menos a referência, que não muda depois de criada.</li>
     <li><span class="bt">Apagar</span>: os processos que já a usam não são alterados; deixa só de aparecer na pesquisa.</li>
+  </ul>
+  <h3>Nas Propostas (nomes comerciais)</h3>
+  <ul>
+    <li>Na ficha da referência, a secção <b>Nas Propostas</b> tem os nomes comerciais dessa referência (ex.: <i>BIZ STD 2025</i>) e o que a proposta mostra de cada um: Dados, Chamadas, Partilha, Roaming, Internacional, Roaming TDR, Fixo, Equipamentos e Obs.</li>
+    <li>Uma referência pode ter vários nomes comerciais (ex.: a mesma referência com streaming 3 meses e 24 meses). Use <span class="bt">+ Nome comercial</span>.</li>
+    <li>O nome comercial não se pode repetir em todo o Tarifário: as propostas guardam o tarifário pelo nome.</li>
+    <li>Só aparecem nas Propostas as referências com pelo menos um nome comercial. As alterações chegam às Propostas na entrada seguinte de cada pessoa.</li>
+    <li>Os tarifários já não se alteram em Propostas › Administração.</li>
   </ul>
   <h3>Bundles</h3>
   <ul>
@@ -657,7 +665,7 @@ footer{max-width:1240px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
   <h3>Referências inativas</h3>
   <p>Uma referência marcada como <b>Inativa</b> não aparece na pesquisa das linhas, mas continua a servir como parte de um pacote.</p>
   <div class="aviso">O tier e o estado "descontinuado" entram no cálculo do Score. Um erro no catálogo afeta o Score de todos os processos novos com essa referência.</div>
-  <div class="dica"><span class="bt">Duplicar</span>, em cada linha do Catálogo, abre uma referência nova já preenchida com os dados da original (designação, tier, pricing plan, composição). Só falta escrever a nova referência e alterar o que for diferente.</div>
+  <div class="dica"><span class="bt">Duplicar</span>, em cada linha do Tarifário, abre uma referência nova já preenchida com os dados da original (designação, tier, pricing plan, composição e a descrição dos nomes comerciais). Só falta escrever a nova referência, os novos nomes comerciais e alterar o que for diferente.</div>
 </section>
 
 <section data-p="b" id="b-projetos">
