@@ -1010,12 +1010,16 @@ document.addEventListener('click',e=>{
 function searchTariff(id,q){
   const res=document.getElementById('tf-res-'+id);
   if(!res)return;
-  const matches=q?TF.filter(t=>t.name.toLowerCase().includes(q.toLowerCase())):TF;
+  // procura no nome e na Ref PHC; várias palavras (todas têm de aparecer); «_», «-» e «.» contam como espaço
+  const nz=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[_\-.\/]+/g,' ');
+  const pal=nz(q).split(/\s+/).filter(Boolean);
+  const matches=pal.length?TF.filter(t=>{const h=nz(t.name)+' '+nz(t.refPHC);return pal.every(w=>h.includes(w));}):TF;
   res.innerHTML='';
   if(matches.length===0){res.classList.remove('open');return;}
-  matches.slice(0,30).forEach(t=>{
+  const LIM=80;
+  matches.slice(0,LIM).forEach(t=>{
     const div=document.createElement('div');div.className='cli-item';
-    div.innerHTML='<div class="cli-name">'+eh(t.name)+'</div>';
+    div.innerHTML='<div class="cli-name">'+eh(t.name)+'</div>'+(t.refPHC?'<div style="font-size:10px;color:var(--muted);font-family:monospace">'+eh(t.refPHC)+'</div>':'');
     div.onclick=()=>{
       upSvc(id,'tariff',t.name);
       document.getElementById('tf-inp-'+id).value=t.name;
@@ -1024,6 +1028,7 @@ function searchTariff(id,q){
     };
     res.appendChild(div);
   });
+  if(matches.length>LIM){const m=document.createElement('div');m.style.cssText='padding:6px 10px;font-size:11px;color:var(--muted)';m.textContent='… mais '+(matches.length-LIM)+' tarifários: escreva parte do nome ou da Ref PHC para filtrar.';res.appendChild(m);}
   res.classList.add('open');
 }
 
