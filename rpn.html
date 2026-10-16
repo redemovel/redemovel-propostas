@@ -452,6 +452,37 @@ document.addEventListener('click', e=>{
         const alvo=t.parentElement && t.parentElement.classList.contains('scroll') ? t.parentElement : t; alvo.parentElement.insertBefore(f, alvo); f.oninput=()=>tabFiltra(t, f.value); }
     }); }, 120); }).observe(document.body, {childList:true, subtree:true});
 })();
+// ===== validação de NIF e MSISDN; ficha de cliente obrigatória =====
+const msisdnOk = v => { const d=String(v||'').replace(/[\s.\-]/g,''); return !d || /^(351\d{9}|1\d+|2\d{8}|499\d+)$/.test(d); };
+const nifCampoOk = v => { const d=String(v||'').replace(/\s/g,''); return !d || nifValido(d); };
+function marcaCampo(el){ if (!el || el.disabled) { el?.classList.remove('inv'); return; }
+  const ms=el.matches('[data-l="msisdn"]'), ok = ms ? msisdnOk(el.value) : nifCampoOk(el.value);
+  el.classList.toggle('inv', !ok); el.title = ok ? '' : (ms ? 'MSISDN inválido: tem de começar por 351 (ex.: 351912345678), 1, 2 ou 499' : 'NIF inválido: o dígito de controlo não confere');
+}
+const CAMPOS_VAL='[data-l="msisdn"],[data-f="cliente.nif"],[data-a="cliente.nif"]';
+document.addEventListener('input', e=>{ if (e.target instanceof Element && e.target.matches(CAMPOS_VAL)) marcaCampo(e.target); }, true);
+(()=>{ const st=document.createElement('style'); st.textContent='input.inv{border-color:var(--red)!important;background:#fff1f1!important;color:var(--red-d)}'; document.head.appendChild(st);
+  let tm=null; new MutationObserver(()=>{ clearTimeout(tm); tm=setTimeout(()=>document.querySelectorAll(CAMPOS_VAL).forEach(marcaCampo),150); }).observe(document.body,{childList:true,subtree:true}); })();
+const FICHA_OK=new Set();
+async function fichaExiste(nif){ if (FICHA_OK.has(nif)) return true;
+  try { const s=await getDoc(doc(db,'clientesFicha',nif)); if (s.exists()) { FICHA_OK.add(nif); return true; } return false; } catch(e){ return true; } }   // sem permissão de leitura = existe, noutra carteira
+function fichaRapida(c, vendUid){ return new Promise(res=>{ const u=S.users[vendUid]||{}, vend=String(u.vendedorPHC||'');
+  modal(`<h2>Cliente sem ficha</h2><p class="muted" style="margin-top:0">O NIF <b>${esc(c.nif)}</b> ainda não tem ficha de cliente. Para continuar, crie-a agora; pode completá-la depois em <b>Clientes</b>.</p>
+    <div class="grid g2"><div><label>NIF</label><input value="${esc(c.nif)}" disabled></div><div><label>Nome *</label><input id="fr-n" value="${esc(c.nome||'')}"></div>
+      <div><label>Email</label><input id="fr-e" value="${esc(c.email||'')}"></div><div><label>Telefone</label><input id="fr-t" value="${esc(c.telefone||'')}"></div>
+      <div style="grid-column:1/-1"><label>Morada</label><input id="fr-m" value="${esc(c.morada1||'')}"></div><div><label>Localidade</label><input id="fr-l" value="${esc(c.localidade||'')}"></div><div><label>Código postal</label><input id="fr-p" value="${esc(c.codPostal||'')}"></div>
+      <div style="grid-column:1/-1" class="muted">Fica na carteira de: <b>${vend?esc(u.nome||'')+' (vendedor '+esc(vend)+')':'sem vendedor'}</b></div></div>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Criar ficha e continuar</button></div>`, (m,close)=>{
+    const fim=v=>{ close(); res(v); }; m.querySelector('#c').onclick=()=>fim(false);
+    m.querySelector('#ok').onclick=async()=>{ const nome=m.querySelector('#fr-n').value.trim(); if(!nome) return toast('Falta o nome do cliente.',true);
+      if (!isBO() && !vend) return toast('A sua conta não tem nº de vendedor PHC: peça à BackOffice para criar a ficha deste cliente.',true);
+      const f={ncont:c.nif, nome, email:m.querySelector('#fr-e').value.trim(), telefone:m.querySelector('#fr-t').value.trim(), morada:m.querySelector('#fr-m').value.trim(), local:m.querySelector('#fr-l').value.trim(), codpost:m.querySelector('#fr-p').value.trim(), vendedor:vend, vendnm:vend?(u.nome||''):''};
+      const b=m.querySelector('#ok'); b.disabled=true;
+      try { await gravarFicha(f, true); FICHA_OK.add(c.nif); toast('Ficha de cliente criada.'); fim(true); }
+      catch(e){ b.disabled=false; if (e.code==='ja-existe') { FICHA_OK.add(c.nif); fim(true); } else toast(errTxt(e),true); } };
+  }); }); }
+async function exigirFicha(c, vendUid){ const nif=String(c?.nif||'').replace(/\s/g,''); if (!/^\d{9}$/.test(nif)) return true;
+  if (await fichaExiste(nif)) return true; return fichaRapida({...c, nif}, vendUid); }
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -724,7 +755,7 @@ function tabPrincipal(tc, dis, p){
       ${r.confNome||r.estado==='Em Conferência'?`<div><label>Conferência</label><input value="${esc(r.confNome||'em fila')}" disabled></div>`:''}
       ${sel('Atividade incentivada','atividade',ATIVIDADE,dis)}
       <div class="row" style="align-items:flex-end;gap:16px">
-        <label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" data-f="rpnAgregado" ${r.rpnAgregado?'checked':''} ${dis}> RPN agregado</label>
+
         <label style="display:flex;gap:6px;margin:0;color:var(--ink)"><input type="checkbox" data-f="clienteParticular" ${r.clienteParticular?'checked':''} ${dis}> Cliente particular</label>
       </div>
     </div>
@@ -1007,7 +1038,8 @@ function diffTxt(a,b){
 // ---------- 8. GUARDAR / SUBMETER (com distribuição automática da BO) ----------
 function validarSubmissao(r){
   const e=[];
-  if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)');
+  if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)'); else if(!nifValido(String(r.cliente.nif).trim())) e.push('NIF válido (o dígito de controlo não confere)');
+  (r.linhas||[]).forEach((l,i)=>{ if (!msisdnOk(l.msisdn)) e.push(`MSISDN da linha ${i+1} (tem de começar por 351, 1, 2 ou 499)`); });
   if(!r.linhas.length) e.push('pelo menos 1 linha');
   r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(l.bGid){ if(!(+l.bTot>0) && l.bGid!==r.linhas[i-1]?.bGid) e.push(`RLMC total do bundle ${l.bRef}`); } else if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
   return e;
@@ -1114,6 +1146,7 @@ async function ausencias(){
 async function guardar(opts={}){
   const r = S.cur; recalc();
   if (!r.vendedorUid && r.origem!=='PHC') { toast('Escolha o comercial a quem fica atribuído o RPN (campo «Vendedor»).', true); return false; }
+  if ((!r.id || opts.submeter) && r.origem!=='PHC' && !(await exigirFicha(r.cliente, r.vendedorUid))) return false;
   if (opts.submeter) { const e=validarSubmissao(r); if(e.length) return toast('Falta: '+e.join(', '), true); }
   if (opts.submeter && !r.id) { const ok = await guardar({silencioso:true}); if(ok===false) return; }
   const btns=[...document.querySelectorAll('.row .btn')]; btns.forEach(b=>b.disabled=true);
@@ -1286,6 +1319,7 @@ async function acaoGrupo(tipo, opts){
       const pref=irm.map(x=>x.estado==='Em Conferência'?x.confUid:x.conferidoPorUid).find(Boolean); if (pref) opts={...opts, confPref:pref};   // a parte que segue depois vai, se possível, para quem conferiu a primeira
       // todos prontos → seguem juntos sem perguntar
       if (abertos.some(x=>!['Submetido','Em Implementação'].includes(x.estado)) && !opts._ids) { const esc2=await escolherParcial(r, abertos); if (!esc2) return; opts={...opts, _ids:esc2.ids, _fora:esc2.fora, _razao:esc2.razao}; }
+      else if (abertos.length && !opts._ids && !confirm(`O RPN ${r.numero} faz parte de um grupo. Vão seguir juntos para conferência: ${[r.numero, ...abertos.map(x=>x.numero)].join(', ')}.\n\nEstão TODOS prontos para fechar?\n\nOK = sim, seguem todos · Cancelar = escolher os que seguem`)) { const esc2=await escolherParcial(r, abertos); if (!esc2) return; opts={...opts, _ids:esc2.ids, _fora:esc2.fora, _razao:esc2.razao}; }
     }
   }
   const ok=await guardar(opts); if(ok!==true) return;
@@ -2194,7 +2228,7 @@ function atFicha(){
   on('#t-del',()=>atEliminar());
 }
 function atValidar(r){
-  const e=[]; if(!String(r.cliente?.nome||'').trim()) e.push('cliente'); if(String(r.cliente?.nif||'').replace(/\s/g,'').length<5) e.push('NIF');
+  const e=[]; if(!String(r.cliente?.nome||'').trim()) e.push('cliente'); if(String(r.cliente?.nif||'').replace(/\s/g,'').length<5) e.push('NIF'); else if(!nifCampoOk(r.cliente?.nif)) e.push('NIF válido (o dígito de controlo não confere)');
   if(!r.assunto) e.push('assunto'); if(!r.subAssunto) e.push('sub-assunto');
   const d=String(r.descricao||'').trim(); if(d.length<10 || Object.values(AT_GUIA).includes(d)) e.push('descrição do pedido');
   if(r.assunto==='Correcção Implementação' && !String(r.pnNumero||'').trim()) e.push('PN relacionado');
@@ -2204,6 +2238,7 @@ function atValidar(r){
 async function atGuardar(acao, arg){
   const r=AT.cur, p=atPerms();
   if (!r.vendedorUid) return toast('Escolha o comercial a quem fica atribuída a Atividade (campo «Vendedor»).', true);
+  if ((!r.id || acao==='submeter') && !(await exigirFicha(r.cliente, r.vendedorUid))) return;
   if (acao==='submeter') { const e=atValidar(r); if(e.length) return toast('Falta: '+e.join(', '),true); }
   if (acao==='concluir' && String(r.resposta||'').trim().length<3) return toast('Escreva o Relatório BackOffice (o que foi feito) antes de concluir.',true);
   document.querySelectorAll('#main .row .btn').forEach(b=>b.disabled=true);
