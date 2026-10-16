@@ -352,7 +352,7 @@ document.addEventListener('click', e=>{
 // mensagem com «pend»: o processo aparece nas listas (mesmo arquivado) até todas as partes a lerem; quem lê por último tira a marca
 function msgPendFim(r){
   const u=r?.msgUlt; if (!u?.pend) return {};
-  const partes=(u.auto?[r.vendedorUid]:[r.vendedorUid,r.boUid,r.confUid]).filter(x=>x && x!==u.porUid);
+  const partes=(u.auto?[r.vendedorUid]:msgPartes(r)).filter(x=>x && x!==u.porUid);
   if (!partes.every(x=>String(r.msgLido?.[x]||'') >= String(u.em||''))) return {};
   u.pend=false; return {msgUlt:{pend:false}};
 }
@@ -562,7 +562,8 @@ function drawLista(){
 
 // ---------- 7. FICHA RPN ----------
 function rpnVazio(){
-  return { numero:null, data:hoje(), estado:'Em Elaboração', motivos:[], vendedorUid:S.me.uid, vendedorNome:S.me.nome, subSfid:S.me.sfid||'',
+  const eu = !isBO() || S.me.perfil==='comercial' || !!S.me.vendedorPHC;   // a BO / Master (sem nº de vendedor) tem de escolher o comercial
+  return { numero:null, data:hoje(), estado:'Em Elaboração', motivos:[], vendedorUid:eu?S.me.uid:'', vendedorNome:eu?S.me.nome:'', subSfid:eu?(S.me.sfid||''):'',
     nOportunidade:'', simulador:'', boUid:null, boNome:'', rpnAgregado:false, atividade:'Elegível/Carteira', clienteParticular:false,
     cliente:{nome:'',nCliente:'',nif:'',email:'',interlocutor:'',telefone:'',morada1:'',morada2:'',localidade:'',codPostal:''},
     loja:'Externos', dtAtivacao:'', dtFimEquip:'', prazoPermanencia:24, classificacao:'',
@@ -705,13 +706,14 @@ const sel = (lab, path, opts, dis) => `<div><label>${lab}</label><select data-f=
 
 function tabPrincipal(tc, dis, p){
   const r = S.cur, boDis = isBO()&&p.edit?'':'disabled';
-  const vendOpts = Object.entries(S.users).filter(([,u])=>u.ativo&&['comercial','coordenador','master'].includes(u.perfil)).map(([uid,u])=>[uid,u.nome]);
+  const vendOpts = Object.entries(S.users).filter(([,u])=>u.ativo&&['comercial','coordenador','master'].includes(u.perfil)).map(([uid,u])=>[uid,u.nome]).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt'));
+  if (!r.vendedorUid) vendOpts.unshift(['','— escolher o comercial —']);
   const podeEscolher = p.edit && r.origem!=='PHC' && (!r.id || r.estado==='Em Elaboração' || isBO());
   tc.innerHTML = `
     <div class="card">${podeEscolher?`<div class="cli-box" style="margin-bottom:14px"><label>Escolher cliente</label><input id="cli-q" type="search" autocomplete="off" name="procura-cliente" placeholder="Escreva as primeiras letras do nome ou o início do NIF…"><div class="cli-res" id="cli-res"></div></div>`:''}<div class="grid g4">
       ${fld('Cliente','cliente.nome',dis)}${fld('NIF','cliente.nif',dis)}${fld('Nº Cliente (PHC)','cliente.nCliente',dis)}${fld('Data','data',dis,'date')}
       ${fld('Email cliente','cliente.email',dis,'email')}${fld('Nº Oportunidade (VDF)','nOportunidade',dis)}${fld('Sub-SFID','subSfid',dis)}${fld('Simulador','simulador',dis,'text','title="Referência do simulador usado no negócio. Vem da proposta e fica no PN, para rastreabilidade."')}
-      ${isBO()?sel('Vendedor','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
+      ${isBO()?sel('Vendedor (comercial) *','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
       ${sel('Estado','estado',(ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN]).map(e=>[e,estTxt(e)]),isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
       <div id="cx-esp" style="${r.estado==='A aguardar'?'':'display:none'};grid-column:span 2"><div class="grid g2" style="gap:10px">
         <div><label>A aguardar o quê</label><select data-f="esperaMotivo" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${ESPERAS.map(([v,t])=>`<option value="${v}" ${r.esperaMotivo===v?'selected':''}>${t}</option>`).join('')}</select></div>
@@ -783,8 +785,9 @@ function aplicarProduto(l, pr){
 }
 let PROD_DROP = null;
 function prodDrop(){
-  if (!PROD_DROP) { PROD_DROP=document.createElement('div'); PROD_DROP.className='cli-res'; PROD_DROP.id='prod-res'; PROD_DROP.style.position='fixed'; document.body.appendChild(PROD_DROP);
-    window.addEventListener('scroll', ()=>PROD_DROP.classList.remove('on'), true); }
+  if (!PROD_DROP) { PROD_DROP=document.createElement('div'); PROD_DROP.className='cli-res'; PROD_DROP.id='prod-res'; PROD_DROP.style.position='fixed'; PROD_DROP.style.overflowY='auto'; document.body.appendChild(PROD_DROP);
+    PROD_DROP.addEventListener('mousedown', e=>e.preventDefault());   // clicar/arrastar a barra de scroll não tira o foco da caixa (não fecha a lista)
+    window.addEventListener('scroll', e=>{ if (e.target===PROD_DROP || PROD_DROP.contains(e.target)) return; PROD_DROP.classList.remove('on'); }, true); }
   return PROD_DROP;
 }
 function procurarProdutos(q){
@@ -792,7 +795,8 @@ function procurarProdutos(q){
   const pal=t.split(/\s+/), a=[], b=[], c=[];
   for (const p of S.prodList) { if (p.inativo) continue; const r=semAcento(p.ref), d=semAcento(p.designacao);
     if (r.startsWith(t)) a.push(p); else if (d.startsWith(t)) b.push(p); else if (pal.every(w=>r.includes(w)||d.includes(w))) c.push(p); }
-  return [...a,...b,...c].slice(0,12);
+  const todos=[...a,...b,...c]; procurarProdutos.total=todos.length;
+  return todos.slice(0,60);
 }
 function drawLines(dis){
   const r = S.cur, L = r.linhas;
@@ -841,10 +845,12 @@ function drawLines(dis){
     const fecha = () => { box.classList.remove('on'); box._dono=null; };
     const aplica = pr => { if(!pr) return; fecha(); const i=+inp.closest('tr').dataset.i, novas=linhasDoProduto(L[i],pr); L.splice(i,1,...novas); S.dirty=true; drawLines(dis); (novas[0].bGid ? $('#lines').querySelector(`tr.bh[data-g="${novas[0].bGid}"] [data-bt]`) : $('#lines').querySelector(`tr[data-i="${i}"] [data-l="msisdn"]`))?.focus(); };
     const mostra = () => { if(!inp.isConnected) return; res=procurarProdutos(inp.value); if(inp.value.trim().length<2) return fecha();
-      const rc=inp.getBoundingClientRect(); Object.assign(box.style,{left:Math.max(8,Math.min(rc.left, innerWidth-560))+'px', top:(rc.bottom+2)+'px', width:'540px', right:'auto'});
+      const rc=inp.getBoundingClientRect(), baixo=innerHeight-rc.bottom-12, cima=rc.top-12, paraCima=baixo<220 && cima>baixo, alt=Math.max(160, Math.min(420, paraCima?cima:baixo));
+      Object.assign(box.style,{left:Math.max(8,Math.min(rc.left, innerWidth-560))+'px', top:paraCima?'auto':(rc.bottom+2)+'px', bottom:paraCima?(innerHeight-rc.top+2)+'px':'auto', width:'540px', right:'auto', maxHeight:alt+'px'});
       // sem resultados: dizer porquê, em vez de não mostrar nada
       if (!res.length) { box.innerHTML=`<div style="cursor:default;color:#777">${S.prodList.length?`Nenhum produto com “${esc(inp.value.trim())}” nos ${S.prodList.length} do catálogo. Pode escrever a referência à mão.`:'O catálogo de produtos está vazio. O Master tem de o importar em Administração › Catálogo PHC.'}</div>`; box.classList.add('on'); box._dono=inp; box.onmousedown=null; return; }
-      box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(p.ref)}</b> — ${esc(p.designacao)}<br><small>${esc(composicaoDe(p)?'📦 bundle: '+p.composicao.map(c=>c.ref).join(' + '):[p.categoria,p.tier,p.descontinuado?'descontinuado':''].filter(Boolean).join(' · '))}</small></div>`).join('');
+      box.innerHTML=res.map((p,i)=>`<div data-i="${i}" class="${i===sel?'sel':''}"><b>${esc(p.ref)}</b> — ${esc(p.designacao)}<br><small>${esc(composicaoDe(p)?'📦 bundle: '+p.composicao.map(c=>c.ref).join(' + '):[p.categoria,p.tier,p.descontinuado?'descontinuado':''].filter(Boolean).join(' · '))}</small></div>`).join('')+((procurarProdutos.total||0)>res.length?`<div style="cursor:default;color:#777;font-size:12px">… mais ${procurarProdutos.total-res.length} referências: escreva mais letras para filtrar.</div>`:'');
+      const sd=box.querySelector('.sel'); if (sd) sd.scrollIntoView({block:'nearest'});
       box.classList.add('on'); box._dono=inp; box.onmousedown=e=>{ const d=e.target.closest('[data-i]'); if(d){ e.preventDefault(); aplica(res[+d.dataset.i]); } }; };
     inp.addEventListener('input', ()=>{ sel=-1; mostra(); });
     inp.addEventListener('keydown', e=>{ if(box._dono!==inp || !box.classList.contains('on')) return;
@@ -922,10 +928,11 @@ function tabAnexos(tc, p){
 
 // ---- mensagens ----
 // mensagem por ler: a última não é minha, sou parte do processo (vendedor, BO ou conferente) e ainda não abri as Mensagens depois dela
-const msgPorLer = r => !!(r && r.msgUlt && r.msgUlt.porUid!==S.me.uid && (r.msgUlt.auto ? r.vendedorUid===S.me.uid : [r.vendedorUid,r.boUid,r.confUid].includes(S.me.uid)) &&   // os avisos automáticos de estado são só para o vendedor
+const msgPartes = r => [...new Set([r?.vendedorUid, r?.boUid, r?.confUid, r?.implPorUid, r?.conferidoPorUid, r?.fechadoPorUid, ...((r?.devolucoes||[]).map(d=>d.aUid)), ...(r?.msgUlt?.partes||[])].filter(Boolean))];
+const msgPorLer = r => !!(r && r.msgUlt && r.msgUlt.porUid!==S.me.uid && (r.msgUlt.auto ? r.vendedorUid===S.me.uid : msgPartes(r).includes(S.me.uid)) &&   // os avisos automáticos de estado são só para o vendedor
   String(r.msgLido?.[S.me.uid]||'') < String(r.msgUlt.em||''));
 function marcarMsgLidas(r, ult){   // ult = última mensagem no ecrã; apanha também as que chegam com o separador aberto
-  if (!r?.id || ![r.vendedorUid,r.boUid,r.confUid].includes(S.me.uid)) return;
+  if (!r?.id || !msgPartes(r).includes(S.me.uid)) return;
   const chegou = !!(ult && ult.porUid!==S.me.uid && r._msgVistas!==undefined && r._msgVistas!==ult._n);
   if (ult) r._msgVistas=ult._n;
   if (!msgPorLer(r) && !chegou) return;
@@ -933,7 +940,7 @@ function marcarMsgLidas(r, ult){   // ult = última mensagem no ecrã; apanha ta
   setDoc(doc(db,'rpn',r.id),{msgLido:{[S.me.uid]:agora}, ...msgPendFim(r)},{merge:true}).catch(e=>console.warn('msgLido',e));
   const t=document.querySelector('.tabs a[data-t="msg"]'); if(t) t.textContent='Mensagens';
 }
-const msgPara = r => r.vendedorUid===S.me.uid ? 'a BackOffice' : [r.boUid,r.confUid].includes(S.me.uid) ? 'o Comercial' : 'o Comercial ou a BackOffice';
+const msgPara = r => r.vendedorUid===S.me.uid ? 'a BackOffice' : 'o Comercial e a BackOffice';
 function tabMsg(tc){
   const r=S.cur;
   if (!r.id) { tc.innerHTML=`<div class="card muted">Guarde o RPN primeiro.</div>`; return; }
@@ -948,7 +955,7 @@ function tabMsg(tc){
   }, e=>toast(errTxt(e),true));
   S.unsub.push(un);
   $('#ms').onclick = async ()=>{ const t=$('#mt').value.trim(); if(!t) return; try{ await addDoc(collection(db,'rpn',r.id,'mensagens'),{texto:t,porUid:S.me.uid,porNome:S.me.nome,em:serverTimestamp()});
-      const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome,auto:false,pend:true};   // assinala «por ler» à outra parte, na lista
+      const agora=new Date().toISOString(); r.msgUlt={em:agora,porUid:S.me.uid,porNome:S.me.nome,auto:false,pend:true,partes:[...new Set([...(r.msgUlt?.partes||[]), S.me.uid])]};   // assinala «por ler» à outra parte, na lista
       await setDoc(doc(db,'rpn',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e));
       $('#mt').value=''; }catch(e){ toast(errTxt(e),true); } };
 }
@@ -1106,6 +1113,7 @@ async function ausencias(){
 }
 async function guardar(opts={}){
   const r = S.cur; recalc();
+  if (!r.vendedorUid && r.origem!=='PHC') { toast('Escolha o comercial a quem fica atribuído o RPN (campo «Vendedor»).', true); return false; }
   if (opts.submeter) { const e=validarSubmissao(r); if(e.length) return toast('Falta: '+e.join(', '), true); }
   if (opts.submeter && !r.id) { const ok = await guardar({silencioso:true}); if(ok===false) return; }
   const btns=[...document.querySelectorAll('.row .btn')]; btns.forEach(b=>b.disabled=true);
@@ -2014,7 +2022,7 @@ const AT_GUIA = {   // texto-guia: entra na descrição quando ela está vazia, 
 const AT_DIAS_ALERTA = 5;   // dias em aberto a partir dos quais a lista destaca o pedido
 const AT = {lista:null, mes:null, listaMes:null, extra:[], f:{estado:'',txt:'',meus:null}, cur:null, tab:'pedido'};
 const atNum = r => r?.numero ? 'A'+r.numero : '—';
-const atVazia = () => ({ numero:null, data:hoje(), estado:'Em Elaboração', vendedorUid:S.me.uid, vendedorNome:S.me.nome, boUid:null, boNome:'', cliente:{nif:'',nome:''},
+const atVazia = () => ({ numero:null, data:hoje(), estado:'Em Elaboração', ...((!isBO() || S.me.perfil==='comercial' || !!S.me.vendedorPHC) ? {vendedorUid:S.me.uid, vendedorNome:S.me.nome} : {vendedorUid:'', vendedorNome:''}), boUid:null, boNome:'', cliente:{nif:'',nome:''},
   assunto:'', subAssunto:'', descricao:'', resposta:'', conta:'', msisdns:'', dataEfetiva:'', refVDF:'', pnNumero:'', valor:'', motivo:'', cargaContada:0 });
 const atDias = r => { const d0=String(r.submetidoEm||'').slice(0,10); if(!d0) return 0; const d1=AT_FECHADAS.includes(r.estado)?String(r.fechadoEm||'').slice(0,10)||hojeLocal():hojeLocal(); return Math.max(0, Math.round((new Date(d1+'T12:00:00')-new Date(d0+'T12:00:00'))/864e5)); };
 const atHist = (id, acao, detalhe) => addDoc(collection(db,'atividades',id,'historico'),{acao, detalhe:detalhe||'', porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()}).catch(e=>console.warn('atHist',e));
@@ -2139,7 +2147,7 @@ function atFicha(){
     tc.innerHTML=`<div class="card">${podeCli?`<div class="cli-box" style="margin-bottom:14px"><label>Escolher cliente</label><input id="t-cq" type="search" autocomplete="off" name="procura-cli-at" placeholder="Escreva as primeiras letras do nome ou o início do NIF…"><div class="cli-res" id="t-cr"></div></div>`:''}
       <div class="grid g4">
         ${fa('Cliente','cliente.nome',podeCli?'':'disabled','text','title="Duplo clique: ficha do cliente"')}${fa('NIF','cliente.nif',podeCli?'':'disabled','text','title="Duplo clique: ficha do cliente"')}${fa('Email','cliente.email',podeCli?'':'disabled','email')}${fa('Telefone (Contacto 1)','cliente.telefone',podeCli?'':'disabled','tel')}${fa('Data','data','disabled','date')}
-        ${isBO()?sa('Vendedor','vendedorUid',vendOpts,dB):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
+        ${isBO()?sa('Vendedor (comercial) *','vendedorUid',vendOpts,dB):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
         ${sa('Assunto','assunto',AT_ASSUNTOS,dV)}${sa('Sub-assunto','subAssunto',AT_SUBS,dV)}
         ${fa('Conta Vodafone','conta',dV)}${fa('Número(s) afetado(s)','msisdns',dV,'text','placeholder="separados por vírgula"')}
         ${fa('Data efetiva pretendida','dataEfetiva',dV,'date')}
@@ -2195,6 +2203,7 @@ function atValidar(r){
 }
 async function atGuardar(acao, arg){
   const r=AT.cur, p=atPerms();
+  if (!r.vendedorUid) return toast('Escolha o comercial a quem fica atribuída a Atividade (campo «Vendedor»).', true);
   if (acao==='submeter') { const e=atValidar(r); if(e.length) return toast('Falta: '+e.join(', '),true); }
   if (acao==='concluir' && String(r.resposta||'').trim().length<3) return toast('Escreva o Relatório BackOffice (o que foi feito) antes de concluir.',true);
   document.querySelectorAll('#main .row .btn').forEach(b=>b.disabled=true);
@@ -2330,7 +2339,7 @@ function atAnexos(tc, p){
       toast('Anexo(s) carregado(s).'); $('#t-fup').value=''; } catch(e){ toast(errTxt(e),true); } finally { const b=$('#t-bup'); if(b) b.disabled=false; } });
 }
 function atMsgs(tc){
-  const r=AT.cur, parte=[r.vendedorUid,r.boUid].includes(S.me.uid);
+  const r=AT.cur, parte=msgPartes(r).includes(S.me.uid);
   tc.innerHTML=`<div class="card"><div class="msgs" id="t-ml"><span class="muted">A carregar…</span></div>
     <textarea id="t-mt" rows="3" placeholder="Escrever mensagem para ${msgPara(r)}…"></textarea>
     <div class="row" style="margin-top:8px"><span class="sp"></span><button class="btn pri" id="t-ms">Enviar</button></div></div>`;
@@ -2341,7 +2350,7 @@ function atMsgs(tc){
     el.scrollTop=el.scrollHeight; lida(); }, e=>toast(errTxt(e),true)));
   $('#t-ms').onclick=async()=>{ const t=$('#t-mt').value.trim(); if(!t) return;
     try { await addDoc(collection(db,'atividades',r.id,'mensagens'),{texto:t, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
-      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:false, pend:true};
+      const agora=new Date().toISOString(); r.msgUlt={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:false, pend:true, partes:[...new Set([...(r.msgUlt?.partes||[]), S.me.uid])]};
       await setDoc(doc(db,'atividades',r.id),{msgUlt:r.msgUlt, msgLido:{[S.me.uid]:agora}},{merge:true}).catch(e=>console.warn('msgUlt',e)); $('#t-mt').value=''; } catch(e){ toast(errTxt(e),true); } };
 }
 function atHistorico(tc){

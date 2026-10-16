@@ -828,11 +828,12 @@ function setupApp(){
   document.querySelectorAll('.nb-coord').forEach(el=>el.classList.toggle('hid',!isC&&!isBO));
   // Backoffice: hide Nova Proposta and Equipa
   if(isBO){
-    document.querySelector('[onclick*="proposta"]')?.classList.add('hid');
+    // a BackOffice também faz propostas, sempre atribuídas a um comercial (escolha obrigatória)
     document.querySelector('[onclick*="equipa"]')?.classList.add('hid');
   }
   const sel=document.getElementById('sc');sel.innerHTML='';
-  const list=u.funcao==='comercial'?[u]:CM;
+  const list=u.funcao==='comercial'?[u]:u.funcao==='backoffice'?CM.filter(c=>c.funcao!=='backoffice'):CM;
+  if(u.funcao==='backoffice'){const o=document.createElement('option');o.value='';o.textContent='— escolher o comercial —';sel.appendChild(o);}
   list.forEach(c=>{const o=document.createElement('option');o.value=c.nome;o.textContent=c.nome;sel.appendChild(o);});
   sel.disabled=u.funcao==='comercial';
   // Pre-select own user for all roles
@@ -846,7 +847,7 @@ function setupApp(){
     document.getElementById('pg-minhas').classList.add('act');
     document.querySelectorAll('.nb').forEach(b=>b.classList.remove('act'));
     document.querySelector('[onclick*="minhas"]')?.classList.add('act');
-    renderM();renderDB();
+    addSvc();renderM();renderDB();
   } else {
     fillCom();addSvc();renderM();renderDB();
   }
@@ -1233,6 +1234,7 @@ function saveP(){
   const cli=document.getElementById('cn').value.trim();
   if(!cli){toast('⚠','Introduza o nome do cliente');return;}
   if(!TIPO){toast('⚠','Selecione o tipo de proposta');return;}
+  {const c0=CM.find(c=>c.nome===document.getElementById('sc').value);if(!c0||c0.funcao==='backoffice'){toast('⚠','Escolha o comercial a quem fica atribuída a proposta');return;}}
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
   const cNm=document.getElementById('sc').value;
@@ -2201,7 +2203,7 @@ function desenharCli(){
   document.getElementById('cli-b-ed').style.display=(!CLI_EDIT&&pode)?'':'none';
   document.getElementById('cli-b-sv').style.display=CLI_EDIT?'':'none';
   document.getElementById('cli-b-cn').style.display=CLI_EDIT&&!CLI_NOVO?'':'none';
-  document.getElementById('cli-b-pr').style.display=(!CLI_NOVO&&!CLI_EDIT&&CU.funcao!=='backoffice')?'':'none';
+  document.getElementById('cli-b-pr').style.display=(!CLI_NOVO&&!CLI_EDIT)?'':'none';
 }
 function cliEditar(){CLI_EDIT=true;desenharCli();}
 async function cliCancelar(){const n=CLI_CUR.ncont;CLI_CUR=null;await abrirCli(n);}
@@ -2213,6 +2215,8 @@ function cliProposta(){
   const f=CLI_CUR;
   document.querySelector('.nb[onclick*="proposta"]').click();
   selectClient({nome:f.nome,ncont:f.ncont});
+  // BackOffice / chefia: o comercial da proposta passa a ser o da carteira do cliente (pode mudar)
+  if(CU.funcao!=='comercial'){const c=CM.find(x=>x.vendedor&&x.vendedor===String(f.vendedor||'')&&x.funcao!=='backoffice');const sc=document.getElementById('sc');if(c&&[...sc.options].some(o=>o.value===c.nome)){sc.value=c.nome;fillCom();}}
   CLI_CUR=null;
 }
 async function cliGravar(){
