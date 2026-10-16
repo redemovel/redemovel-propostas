@@ -453,11 +453,11 @@ document.addEventListener('click', e=>{
     }); }, 120); }).observe(document.body, {childList:true, subtree:true});
 })();
 // ===== validação de NIF e MSISDN; ficha de cliente obrigatória =====
-const msisdnOk = v => { const d=String(v||'').replace(/[\s.\-]/g,''); return !d || /^(351\d{9}|1\d+|2\d{8}|499\d+)$/.test(d); };
+const msisdnOk = v => { const d=String(v||'').replace(/[\s.\-]/g,''); return !d || /^(351\d{9}|[12]\d{8}|499\d{9})$/.test(d); };
 const nifCampoOk = v => { const d=String(v||'').replace(/\s/g,''); return !d || nifValido(d); };
 function marcaCampo(el){ if (!el || el.disabled) { el?.classList.remove('inv'); return; }
   const ms=el.matches('[data-l="msisdn"]'), ok = ms ? msisdnOk(el.value) : nifCampoOk(el.value);
-  el.classList.toggle('inv', !ok); el.title = ok ? '' : (ms ? 'MSISDN inválido: tem de começar por 351 (ex.: 351912345678), 1, 2 ou 499' : 'NIF inválido: o dígito de controlo não confere');
+  el.classList.toggle('inv', !ok); el.title = ok ? '' : (ms ? 'MSISDN inválido: 351 + 9 dígitos (ex.: 351912345678), fixo começado por 1 ou 2 com 9 dígitos, ou 499 com 12 dígitos' : 'NIF inválido: o dígito de controlo não confere');
 }
 const CAMPOS_VAL='[data-l="msisdn"],[data-f="cliente.nif"],[data-a="cliente.nif"]';
 document.addEventListener('input', e=>{ if (e.target instanceof Element && e.target.matches(CAMPOS_VAL)) marcaCampo(e.target); }, true);
@@ -1039,7 +1039,7 @@ function diffTxt(a,b){
 function validarSubmissao(r){
   const e=[];
   if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)'); else if(!nifValido(String(r.cliente.nif).trim())) e.push('NIF válido (o dígito de controlo não confere)');
-  (r.linhas||[]).forEach((l,i)=>{ if (!msisdnOk(l.msisdn)) e.push(`MSISDN da linha ${i+1} (tem de começar por 351, 1, 2 ou 499)`); });
+  (r.linhas||[]).forEach((l,i)=>{ if (!msisdnOk(l.msisdn)) e.push(`MSISDN da linha ${i+1} (351 + 9 dígitos; 1 ou 2 com 9 dígitos; 499 com 12 dígitos)`); });
   if(!r.linhas.length) e.push('pelo menos 1 linha');
   r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(l.bGid){ if(!(+l.bTot>0) && l.bGid!==r.linhas[i-1]?.bGid) e.push(`RLMC total do bundle ${l.bRef}`); } else if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
   return e;
