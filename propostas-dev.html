@@ -2351,12 +2351,15 @@ function toRPN(id){
   if(!p){toast('⚠','Proposta não encontrada');return;}
   const d={ref:p.id,cliente:p.cliente,nif:p.nif||'',comercial:p.comercial,tipo:p.tipo,tarif:p.tarif,mensalidade:p.mensalidade,duracao:p.duracao,notas:p.notas||'',simulador:p.simulador||''};
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  window.open(RPN_URL+'?prop='+b64,'_blank');
+  window.open(RPN_URL+'?'+passaGrande('prop',b64),'_blank');
 }
 // ══ LIGAÇÃO AOS PROJETOS ( ?proj=<base64 JSON> vindo do RPN › Projetos ) ═══════
+// dados grandes entre RPN e Propostas (mesmo site): ficam no browser e o endereço leva só uma chave («URI Too Long»)
+function passaGrande(k,b64){if(String(b64).length<1500)return k+'='+b64;try{const id=Date.now().toString(36)+Math.random().toString(36).slice(2,7);localStorage.setItem('rdm-pass-'+id,b64);return k+'k='+id;}catch(e){return k+'='+b64;}}
+function lerPassagem(u,k){const id=u.searchParams.get(k);if(!id)return null;u.searchParams.delete(k);try{const v=localStorage.getItem('rdm-pass-'+id);localStorage.removeItem('rdm-pass-'+id);return v;}catch(e){return null;}}
 function abrirProjetoParam(){
   let raw;
-  try{const u=new URL(location.href);raw=u.searchParams.get('proj');if(!raw)return;u.searchParams.delete('proj');history.replaceState(null,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams:'')+u.hash);}catch(e){return;}
+  try{const u=new URL(location.href);raw=u.searchParams.get('proj')||lerPassagem(u,'projk');if(!raw)return;u.searchParams.delete('proj');history.replaceState(null,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams:'')+u.hash);}catch(e){return;}
   let p;
   try{const b=raw.replace(/-/g,'+').replace(/_/g,'/');p=JSON.parse(decodeURIComponent(escape(atob(b+'==='.slice((b.length+3)%4)))));}catch(e){toast('⚠','Dados do Projeto inválidos');return;}
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('act'));

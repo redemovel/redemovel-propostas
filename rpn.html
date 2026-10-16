@@ -483,6 +483,11 @@ function fichaRapida(c, vendUid){ return new Promise(res=>{ const u=S.users[vend
   }); }); }
 async function exigirFicha(c, vendUid){ const nif=String(c?.nif||'').replace(/\s/g,''); if (!/^\d{9}$/.test(nif)) return true;
   if (await fichaExiste(nif)) return true; return fichaRapida({...c, nif}, vendUid); }
+// dados grandes entre RPN e Propostas (mesmo site): ficam no browser e o endereço leva só uma chave
+function passaGrande(k, b64){ if (String(b64).length<1500) return k+'='+b64;
+  try { const id=Date.now().toString(36)+Math.random().toString(36).slice(2,7); localStorage.setItem('rdm-pass-'+id, b64); return k+'k='+id; } catch(e){ return k+'='+b64; } }
+function lerPassagem(u, k){ const id=u.searchParams.get(k); if (!id) return null; u.searchParams.delete(k);
+  try { const v=localStorage.getItem('rdm-pass-'+id); localStorage.removeItem('rdm-pass-'+id); return v; } catch(e){ return null; } }
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -1471,7 +1476,7 @@ async function preencherCliente(r, substituir){
 
 // ---------- 9. LIGAÇÃO ÀS PROPOSTAS ( ?prop=<base64 JSON> ) ----------
 function handlePropostaParam(){
-  const u = new URL(location.href), raw = u.searchParams.get('prop'); if(!raw) return;
+  const u = new URL(location.href), raw = u.searchParams.get('prop') || lerPassagem(u,'propk'); if(!raw) return;
   u.searchParams.delete('prop'); history.replaceState(null,'',u.pathname+(u.searchParams.toString()?'?'+u.searchParams:'')+'#/novo');
   let p; try { const b64 = raw.replace(/-/g,'+').replace(/_/g,'/'); p = JSON.parse(decodeURIComponent(escape(atob(b64 + '==='.slice((b64.length+3)%4))))); } catch(e){ toast('Dados da proposta inválidos.',true); return; }
   const r = rpnVazio();
@@ -1792,7 +1797,7 @@ function abrirProjeto(p, apos){
     const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); apos(); }catch(e){ toast(errTxt(e),true); } };
     m.querySelector('#c').onclick=close;
     m.querySelectorAll('[data-pn]').forEach(a=>a.onclick=()=>close());
-    m.querySelector('#pj-cp')?.addEventListener('click',()=>{ window.open(PROPOSTAS_URL+'?proj='+projParaProposta(p),'_blank'); close(); toast('Proposta aberta noutro separador. O Projeto passa a “Em negociação” quando a gravar.'); });
+    m.querySelector('#pj-cp')?.addEventListener('click',()=>{ window.open(PROPOSTAS_URL+'?'+passaGrande('proj',projParaProposta(p)),'_blank'); close(); toast('Proposta aberta noutro separador. O Projeto passa a “Em negociação” quando a gravar.'); });
     m.querySelector('#pj-pd')?.addEventListener('click',()=>{ close(); pedirRazao('Perdido sem proposta','', 'Marcar como perdido', rz=>grava({estado:'Perdido', motivoPerda:rz, perdidoEm:new Date().toISOString()},'Projeto marcado como perdido.')); });
     m.querySelector('#pj-re')?.addEventListener('click',()=>grava({estado:'Por tratar', motivoPerda:''},'Projeto reaberto.'));
     m.querySelector('#pj-ad')?.addEventListener('click',()=>{ close();
