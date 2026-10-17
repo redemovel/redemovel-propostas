@@ -453,11 +453,11 @@ document.addEventListener('click', e=>{
     }); }, 120); }).observe(document.body, {childList:true, subtree:true});
 })();
 // ===== validação de NIF e MSISDN; ficha de cliente obrigatória =====
-const msisdnOk = v => { const d=String(v||'').replace(/[\s.\-]/g,''); return !d || /^(351\d{9}|[12]\d{8}|499\d{9})$/.test(d); };
+const msisdnOk = v => { const d=String(v||'').replace(/[\s.\-]/g,''); return !d || /^(351\d{9}|[125689]\d{8}|499\d{9})$/.test(d); };
 const nifCampoOk = v => { const d=String(v||'').replace(/\s/g,''); return !d || nifValido(d); };
 function marcaCampo(el){ if (!el || el.disabled) { el?.classList.remove('inv'); return; }
   const ms=el.matches('[data-l="msisdn"]'), ok = ms ? msisdnOk(el.value) : nifCampoOk(el.value);
-  el.classList.toggle('inv', !ok); el.title = ok ? '' : (ms ? 'MSISDN inválido: 351 + 9 dígitos (ex.: 351912345678), fixo começado por 1 ou 2 com 9 dígitos, ou 499 com 12 dígitos' : 'NIF inválido: o dígito de controlo não confere');
+  el.classList.toggle('inv', !ok); el.title = ok ? '' : (ms ? 'MSISDN inválido: 351 + 9 dígitos (ex.: 351912345678); começado por 1, 2, 5, 6 ou 9 com 9 dígitos; ou 499 com 12 dígitos' : 'NIF inválido: o dígito de controlo não confere');
 }
 const CAMPOS_VAL='[data-l="msisdn"],[data-f="cliente.nif"],[data-a="cliente.nif"]';
 document.addEventListener('input', e=>{ if (e.target instanceof Element && e.target.matches(CAMPOS_VAL)) marcaCampo(e.target); }, true);
@@ -920,10 +920,9 @@ function tabOutros(tc, dis){
       ${fld('Morada','cliente.morada1',dis)}${fld('Morada (cont.)','cliente.morada2',dis)}${fld('Localidade','cliente.localidade',dis)}${fld('Código postal','cliente.codPostal',dis)}
     </div></div>
     <div class="card"><h2>Contacto e prazos</h2><div class="grid g4">
-      ${fld('Interlocutor','cliente.interlocutor',dis)}${fld('Telefone','cliente.telefone',dis)}${sel('Loja','loja',LOJAS,dis)}${sel('Prazo permanência (meses)','prazoPermanencia',PRAZOS,dis)}
-      ${fld('Data ativação','dtAtivacao',dis,'date')}${fld('Data fim equipamento','dtFimEquip',dis,'date')}${fld('Classificação cliente','classificacao',dis,'text','placeholder="Prospect, Cliente…"')}
+      ${fld('Interlocutor','cliente.interlocutor',dis)}${fld('Telefone','cliente.telefone',dis)}${sel('Loja','loja',LOJAS,dis)}
+      ${fld('Classificação cliente','classificacao',dis,'text','placeholder="Prospect, Cliente…"')}
     </div><div id="r-ct" style="margin-top:10px;font-size:13px;line-height:1.6"></div></div>`;
-  tc.querySelector('[data-f="prazoPermanencia"]').addEventListener('change',e=>S.cur.prazoPermanencia=+e.target.value);
 }
 function tabCond(tc, dis){
   tc.innerHTML = `<div class="card"><h2>Condições comerciais</h2><div class="grid g4">
@@ -1044,7 +1043,7 @@ function diffTxt(a,b){
 function validarSubmissao(r){
   const e=[];
   if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)'); else if(!nifValido(String(r.cliente.nif).trim())) e.push('NIF válido (o dígito de controlo não confere)');
-  (r.linhas||[]).forEach((l,i)=>{ if (!msisdnOk(l.msisdn)) e.push(`MSISDN da linha ${i+1} (351 + 9 dígitos; 1 ou 2 com 9 dígitos; 499 com 12 dígitos)`); });
+  (r.linhas||[]).forEach((l,i)=>{ if (!msisdnOk(l.msisdn)) e.push(`MSISDN da linha ${i+1} (351 + 9 dígitos; 1, 2, 5, 6 ou 9 com 9 dígitos; 499 com 12 dígitos)`); });
   if(!r.linhas.length) e.push('pelo menos 1 linha');
   r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(l.bGid){ if(!(+l.bTot>0) && l.bGid!==r.linhas[i-1]?.bGid) e.push(`RLMC total do bundle ${l.bRef}`); } else if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
   return e;
@@ -1446,6 +1445,7 @@ async function carregarClientes(){
   if (isStaff()) docs = (await getDocs(col)).docs;
   else if (S.me.vendedorPHC) docs = (await getDocs(query(col, where('vendedor','==',String(S.me.vendedorPHC))))).docs;
   S.cli = docs.flatMap(d => (d.data().lista||[]).map(c => ({nome:c.nome||'', nif:String(c.ncont||''), local:c.local||c.area||'', vend:c.vendnm||'', email:c.email||'', _n:semAcento(c.nome), _e:String(c.email||'').toLowerCase(), _t:String(c.tel||'').replace(/\D/g,'')})));
+  if (!isStaff() && S.me.vendedorPHC) { try { (await getDocs(query(collection(db,'clientesFicha'), where('vendedorTemp','==',String(S.me.vendedorPHC))))).docs.map(d=>d.data()).filter(tempAtivo).forEach(c=>{ if (!S.cli.some(x=>x.nif===String(c.ncont))) S.cli.push({nome:c.nome||'', nif:String(c.ncont||''), local:c.local||c.area||'', vend:(c.vendnm||'')+' · temporário', email:c.email||'', _n:semAcento(c.nome), _e:String(c.email||'').toLowerCase(), _t:String((c.telefone||'')+(c.tlmvl||'')).replace(/\D/g,'')}); }); } catch(e){ console.warn('clientes temporários', e); } }
   return S.cli;
 }
 function procurarClientes(q){
@@ -1486,23 +1486,24 @@ function handlePropostaParam(){
   // BackOffice/Master a abrir a proposta de um comercial: o RPN fica em nome do comercial da proposta
   if (isBO() && p.comercial) { const v = Object.entries(S.users).find(([,u])=>(u.nome||'').trim().toLowerCase()===String(p.comercial).trim().toLowerCase()); if (v) { r.vendedorUid=v[0]; r.vendedorNome=v[1].nome; r.subSfid=v[1].sfid||''; } }
   // Formato da app de Propostas:  "912 345 678 TARIFÁRIO [24m] [REF_PHC]; 10× TARIFÁRIO [24m] [REF_PHC]"
-  String(p.tarif||'').split(/;|\n|\|/).map(x=>x.trim()).filter(Boolean).forEach(sg=>{
+  String(p.tarif||'').split(/;|\n|\|/).map(x=>x.trim()).filter(Boolean).forEach((sg, pi)=>{
+    const ns = (p.nums && Array.isArray(p.nums[pi])) ? p.nums[pi] : [];
     const br = [...sg.matchAll(/\[([^\]]+)\]/g)].map(x=>x[1].trim());
     const pz = br.find(b=>/^\d+\s*m$/i.test(b));
     const rf = br.filter(b=>!/^\d+\s*m$/i.test(b)).pop();
     let resto = sg.replace(/\[[^\]]+\]/g,'').trim(), qtd = 1, msisdn = '';
     const q = resto.match(/^(\d+)\s*[×x]\s+/i);
-    if (q) { qtd = Math.min(Math.max(+q[1],1),300); resto = resto.slice(q[0].length); }
+    if (q) { qtd = Math.min(Math.max(+q[1], ns.length, 1),1000); resto = resto.slice(q[0].length); }
     else { const m = resto.match(/^(\d[\d ]{7,14}\d)\s+/); if (m && m[1].replace(/\s/g,'').length>=9) { msisdn = m[1].replace(/\s/g,''); resto = resto.slice(m[0].length); } }
     const pr = rf && S.prodMap[rf.toUpperCase()];
     const fixo = pr ? pr.categoria==='Fixo' : false;
     const l = linhaVazia();
     Object.assign(l, { designacao: resto.trim(), msisdn, upgrade: upg, prazo: pz ? parseInt(pz) : (+p.duracao||24),
       natureza: (nova?'Nova ':'Ref ') + (fixo?'Fixo':'Móvel') });
-    if (composicaoDe(pr)) { for (let i=0;i<qtd;i++) r.linhas.push(...linhasDoProduto(l,pr)); return; }   // bundle: abre nas filhas
+    if (composicaoDe(pr)) { for (let i=0;i<qtd;i++) r.linhas.push(...linhasDoProduto({...l, msisdn:ns[i]||l.msisdn},pr)); return; }   // bundle: abre nas filhas
     if (pr) Object.assign(l, {ref:pr.ref, designacao:pr.designacao, tier:pr.tier, pricingPlan:pr.pricingPlan, descontinuado:pr.descontinuado});
     else l.ref = rf||'';
-    for (let i=0;i<qtd;i++) r.linhas.push({...l});
+    for (let i=0;i<qtd;i++) r.linhas.push({...l, msisdn:ns[i]||l.msisdn});
   });
   const mens = parseFloat(String(p.mensalidade||'').replace(',','.'))||0;
   if (r.linhas.length===1 && mens) r.linhas[0].rlmc = mens;
@@ -1554,7 +1555,7 @@ async function gerarProjetos(M){
     });
     if (!linhas.length) { res.semLinhas++; continue; }
     linhas.sort((a,b)=>a.alerta.localeCompare(b.alerta)||String(a.pnNumero).localeCompare(String(b.pnNumero)));
-    const f=ficha.exists()?ficha.data():null, cod=String(f?.vendedor||''), uid=porVend[cod]||null; if(!uid) res.semVendedor++;
+    const f=ficha.exists()?ficha.data():null, cod=String(tempAtivo(f)&&porVend[String(f.vendedorTemp)] ? f.vendedorTemp : (f?.vendedor||'')), uid=porVend[cod]||null; if(!uid) res.semVendedor++;
     ops.push([pid,{nif, clienteNome:f?.nome||cand[nif][0].r.cliente?.nome||'', mes:M, alertaEm:linhas[0].alerta, fimEm:linhas.map(l=>l.fim).sort()[0],
       vendedorUid:uid, vendedorNome:uid?S.users[uid].nome:'', vendedorPHC:cod, linhas, nLinhas:linhas.length,
       totRLMC:Math.round(linhas.reduce((a,l)=>a+l.rlmc,0)*100)/100, totScore:Math.round(linhas.reduce((a,l)=>a+(+l.score||0),0)*1000)/1000,
@@ -1581,7 +1582,14 @@ const navProj = () => (S.projAtr?` <b id="pj-a" title="Em atraso: de meses anter
   + (S.projN?` <b id="pj-n" title="Para tratar este mês" style="background:#e5e7eb;color:#111;border-radius:10px;padding:1px 7px;font-size:11px">${S.projN}</b>`:'');
 function contarProj(L){ const h=L.filter(projParaHoje), a=h.filter(projAtrasado).length, n=h.length-a; const mudou=a!==(S.projAtr||0)||n!==(S.projN||0); S.projAtr=a; S.projN=n; return mudou; }
 // à entrada: Master/Coordenador/BO geram o mês corrente (se faltar) e, a partir do dia 28, o mês seguinte; o comercial fica a saber o que tem para tratar e o que está em atraso
+async function tempExpirados(){
+  if (!isBO()) return; const k='rdm-temp-'+hojeLocal(); try { if (localStorage.getItem(k)) return; } catch(_){}
+  try { const sn=await getDocs(query(collection(db,'clientesFicha'), where('vendedorTempAte','>',''), where('vendedorTempAte','<',hojeLocal())));
+    for (const d of sn.docs) await updateDoc(d.ref,{vendedorTemp:'', vendedorTempNome:'', vendedorTempAte:''});
+    try { localStorage.setItem(k,'1'); } catch(_){} } catch(e){ console.warn('vendedor temporário', e); }
+}
 async function projetosAoEntrar(){
+  setTimeout(()=>tempExpirados(), 6000);
   try {
     if (isStaff()) {
       const cur=mesLocal(), alvo=[cur]; if (new Date().getDate()>=28) alvo.push(somaMeses(cur,1));
@@ -1791,7 +1799,16 @@ function abrirProjeto(p, apos){
       ${aberto&&!p.propostaId&&dMin<=dMax?`<button class="btn" id="pj-ad">Adiar</button>`:''}
       ${(stf||meu)&&(p.propostaId||p.rpnId)&&!['Ganho','Perdido'].includes(p.estado)?`<button class="btn" id="pj-dl" title="Retira a ligação à proposta / RPN">Desligar</button>`:''}
       ${(stf||meu)&&p.estado!=='Perdido'&&(!p.propostaId||!p.rpnId)?`<button class="btn" id="pj-lg" title="Ligar este Projeto a uma proposta ou a um RPN que já existam">Ligar a proposta / RPN</button>`:''}
-      ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}</div>`, (m,close)=>{
+      ${aberto&&!p.propostaId?`<button class="btn pri" id="pj-cp">Criar proposta</button>`:''}
+      ${(stf||meu)&&p.propostaId&&!p.rpnId?`<button class="btn pri" id="pj-rpn" title="Cria o RPN a partir da proposta ganha (uma linha por número)">Passar a RPN</button>`:''}</div>`, (m,close)=>{
+    m.querySelector('#pj-rpn')?.addEventListener('click', async()=>{
+      try { const s=await getDoc(doc(db,'propostas',p.propostaId)); if(!s.exists()) return toast('Não encontrei a proposta ligada.',true); const x=s.data();
+        if (String(x.estado||'').toLowerCase()!=='ganho') return toast('A proposta ligada ainda não está ganha: marque-a como ganha nas Propostas.',true);
+        if (x.rpnId) return toast(`Esta proposta já tem o RPN ${x.rpnNumero||''}.`,true);
+        const d={ref:p.propostaId, cliente:x.cliente, nif:x.nif||'', comercial:x.comercial, tipo:x.tipo, tarif:x.tarif, mensalidade:x.mensalidade, duracao:x.duracao, notas:x.notas||'', simulador:x.simulador||'', nums:x.nums||null};
+        const b64=btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+        close(); history.replaceState(null,'',location.pathname+'?'+passaGrande('prop',b64)+'#/novo'); handlePropostaParam(); render();
+      } catch(e){ toast(errTxt(e),true); } });
     m.style.width='min(980px,94vw)';
     if (p.nif) contactosFicha(p.nif).then(x=>{ const el=m.querySelector('#pj-ct'); if (el && x) el.innerHTML=contactosHTML(x); });
     const grava=async(upd,msg)=>{ try{ await updateDoc(doc(db,'projetos',p.id),{...upd, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); toast(msg); close(); apos(); }catch(e){ toast(errTxt(e),true); } };
@@ -1829,9 +1846,9 @@ const CLI_SEC = [
     ['c2tacto','Contacto 2 — nome'],['c2func','Contacto 2 — função'],['c2tele','Contacto 2 — telefone'],['c2email','Contacto 2 — email'],
     ['c3tacto','Contacto 3 — nome'],['c3func','Contacto 3 — função'],['c3tele','Contacto 3 — telefone'],['c3email','Contacto 3 — email']]],
   ['Vodafone',[['contaA','Conta Vodafone 1'],['contaB','Conta Vodafone 2'],['contaC','Conta Vodafone 3'],['contaD','Conta Vodafone 4'],
-    ['clprazo','Prazo'],['clvfixa','Voz fixa'],['clintern','Internet'],['ciclofac','Ciclo de faturação'],
-    ['dtinicio','Data de início'],['cmalt','CM alt.'],['cmaltini','CM alt. — início'],['cmaltfim','CM alt. — fim'],['obsvodaf','Observações Vodafone','ta']]],
-  ['Comercial',[['vendedor','Vendedor','vend'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
+    ['ciclofac','Ciclo de faturação']]],
+  ['Observações',[['obs','Observações (PHC)','ta'],['obsvodaf','Observações Vodafone','ta']]],
+  ['Comercial',[['vendedor','Vendedor','vend'],['vendedorTemp','Vendedor temporário (ex.: ausência prolongada)','vend'],['vendedorTempAte','Vendedor temporário até','date'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
 ];
 const CLI_KEYS = CLI_SEC.flatMap(s=>s[1].map(c=>c[0]));
 const CL = {q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}};
@@ -1839,7 +1856,9 @@ const CLI_TABS = [['ficha','Ficha'],['fid','Fidelizações'],['rpn','RPN e PN'],
 const nifValido = n => { if(!/^\d{9}$/.test(n)) return false; let t=0; for(let i=0;i<8;i++) t+=(+n[i])*(9-i); const r=t%11; return (r<2?0:11-r)===+n[8]; };
 const vendPHCNome = v => { v=String(v||''); if(!v) return ''; const us=Object.values(S.users).filter(u=>String(u.vendedorPHC||'')===v); return (us.find(u=>u.ativo!==false)||us[0])?.nome||''; };
 // quem altera fichas: BackOffice e Master, todas; o comercial, as da sua carteira; o Coordenador só consulta (igual à app Propostas)
-const cliPodeEditar = f => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC && String(f?.vendedor||'')===String(S.me.vendedorPHC));
+// vendedor temporário (cobre uma ausência): vê, edita e recebe os Projetos do cliente até à data indicada
+const tempAtivo = f => !!(f && f.vendedorTemp && (!f.vendedorTempAte || String(f.vendedorTempAte) >= hojeLocal()));
+const cliPodeEditar = f => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC && (String(f?.vendedor||'')===String(S.me.vendedorPHC) || (tempAtivo(f) && String(f.vendedorTemp)===String(S.me.vendedorPHC))));
 const cliPodeCriar = () => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC);
 const natGrupo = l => { const n=String(l.natureza||''); if(/m[óo]vel/i.test(n)) return 'Móvel'; if(/fix/i.test(n)) return 'Fixo';
   const c=S.prodMap[String(l.ref||'').toUpperCase()]?.categoria; return c==='Móvel'||c==='Fixo' ? c : 'Outros'; };
@@ -1970,9 +1989,10 @@ function desenharCliente(){
     const campo=([k,l,t])=>{ const v=f[k]==null?'':String(f[k]), ro=!CL.edit||t==='ro'||(k==='ncont'&&!novo), dis=ro?'disabled':'';
       if (t==='vend') { const us=Object.values(S.users).filter(u=>u.vendedorPHC && u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome)), tem=us.some(u=>String(u.vendedorPHC)===v);
         return `<div><label>${l}</label><select data-k="${k}" ${CL.edit&&isBO()?'':'disabled'}><option value="">— Sem vendedor —</option>${us.map(u=>`<option value="${esc(u.vendedorPHC)}" ${String(u.vendedorPHC)===v?'selected':''}>${esc(u.nome)} (${esc(u.vendedorPHC)})</option>`).join('')}${v&&!tem?`<option value="${esc(v)}" selected>${esc(vn||'Vendedor '+v)}</option>`:''}</select></div>`; }
+      if (t==='date') return `<div><label>${l}</label><input type="date" data-k="${k}" value="${esc(v)}" ${CL.edit&&isBO()?'':'disabled'}></div>`;
       if (t==='ta') return `<div style="grid-column:1/-1"><label>${l}</label><textarea rows="3" data-k="${k}" ${dis}>${esc(v)}</textarea></div>`;
       return `<div ${k==='nome'||k==='morada'?'style="grid-column:span 2"':''}><label>${l}</label><input data-k="${k}" value="${esc(v)}" ${dis}></div>`; };
-    corpo=`<div id="cl-form">${CLI_SEC.filter(s=>!novo||s[0]!=='Comercial'||isBO()).map(([t,cs])=>`<h3 style="margin:16px 0 8px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em">${t}</h3><div class="grid g4">${cs.filter(c=>!novo||c[2]!=='ro').map(campo).join('')}</div>`).join('')}</div>
+    corpo=`${!CL.edit&&pode?'<div class="row" style="margin-bottom:6px"><span class="sp"></span><button class="btn pri" id="cl-ed0">✎ Editar ficha</button></div>':''}<div id="cl-form">${CLI_SEC.filter(s=>!novo||s[0]!=='Comercial'||isBO()).map(([t,cs])=>`<h3 style="margin:16px 0 8px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em">${t}</h3><div class="grid g4">${cs.filter(c=>!novo||c[2]!=='ro').map(campo).join('')}</div>`).join('')}</div>
       <div class="row" style="margin-top:16px"><span class="sp"></span>
         ${!CL.edit&&pode?`<button class="btn" id="cl-ed">Editar</button>`:''}
         ${CL.edit?`<button class="btn" id="cl-cn">Cancelar</button><button class="btn pri" id="cl-sv">${novo?'Criar cliente':'Guardar'}</button>`:''}</div>`;
@@ -2018,9 +2038,13 @@ function desenharCliente(){
   if (tab!=='ficha') return;
   if (CL.edit) m.querySelectorAll('#cl-form [data-k]').forEach(el=>el.addEventListener('input',()=>{ S.dirty=true; }));
   $('#cl-ed')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
+  $('#cl-ed0')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
   $('#cl-cn')?.addEventListener('click',()=>{ S.dirty=false; if (novo) { location.hash='#/clientes'; return; } CL.edit=false; CL.f=null; cliAbrir(CL.nif); });
   $('#cl-sv')?.addEventListener('click', async()=>{
-    m.querySelectorAll('#cl-form [data-k]').forEach(el=>{ if(!el.disabled || el.dataset.k==='vendedor') f[el.dataset.k]=el.value.trim(); });
+    m.querySelectorAll('#cl-form [data-k]').forEach(el=>{ if(!el.disabled || ['vendedor','vendedorTemp','vendedorTempAte'].includes(el.dataset.k)) f[el.dataset.k]=el.value.trim(); });
+    if (f.vendedorTemp && f.vendedorTemp===String(f.vendedor||'')) return toast('O vendedor temporário tem de ser diferente do vendedor da carteira.',true);
+    if (f.vendedorTemp && !f.vendedorTempAte) return toast('Indique até quando fica o vendedor temporário.',true);
+    if (!f.vendedorTemp) f.vendedorTempAte='';
     f.ncont=String(f.ncont||'').replace(/\s/g,'').toUpperCase();
     if (!f.nome) return toast('Falta o nome do cliente.',true);
     if (!f.ncont) return toast('O NIF é obrigatório.',true);
@@ -2029,7 +2053,7 @@ function desenharCliente(){
       if (/^\d+$/.test(f.ncont) && !nifValido(f.ncont) && !confirm(`"${f.ncont}" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?`)) return;
     }
     const data={}; CLI_KEYS.forEach(k=>{ if (f[k]!=null) data[k]=f[k]; });
-    data.vendedor=String(f.vendedor||''); data.vendnm=vendPHCNome(data.vendedor);
+    data.vendedor=String(f.vendedor||''); data.vendnm=vendPHCNome(data.vendedor); data.vendedorTemp=String(f.vendedorTemp||''); data.vendedorTempNome=vendPHCNome(data.vendedorTemp); data.vendedorTempAte=data.vendedorTemp?String(f.vendedorTempAte||''):'';
     const bt=$('#cl-sv'); bt.disabled=true;
     try { await gravarFicha(data, novo); S.cli=null; S.dirty=false; toast(novo?'Cliente criado.':'Ficha guardada.');
       Object.assign(CL,{nif:data.ncont, f:null, edit:false, novo:false, tab:'ficha', d:{}});

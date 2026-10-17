@@ -542,6 +542,7 @@ SELECT
   CASE WHEN c.u_cmaltini &gt; &#x27;19000101&#x27; THEN CONVERT(varchar(10), c.u_cmaltini, 103) ELSE &#x27;&#x27; END AS u_cmaltini,
   CASE WHEN c.u_cmaltfim &gt; &#x27;19000101&#x27; THEN CONVERT(varchar(10), c.u_cmaltfim, 103) ELSE &#x27;&#x27; END AS u_cmaltfim,
   REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(CAST(c.u_obsvodaf AS varchar(4000)),&#x27;&#x27;)),CHAR(9),&#x27; &#x27;),CHAR(13),&#x27; &#x27;),CHAR(10),&#x27; &#x27;) AS u_obsvodaf,
+  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(CAST(c.obs AS varchar(4000)),&#x27;&#x27;)),CHAR(9),&#x27; &#x27;),CHAR(13),&#x27; &#x27;),CHAR(10),&#x27; &#x27;) AS obs,
   ISNULL(d.n,0) AS dossiers,
   CASE WHEN c.ousrdata &gt; &#x27;19000101&#x27; THEN CONVERT(varchar(10), c.ousrdata, 103) ELSE &#x27;&#x27; END AS ousrdata
 FROM cl c
@@ -1073,6 +1074,24 @@ function selCTA(o){
   document.querySelector('input[value="'+o+'"]').checked=true;
 }
 
+// MSISDN aceites (mesma regra do RPN): 351 + 9 dígitos; 1, 2, 5, 6 ou 9 com 9 dígitos; 499 com 12 dígitos
+function msisdnOk(v){const d=String(v||'').replace(/[\s.\-]/g,'');return !d||/^(351\d{9}|[125689]\d{8}|499\d{9})$/.test(d);}
+// serviço por quantidade («150× tarifário»): lista de números que não aparece ao cliente, mas abre uma linha por número no RPN
+function numsSvc(id){const s=SV.find(x=>x.id===id);if(!s)return;
+  const ov=document.createElement('div');ov.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center';
+  ov.innerHTML='<div style="background:var(--card,#fff);color:var(--txt,#222);border-radius:12px;padding:18px;width:min(520px,94vw);box-shadow:0 10px 40px rgba(0,0,0,.3)"><div style="font-weight:700;margin-bottom:6px">Números deste serviço'+(s.tariff?' · '+eh(s.tariff):'')+'</div><div style="font-size:12px;opacity:.75;margin-bottom:8px">Um por linha (ou separados por vírgula ou espaço). Não aparecem no documento do cliente: no RPN, cada número dá uma linha.</div><textarea id="nm-t" rows="12" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px">'+eh((s.nums||[]).join('\n'))+'</textarea><div id="nm-i" style="font-size:12px;margin:6px 0 10px"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-g btn-sm" id="nm-c">Cancelar</button><button class="btn btn-r btn-sm" id="nm-ok">Guardar números</button></div></div>';
+  document.body.appendChild(ov);
+  const ta=ov.querySelector('#nm-t'),inf=ov.querySelector('#nm-i');
+  const ler=()=>[...new Set(ta.value.split(/[\s,;]+/).map(x=>x.replace(/\D/g,'')).filter(Boolean))];
+  const info=()=>{const l=ler(),maus=l.filter(x=>!msisdnOk(x)),q=+s.ref||0;inf.innerHTML='<b>'+l.length+'</b> número(s)'+(q?' · quantidade do serviço: '+q:'')+(q&&l.length&&l.length!==q?' <b style="color:#E60000">— não coincide</b>':'')+(maus.length?'<br><b style="color:#E60000">'+maus.length+' com formato inválido:</b> '+eh(maus.slice(0,8).join(', '))+(maus.length>8?'…':''):'');};
+  ta.oninput=info;info();
+  ov.querySelector('#nm-c').onclick=()=>ov.remove();
+  ov.querySelector('#nm-ok').onclick=()=>{const l=ler();
+    if(l.some(x=>!msisdnOk(x))&&!confirm('Há números com formato inválido. Guardar mesmo assim?'))return;
+    s.nums=l;
+    if(l.length&&(+s.ref||0)!==l.length&&(!(+s.ref>0)||confirm('A quantidade do serviço é '+(s.ref||0)+' e há '+l.length+' números. Passar a quantidade para '+l.length+'?')))s.ref=String(l.length);
+    ov.remove();renderSV();markU();};
+}
 function addSvc(){SV.push({id:++SID,type:'number',ref:'',tariff:'',note:'',duracao:lastDuracao,refs:[]});renderSV();}
 function addRef(id){
   const s=SV.find(s=>s.id===id);
@@ -1116,7 +1135,7 @@ function renderSV(){
     }
     const addRefBtn=s.type==='number'?'<button class="asb" style="margin-top:4px;padding:5px;font-size:11px" onclick="addRef('+s.id+')">＋ Número</button>':'';
     div.innerHTML='<div class="svf"><div class="ttg"><button class="ttb'+(s.type==='number'?' act':'')+'" onclick="stSvc('+s.id+',\'number\')">📱 Número</button><button class="ttb'+(s.type==='qty'?' act':'')+'" onclick="stSvc('+s.id+',\'qty\')">🔢 Quantidade</button></div>'
-      +(s.type==='number'?'<input class="fs" placeholder="Ex: 912 345 678" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">':'<input class="fs" type="number" min="1" placeholder="Qtd. (ex: 10)" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">')
+      +(s.type==='number'?'<input class="fs" placeholder="Ex: 912 345 678" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">':'<input class="fs" type="number" min="1" placeholder="Qtd. (ex: 10)" value="'+eh(s.ref)+'" oninput="upSvc('+s.id+',\'ref\',this.value)">'+'<button class="asb" style="margin-top:4px;padding:5px;font-size:11px'+((s.nums||[]).length&&(s.nums||[]).length!==(+s.ref||0)?';color:#E60000;border-color:#E60000':'')+'" title="Números deste serviço (não aparecem ao cliente; no RPN dão uma linha cada)" onclick="numsSvc('+s.id+')">📋 Números ('+(s.nums||[]).length+')</button>')
       +extraRefs+addRefBtn
       +'<div class="cli-search-wrap" style="margin-top:4px"><input class="fs" id="tf-inp-'+s.id+'" placeholder="🔍 Pesquisar tarifário…" autocomplete="off" value="'+eh(s.tariff)+'" oninput="searchTariff('+s.id+',this.value)" onfocus="searchTariff('+s.id+',this.value)"><div class="cli-results" id="tf-res-'+s.id+'"></div></div>'
       +'<div style="display:flex;gap:6px;align-items:center;margin-top:4px"><select class="fs" style="flex:1" onchange="upSvcDur('+s.id+',this.value)"><option value="">— Duração —</option>'+durOpts+'</select><input class="fs" style="flex:1" placeholder="Nota opcional…" value="'+eh(s.note)+'" oninput="upSvc('+s.id+',\'note\',this.value)"></div>'
@@ -1293,8 +1312,9 @@ async function confirmSave(){
   const validadeDiasG=parseInt(document.getElementById('cvalidade')?.value||'15')||15;
   const vExp=new Date();vExp.setDate(vExp.getDate()+validadeDiasG);
   const nif=document.getElementById('cnif')?.value?.trim()||'';
+  const nums={};{let pi=0;SV.filter(s=>s.tariff).forEach(s=>{if(s.type==='number'&&s.refs&&s.refs.length>0){pi+=[s.ref,...s.refs].filter(Boolean).length;return;}if(s.type==='qty'&&(s.nums||[]).length)nums[String(pi)]=s.nums;pi++;});}
   const entry={id,data,comercial:cNm,cliente:cli,tipo:TIPO||'',tarif,mensalidade:mens,duracao:dur,estado:'pendente',notas:'',cta:CTA,validade:vExp.toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric'}),validadeDias:validadeDiasG,nif,simulador:(document.getElementById('csim')?.value||'').trim()};
-  entry.comercialUid=(CM.find(c=>c.nome===cNm)||CU).uid;entry.ord=Date.now();
+  entry.comercialUid=(CM.find(c=>c.nome===cNm)||CU).uid;entry.ord=Date.now();if(Object.keys(nums).length)entry.nums=nums;
   entry.projetoId=window._projetoId||((LD.find(x=>x.id===window._editingOriginalId)||{}).projetoId)||'';
   if(CU.funcao==='comercial'&&!entry.projetoId){let nAtr=0;try{nAtr=await FB.projetosEmAtraso();}catch(e){console.warn(e);}
     if(nAtr){window._currentPropRef=id;toast('⛔','Tem '+nAtr+' Projeto(s) em atraso. Trate-os primeiro (RPN › Projetos): proposta, adiar ou perdido. Só depois pode criar propostas novas.');return;}}
@@ -1688,7 +1708,7 @@ function editL(id){
   SV=[];SID=0;
   if(p.tarif){
     const parts=p.tarif.split(';').map(s=>s.trim()).filter(Boolean);
-    parts.forEach(part0=>{
+    parts.forEach((part0,pi)=>{
       const id=++SID;
       // gravado como "REF TARIFÁRIO [24m] [REF_PHC]": tira a Ref PHC e a duração do nome do tarifário
       const durM=part0.match(/\[(\d+)m\]/), du=durM?{duracao:durM[1]}:{};
@@ -1697,7 +1717,7 @@ function editL(id){
       const qtyMatch=part.match(/^(\d+)×\s*(.+)$/);
       const numMatch=part.match(/^([\d\s]+)\s+(.+)$/);
       if(qtyMatch){
-        SV.push({id,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:'',...du});
+        SV.push({id,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:'',...du,nums:(p.nums&&p.nums[pi])||undefined});
       } else if(numMatch){
         SV.push({id,type:'number',ref:numMatch[1].trim(),tariff:numMatch[2].trim(),note:'',...du});
       } else {
@@ -1749,14 +1769,14 @@ function dupL(id){
   SV=[];SID=0;
   if(p.tarif){
     const parts=p.tarif.split(';').map(s=>s.trim()).filter(Boolean);
-    parts.forEach(part0=>{
+    parts.forEach((part0,pi)=>{
       const part=part0.replace(/\s*\[(?!\d+m\])[^\]]*\]\s*$/,'');   // tira a Ref PHC gravada no fim
       const id2=++SID;
       const qtyMatch=part.match(/^(\d+)×\s*(.+?)(?:\s*\[\d+m\])?$/);
       const numMatch=part.match(/^([\d\s]+)\s+(.+?)(?:\s*\[\d+m\])?$/);
       const durMatch=part.match(/\[(\d+)m\]/);
       const dur=durMatch?durMatch[1]:lastDuracao;
-      if(qtyMatch){SV.push({id:id2,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:'',duracao:dur,refs:[]});}
+      if(qtyMatch){SV.push({id:id2,type:'qty',ref:qtyMatch[1],tariff:qtyMatch[2].trim(),note:'',duracao:dur,refs:[],nums:(p.nums&&p.nums[pi])||undefined});}
       else if(numMatch){SV.push({id:id2,type:'number',ref:numMatch[1].trim(),tariff:numMatch[2].trim(),note:'',duracao:dur,refs:[]});}
       else{SV.push({id:id2,type:'number',ref:'',tariff:part.replace(/\s*\[\d+m\]$/,'').trim(),note:'',duracao:dur,refs:[]});}
     });
@@ -2104,9 +2124,9 @@ const CLI_SEC=[
     ['c2tacto','Contacto 2 — nome'],['c2func','Contacto 2 — função'],['c2tele','Contacto 2 — telefone'],['c2email','Contacto 2 — email'],
     ['c3tacto','Contacto 3 — nome'],['c3func','Contacto 3 — função'],['c3tele','Contacto 3 — telefone'],['c3email','Contacto 3 — email']]],
   ['vodafone','Vodafone',[['contaA','Conta Vodafone 1'],['contaB','Conta Vodafone 2'],['contaC','Conta Vodafone 3'],['contaD','Conta Vodafone 4'],
-    ['clprazo','Prazo (u_clprazo)'],['clvfixa','Voz fixa (u_clvfixa)'],['clintern','Internet (u_clintern)'],['ciclofac','Ciclo de faturação'],
-    ['dtinicio','Data de início'],['cmalt','CM alt. (u_cmalt)'],['cmaltini','CM alt. — início'],['cmaltfim','CM alt. — fim'],['obsvodaf','Observações Vodafone','ta']]],
-  ['comercial','Comercial',[['vendedor','Vendedor','vend'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
+    ['ciclofac','Ciclo de faturação']]],
+  ['obs','Observações',[['obs','Observações (PHC)','ta'],['obsvodaf','Observações Vodafone','ta']]],
+  ['comercial','Comercial',[['vendedor','Vendedor','vend'],['vendedorTempNome','Vendedor temporário','ro'],['vendedorTempAte','Vendedor temporário até','ro'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
 ];
 const CLI_KEYS=CLI_SEC.flatMap(s=>s[2].map(c=>c[0]));
 let CLI_CUR=null,CLI_NOVO=false,CLI_TAB='ident',CLI_EDIT=false;
@@ -2331,7 +2351,7 @@ async function admCliConfirma(){
   const fichas=_phcPend;_phcPend=null;document.getElementById('adm-cli-ok').style.display='none';
   const subst=document.getElementById('adm-cli-subst').checked;
   const res=await FB.importFichas(fichas,subst,m=>admLog('  '+m));
-  admLog('Clientes PHC: '+res.novas+' criados · '+res.substituidas+' atualizados · '+res.mantidas+' mantidos como estavam · '+res.blocos+' bloco(s) de pesquisa.');
+  admLog('Clientes PHC: '+res.novas+' criados · '+res.substituidas+' atualizados · '+res.mantidas+' mantidos como estavam'+(res.obs?' ('+res.obs+' com as Observações do PHC atualizadas)':'')+' · '+res.blocos+' bloco(s) de pesquisa.');
   document.getElementById('adm-cli-file').value='';
   CL=await FB.clientes(null);admCliInfo();toast('✓','Importação de clientes terminada');
 }
@@ -2349,7 +2369,7 @@ function admCopiaSQL(){
 function toRPN(id){
   const p=LD.find(x=>x.id===id);
   if(!p){toast('⚠','Proposta não encontrada');return;}
-  const d={ref:p.id,cliente:p.cliente,nif:p.nif||'',comercial:p.comercial,tipo:p.tipo,tarif:p.tarif,mensalidade:p.mensalidade,duracao:p.duracao,notas:p.notas||'',simulador:p.simulador||''};
+  const d={ref:p.id,cliente:p.cliente,nif:p.nif||'',comercial:p.comercial,tipo:p.tipo,tarif:p.tarif,mensalidade:p.mensalidade,duracao:p.duracao,notas:p.notas||'',simulador:p.simulador||'',nums:p.nums||null};
   const b64=btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   window.open(RPN_URL+'?'+passaGrande('prop',b64),'_blank');
 }
@@ -2375,9 +2395,14 @@ function abrirProjetoParam(){
   document.getElementById('cnif').value=p.nif||'';
   document.getElementById('cm').value='';document.getElementById('csim').value='';
   SV=[];SID=0;
+  const grp={};(p.linhas||[]).forEach(l=>{const t=TF.find(x=>refKey(x.refPHC)&&refKey(x.refPHC)===refKey(l.ref));if(t&&l.msisdn){const k=t.name+'|'+(l.prazo||'');(grp[k]=grp[k]||[]).push(l);}});
+  const feitos=new Set();
   (p.linhas||[]).forEach(l=>{
     const t=TF.find(x=>refKey(x.refPHC)&&refKey(x.refPHC)===refKey(l.ref));
     const aviso=!t?'⚠ escolher tarifário (antes: '+(l.des||l.ref)+')':(l.desc?'⚠ tarifário antigo descontinuado — rever':'');
+    const k=t&&l.msisdn?t.name+'|'+(l.prazo||''):'';
+    if(k&&grp[k].length>=5){if(feitos.has(k))return;feitos.add(k);const g=grp[k];
+      SV.push({id:++SID,type:'qty',ref:String(g.length),tariff:t.name,note:'',aviso,_t0:t.name,duracao:String(l.prazo||lastDuracao),refs:[],nums:g.map(x=>String(x.msisdn).replace(/\D/g,''))});return;}
     SV.push({id:++SID,type:l.msisdn?'number':'qty',ref:l.msisdn||'1',tariff:t?t.name:'',note:'',aviso,_t0:t?t.name:'',duracao:String(l.prazo||lastDuracao),refs:[]});
   });
   if(!SV.length)addSvc();else renderSV();
@@ -2696,8 +2721,8 @@ const resumoDe = p => ({ c: p.comercial||'', e: p.estado||'pendente', t: p.tipo|
 const toLocal = (id, x) => ({ id, data: x.data||'', comercial: x.comercial||'', cliente: x.cliente||'', tipo: x.tipo||'', tarif: x.tarif||'',
   mensalidade: String(x.mensalidade ?? ''), duracao: String(x.duracao ?? ''), estado: x.estado||'pendente', notas: x.notas||'', cta: x.cta||'b',
   validade: x.validade||'', validadeDias: String(x.validadeDias ?? '15'), refPHC: x.refPHC||'', nif: String(x.nif||''), simulador: x.simulador||'',
-  comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', projetoId: x.projetoId||'', ord: x.ord||0, dia: x.dia||'' });
-const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); o.dia = diaDe(p.data); if (p.projetoId) o.projetoId = p.projetoId; return o; };
+  comercialUid: x.comercialUid||null, rpnId: x.rpnId||'', rpnNumero: x.rpnNumero||'', projetoId: x.projetoId||'', ord: x.ord||0, dia: x.dia||'', nums: x.nums||null });
+const toDoc = p => { const o = {}; CAMPOS.forEach(k => o[k] = p[k] ?? ''); o.comercialUid = p.comercialUid || null; o.ord = p.ord || Date.now(); o.dia = diaDe(p.data); if (p.projetoId) o.projetoId = p.projetoId; if (p.nums && Object.keys(p.nums).length) o.nums = p.nums; return o; };
 async function commitEmBlocos(ops, n = 400, prog) {
   for (let i = 0; i < ops.length; i += n) { const b = writeBatch(db); ops.slice(i, i + n).forEach(f => f(b)); await b.commit(); if (prog) prog(Math.min(i + n, ops.length), ops.length); }
 }
@@ -2790,6 +2815,7 @@ window.FB = {
     if (vendedor === '') return [];
     const q = vendedor ? query(collection(db, 'clientes'), where('vendedor', '==', String(vendedor))) : collection(db, 'clientes');
     const s = await getDocs(q); const out = [];
+    if (vendedor) { try { const hj = new Date().toISOString().slice(0, 10); (await getDocs(query(collection(db, 'clientesFicha'), where('vendedorTemp', '==', String(vendedor))))).docs.map(d => d.data()).filter(c => !c.vendedorTempAte || c.vendedorTempAte >= hj).forEach(c => out.push({ nome: c.nome||'', ncont: String(c.ncont||''), codpost: c.codpost||'', area: c.area||'', local: c.local||'', vendedor: String(c.vendedor||''), vendnm: (c.vendnm||'') + ' · temporário', email: c.email||'', tel: [c.telefone, c.tlmvl].filter(Boolean).join(' ') })); } catch (e) { console.warn('clientes temporários', e); } }
     s.docs.forEach(d => (d.data().lista || []).forEach(c => out.push({ nome: c.nome||'', ncont: String(c.ncont||''), codpost: c.codpost||'', area: c.area||'', local: c.local||'', vendedor: String(d.data().vendedor||''), vendnm: c.vendnm||'', email: c.email||'', tel: c.tel||'', _blk: d.id })));
     return out;
   },
@@ -2853,9 +2879,9 @@ window.FB = {
     log = log || (() => {});
     const ex = {}; (await getDocs(collection(db, 'clientesFicha'))).docs.forEach(d => ex[d.id] = d.data());
     const todas = {}; Object.entries(ex).forEach(([id, d]) => todas[id] = { d, w: false });
-    let nNovas = 0, nSubst = 0, nMant = 0;
+    let nNovas = 0, nSubst = 0, nMant = 0; const obsUpd = [];
     novas.forEach(f => {
-      if (ex[f.ncont]) { if (substituir) { todas[f.ncont] = { d: { ...f }, w: true }; nSubst++; } else nMant++; }
+      if (ex[f.ncont]) { if (substituir) { todas[f.ncont] = { d: { ...f }, w: true }; nSubst++; } else { nMant++; if (f.obs != null && String(f.obs) !== String(ex[f.ncont].obs || '')) obsUpd.push([f.ncont, String(f.obs)]); } }
       else { todas[f.ncont] = { d: { ...f }, w: true, n: true }; nNovas++; }
     });
     const porVend = {};
@@ -2878,9 +2904,10 @@ window.FB = {
       if (t.w) opsF.push(b => b.set(doc(db, 'clientesFicha', id), { ...t.d, importadoEm: serverTimestamp(), importadoPorUid: uid }));
       else if (t.b) opsF.push(b => b.update(doc(db, 'clientesFicha', id), { blk: t.d.blk }));
     });
+    obsUpd.forEach(([id, o]) => opsF.push(b => b.update(doc(db, 'clientesFicha', id), { obs: o })));
     await commitEmBlocos(opsF, 400, (a, n) => log('fichas gravadas: ' + a + ' / ' + n));
     await commitEmBlocos(opsB, 20);
-    return { novas: nNovas, substituidas: nSubst, mantidas: nMant, blocos: blocos.length, total: Object.keys(todas).length };
+    return { novas: nNovas, substituidas: nSubst, mantidas: nMant, obs: obsUpd.length, blocos: blocos.length, total: Object.keys(todas).length };
   },
   async importPropostas(lista, atualizar) {
     const ex = new Set((await getDocs(collection(db, 'propostas'))).docs.map(d => d.id));
