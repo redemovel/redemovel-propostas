@@ -543,13 +543,14 @@ SELECT
   CASE WHEN c.u_cmaltfim &gt; &#x27;19000101&#x27; THEN CONVERT(varchar(10), c.u_cmaltfim, 103) ELSE &#x27;&#x27; END AS u_cmaltfim,
   REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(CAST(c.u_obsvodaf AS varchar(4000)),&#x27;&#x27;)),CHAR(9),&#x27; &#x27;),CHAR(13),&#x27; &#x27;),CHAR(10),&#x27; &#x27;) AS u_obsvodaf,
   REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(CAST(c.obs AS varchar(4000)),&#x27;&#x27;)),CHAR(9),&#x27; &#x27;),CHAR(13),&#x27; &#x27;),CHAR(10),&#x27; &#x27;) AS obs,
+  REPLACE(REPLACE(REPLACE(RTRIM(ISNULL(c.ptcmdesc,&#x27;&#x27;)),CHAR(9),&#x27; &#x27;),CHAR(13),&#x27; &#x27;),CHAR(10),&#x27; &#x27;) AS tipificacao_phc,
   ISNULL(d.n,0) AS dossiers,
   CASE WHEN c.ousrdata &gt; &#x27;19000101&#x27; THEN CONVERT(varchar(10), c.ousrdata, 103) ELSE &#x27;&#x27; END AS ousrdata
 FROM cl c
 LEFT JOIN (SELECT no, COUNT(*) AS n FROM bo GROUP BY no) d ON d.no = c.no
 WHERE c.inactivo = 0 AND c.estab = 0
   AND c.vendedor IN (14,57,67,65,20,132,5,59,169,160,171)
-  AND (c.u_contaa &lt;&gt; &#x27;&#x27; OR d.no IS NOT NULL OR c.tipo IN (&#x27;Activo&#x27;,&#x27;ExCliente&#x27;,&#x27;EX.CLIENTE&#x27;))
+  AND (c.u_contaa &lt;&gt; &#x27;&#x27; OR d.no IS NOT NULL OR c.tipo IN (&#x27;Activo&#x27;,&#x27;ExCliente&#x27;,&#x27;EX.CLIENTE&#x27;) OR c.ptcmdesc IN (&#x27;Clt VDF Negócios&#x27;,&#x27;Ex Clt VDF Negócios&#x27;))
 ORDER BY c.no DESC;
 </textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -2117,7 +2118,7 @@ function toast(icon,msg){const t=document.getElementById('toast');document.getEl
 // ══ CLIENTES (ficha completa) ══════════════════════════════════════════
 // [campo, etiqueta, tipo]  tipo: '' texto · 'ta' área de texto · 'ro' só leitura
 const CLI_SEC=[
-  ['ident','Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Tipo'],['segmento','Segmento']]],
+  ['ident','Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Score/Tipo (PHC)'],['segmento','Segmento'],['tipificacaoPHC','Tipificação Cliente (PHC)','ro'],['tipificacao','Tipificação Cliente (atual)','ro']]],
   ['morada','Morada',[['morada','Morada'],['local','Localidade'],['codpost','Código postal'],['zona','Zona'],['distrito','Distrito'],['area','Área']]],
   ['contactos','Contactos',[['telefone','Telefone'],['tlmvl','Telemóvel'],['email','Email'],['url','Site'],
     ['contacto','Contacto 1 — nome'],['c1func','Contacto 1 — função'],['c1tele','Contacto 1 — telefone'],['c1email','Contacto 1 — email'],
@@ -2283,7 +2284,7 @@ async function cliGravar(){
 
 // ── Importação do PHC (Administração) ──
 const PHC_COLS=["no", "nome", "nome2", "ncont", "tipo", "segmento", "morada", "local", "codpost", "zona", "distrito", "area", "telefone", "tlmvl", "email", "url", "contacto", "c1func", "c1tele", "c1email", "c2tacto", "c2func", "c2tele", "c2email", "c3tacto", "c3func", "c3tele", "c3email", "vendedor", "vendedor_phc", "vendnm_phc", "u_contaa", "u_contab", "u_contac", "u_contad", "u_clprazo", "u_clvfixa", "u_clintern", "u_ciclofac", "u_dtinicio", "u_cmalt", "u_cmaltini", "u_cmaltfim", "u_obsvodaf", "dossiers", "ousrdata"];
-const PHC_MAP={u_contaa:'contaA',u_contab:'contaB',u_contac:'contaC',u_contad:'contaD',u_clprazo:'clprazo',u_clvfixa:'clvfixa',u_clintern:'clintern',u_ciclofac:'ciclofac',u_dtinicio:'dtinicio',u_cmalt:'cmalt',u_cmaltini:'cmaltini',u_cmaltfim:'cmaltfim',u_obsvodaf:'obsvodaf',ousrdata:'criadoPHC'};
+const PHC_MAP={u_contaa:'contaA',u_contab:'contaB',u_contac:'contaC',u_contad:'contaD',u_clprazo:'clprazo',u_clvfixa:'clvfixa',u_clintern:'clintern',u_ciclofac:'ciclofac',u_dtinicio:'dtinicio',u_cmalt:'cmalt',u_cmaltini:'cmaltini',u_cmaltfim:'cmaltfim',u_obsvodaf:'obsvodaf',tipificacao_phc:'tipificacaoPHC',ousrdata:'criadoPHC'};
 function lerFicheiroTexto(file){
   return new Promise((res,rej)=>{
     const r=new FileReader();r.onerror=()=>rej(new Error('Não foi possível ler o ficheiro'));
@@ -2351,7 +2352,7 @@ async function admCliConfirma(){
   const fichas=_phcPend;_phcPend=null;document.getElementById('adm-cli-ok').style.display='none';
   const subst=document.getElementById('adm-cli-subst').checked;
   const res=await FB.importFichas(fichas,subst,m=>admLog('  '+m));
-  admLog('Clientes PHC: '+res.novas+' criados · '+res.substituidas+' atualizados · '+res.mantidas+' mantidos como estavam'+(res.obs?' ('+res.obs+' com as Observações do PHC atualizadas)':'')+' · '+res.blocos+' bloco(s) de pesquisa.');
+  admLog('Clientes PHC: '+res.novas+' criados · '+res.substituidas+' atualizados · '+res.mantidas+' mantidos como estavam'+(res.obs?' ('+res.obs+' com Observações / Tipificação do PHC atualizadas)':'')+' · '+res.blocos+' bloco(s) de pesquisa.');
   document.getElementById('adm-cli-file').value='';
   CL=await FB.clientes(null);admCliInfo();toast('✓','Importação de clientes terminada');
 }
@@ -2881,7 +2882,7 @@ window.FB = {
     const todas = {}; Object.entries(ex).forEach(([id, d]) => todas[id] = { d, w: false });
     let nNovas = 0, nSubst = 0, nMant = 0; const obsUpd = [];
     novas.forEach(f => {
-      if (ex[f.ncont]) { if (substituir) { todas[f.ncont] = { d: { ...f }, w: true }; nSubst++; } else { nMant++; if (f.obs != null && String(f.obs) !== String(ex[f.ncont].obs || '')) obsUpd.push([f.ncont, String(f.obs)]); } }
+      if (ex[f.ncont]) { if (substituir) { todas[f.ncont] = { d: { ...f }, w: true }; nSubst++; } else { nMant++; const up = {}; if (f.obs != null && String(f.obs) !== String(ex[f.ncont].obs || '')) up.obs = String(f.obs); if (f.tipificacaoPHC != null && String(f.tipificacaoPHC) !== String(ex[f.ncont].tipificacaoPHC || '')) up.tipificacaoPHC = String(f.tipificacaoPHC); if (Object.keys(up).length) obsUpd.push([f.ncont, up]); } }
       else { todas[f.ncont] = { d: { ...f }, w: true, n: true }; nNovas++; }
     });
     const porVend = {};
@@ -2904,7 +2905,7 @@ window.FB = {
       if (t.w) opsF.push(b => b.set(doc(db, 'clientesFicha', id), { ...t.d, importadoEm: serverTimestamp(), importadoPorUid: uid }));
       else if (t.b) opsF.push(b => b.update(doc(db, 'clientesFicha', id), { blk: t.d.blk }));
     });
-    obsUpd.forEach(([id, o]) => opsF.push(b => b.update(doc(db, 'clientesFicha', id), { obs: o })));
+    obsUpd.forEach(([id, o]) => opsF.push(b => b.update(doc(db, 'clientesFicha', id), o)));
     await commitEmBlocos(opsF, 400, (a, n) => log('fichas gravadas: ' + a + ' / ' + n));
     await commitEmBlocos(opsB, 20);
     return { novas: nNovas, substituidas: nSubst, mantidas: nMant, obs: obsUpd.length, blocos: blocos.length, total: Object.keys(todas).length };

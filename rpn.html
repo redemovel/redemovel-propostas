@@ -1839,7 +1839,7 @@ function abrirProjeto(p, apos){
 // As fichas são as mesmas da app Propostas (clientesFicha/{NIF} + índice de pesquisa em clientes/{vendedor}_…).
 // [campo, etiqueta, tipo]  tipo: '' texto · 'ta' área de texto · 'ro' só leitura · 'vend' vendedor
 const CLI_SEC = [
-  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Tipo'],['segmento','Segmento']]],
+  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Score/Tipo (PHC)'],['segmento','Segmento'],['tipificacaoPHC','Tipificação Cliente (PHC)','ro']]],
   ['Morada',[['morada','Morada'],['local','Localidade'],['codpost','Código postal'],['zona','Zona'],['distrito','Distrito'],['area','Área']]],
   ['Contactos',[['telefone','Telefone'],['tlmvl','Telemóvel'],['email','Email'],['url','Site'],
     ['contacto','Contacto 1 — nome'],['c1func','Contacto 1 — função'],['c1tele','Contacto 1 — telefone'],['c1email','Contacto 1 — email'],
