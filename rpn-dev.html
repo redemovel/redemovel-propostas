@@ -534,10 +534,11 @@ async function cartCalcular(prog){
   const porNif={}; pns.forEach(r=>{ const n=String(r.cliente?.nif||'').trim(); if (n) (porNif[n]=porNif[n]||[]).push(r); });
   const l6=(()=>{ const d=new Date(); d.setMonth(d.getMonth()+6); return d.toISOString().slice(0,10); })(), r2=x=>Math.round(x*100)/100;
   // situação (como a rotina do PHC): Cliente = tem contratos em fidelização · Ex-Cliente = já teve PN (aqui ou no PHC) · Prospect = nunca teve
-  const exPHC = t => /ex|activ|ativ|client/i.test(String(t||''));
+  // já foi cliente: tipificação do PHC (Activo / ExCliente / EX.CLIENTE / Cliente) ou situação já gravada — nunca volta a Prospect
+  const exPHC = t => /^(activo|ativo|cliente|ex\.?\s*-?\s*cliente)$/i.test(String(t||'').trim());
   const muda=[];
   const cl=fs.filter(f=>f.ncont).map(f=>{ const pnsC=porNif[String(f.ncont)]||[], fl=pnsC.length?fidelizacoes(pnsC):[], som=g=>r2(fl.filter(g).reduce((a,o)=>a+o.rlmc,0));
-    const q = fl.length ? 'Cliente' : (pnsC.length || exPHC(f.tipo) || +f.dossiers>0) ? 'Ex-Cliente' : 'Prospect';
+    const q = fl.length ? 'Cliente' : (pnsC.length || exPHC(f.tipo) || +f.dossiers>0 || ['Cliente','Ex-Cliente'].includes(f.qualif)) ? 'Ex-Cliente' : 'Prospect';
     if (f.qualif!==q) muda.push([String(f.ncont), q]);
     return {n:String(f.ncont), nm:f.nome||'', v:String(f.vendedor||''), fa:String(f.familia||''), cp:cpNorm(f.codpost), lc:f.local||'', q, r:som(()=>true), m:som(o=>o.nat==='Móvel'), x:som(o=>o.nat==='Fixo'), li:fl.length, fim:fl[0]?.fim||'', f6:som(o=>o.fim<=l6)}; });
   if (muda.length) { prog(`A atualizar a situação de ${muda.length} cliente(s) nas fichas…`); const hj=hojeLocal();
