@@ -283,6 +283,7 @@ function render(){
   if (perfil()==='backoffice') nav.push(['#/comissao','Comissões']);
   else if (['comercial','coordenador'].includes(perfil()) || S.me.vendedorPHC || isFin()) nav.push(['#/comissao', isFin()&&!S.me.vendedorPHC?'Comissão vendedores':'A minha comissão']);
   if (isFin()) nav.push(['#/comissionamento','Comissionamento']);
+  if (isMaster()) nav.push(['#/carteiras','Carteiras']);
   if (isMaster()) nav.push(['#/admin','Administração']);
   $('#app').innerHTML = `<header>
       <span class="brand">Redemóvel · RPN</span>
@@ -303,6 +304,7 @@ function render(){
   if (h.startsWith('#/comissionamento') && isFin()) return viewComissionamento();
   if (h.startsWith('#/comissao')) return viewComissao();
   if (h.startsWith('#/admin') && isMaster()) return viewAdmin();
+  if (h.startsWith('#/carteiras') && isMaster()) return viewCarteiras();
   return viewLista();
 }
 // contactos da ficha do cliente (1 leitura): email geral (ou do Contacto 1) e telefone do Contacto 1
@@ -497,6 +499,137 @@ function passaGrande(k, b64){ if (String(b64).length<1500) return k+'='+b64;
   try { const id=Date.now().toString(36)+Math.random().toString(36).slice(2,7); localStorage.setItem('rdm-pass-'+id, b64); return k+'k='+id; } catch(e){ return k+'='+b64; } }
 function lerPassagem(u, k){ const id=u.searchParams.get(k); if (!id) return null; u.searchParams.delete(k);
   try { const v=localStorage.getItem('rdm-pass-'+id); localStorage.removeItem('rdm-pass-'+id); return v; } catch(e){ return null; } }
+// ===================== CARTEIRAS (Master) =====================
+const CART={cl:null, em:'', geo:null, sel:new Set(), dest:'', vis:null, mapa:null, camada:null, geoParar:false};
+const CART_CORES=['#e60000','#2563eb','#16a34a','#d97706','#7c3aed','#0891b2','#db2777','#65a30d','#9333ea','#ea580c','#0f766e','#4b5563'];
+const cartCor = v => { if (!v) return '#9ca3af'; const vs=[...new Set((CART.cl||[]).map(c=>c.v).filter(Boolean))].sort(); return CART_CORES[vs.indexOf(v)%CART_CORES.length]; };
+const cpNorm = s => { const t=String(s||'').replace(/\s/g,''); let m=t.match(/^(\d{4})-?(\d{3})/); if (m) return m[1]+'-'+m[2]; m=t.match(/^(\d{4})/); return m?m[1]:''; };
+async function cartGuardarJSON(nome, valor){
+  const s=JSON.stringify(valor), lim=700000, n=Math.max(1,Math.ceil(s.length/lim)), b=writeBatch(db);
+  for (let i=0;i<n;i++) b.set(doc(db,'configFin',nome+'_'+i),{j:s.slice(i*lim,(i+1)*lim)});
+  b.set(doc(db,'configFin',nome+'_meta'),{n, em:new Date().toISOString(), por:S.me.nome}); await b.commit();
+}
+async function cartLerJSON(nome){
+  const m=await getDoc(doc(db,'configFin',nome+'_meta')); if (!m.exists()) return null; const n=m.data().n||0;
+  const ps=await Promise.all(Array.from({length:n},(_,i)=>getDoc(doc(db,'configFin',nome+'_'+i))));
+  return {meta:m.data(), v:JSON.parse(ps.map(d=>d.data()?.j||'').join('')||'null')};
+}
+async function cartCalcular(prog){
+  prog('A ler as fichas de clientes…');
+  const fs=(await getDocs(collection(db,'clientesFicha'))).docs.map(d=>d.data());
+  prog(`${fs.length} fichas. A ler os PN dos últimos 4 anos…`);
+  const corte=somaMeses(mesLocal(),-49);
+  const pns=(await getDocs(query(collection(db,'rpn'), where('mesRef','>=',corte)))).docs.map(d=>({id:d.id, ...d.data()})).filter(r=>['PN','Concluído'].includes(r.estado));
+  prog(`${pns.length} PN. A calcular as fidelizações…`);
+  const porNif={}; pns.forEach(r=>{ const n=String(r.cliente?.nif||'').trim(); if (n) (porNif[n]=porNif[n]||[]).push(r); });
+  const l6=(()=>{ const d=new Date(); d.setMonth(d.getMonth()+6); return d.toISOString().slice(0,10); })(), r2=x=>Math.round(x*100)/100;
+  const cl=fs.filter(f=>f.ncont).map(f=>{ const fl=porNif[String(f.ncont)]?fidelizacoes(porNif[String(f.ncont)]):[], som=g=>r2(fl.filter(g).reduce((a,o)=>a+o.rlmc,0));
+    return {n:String(f.ncont), nm:f.nome||'', v:String(f.vendedor||''), fa:String(f.familia||''), cp:cpNorm(f.codpost), lc:f.local||'', r:som(()=>true), m:som(o=>o.nat==='Móvel'), x:som(o=>o.nat==='Fixo'), li:fl.length, fim:fl[0]?.fim||'', f6:som(o=>o.fim<=l6)}; });
+  await cartGuardarJSON('carteira', cl);
+  CART.cl=cl; CART.em=new Date().toISOString();
+}
+async function cartGeocodificar(prog){
+  const geo=CART.geo||{}; const falta=[...new Set(CART.cl.map(c=>c.cp).filter(cp=>cp && !(cp in geo)))];
+  CART.geoParar=false; let k=0, sujo=0;
+  for (const cp of falta) { if (CART.geoParar || !location.hash.startsWith('#/carteiras')) break; k++;
+    prog(`A localizar códigos postais: ${k} de ${falta.length} (1 por segundo, regra do OpenStreetMap)…`);
+    const loc=(CART.cl.find(c=>c.cp===cp)||{}).lc||'';
+    const tenta=async u=>{ try { const r=await fetch(u,{headers:{'Accept-Language':'pt'}}); const j=await r.json(); return j&&j[0]?[+(+j[0].lat).toFixed(5), +(+j[0].lon).toFixed(5)]:null; } catch(e){ return null; } };
+    let p=await tenta(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=pt&postalcode=${encodeURIComponent(cp)}`);
+    if (!p) { await new Promise(r=>setTimeout(r,1100)); p=await tenta(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=pt&q=${encodeURIComponent(cp.slice(0,4)+' '+loc)}`); }
+    geo[cp]=p||0; sujo++;
+    if (sujo>=40) { await cartGuardarJSON('geo', geo); sujo=0; cartMapa(); }
+    await new Promise(r=>setTimeout(r,1100));
+  }
+  CART.geo=geo; if (sujo) await cartGuardarJSON('geo', geo);
+  return {feitos:k, falta:falta.length-k};
+}
+// junta a família inteira à seleção
+function cartSel(nif, on){ const c=CART.cl.find(x=>x.n===nif); if (!c) return 0; const grupo=c.fa?CART.cl.filter(x=>x.fa===c.fa):[c];
+  grupo.forEach(x=>on?CART.sel.add(x.n):CART.sel.delete(x.n)); return grupo.length; }
+function cartTotais(){
+  const t={}, add=(v,c,k)=>{ const o=t[v]=t[v]||{v, n:0, fam:new Set(), r:0, m:0, x:0, li:0, f6:0, dn:0, dr:0}; if (k){ o.dn+=k; o.dr+=k*c.r; } else { o.n++; if(c.fa) o.fam.add(c.fa); o.r+=c.r; o.m+=c.m; o.x+=c.x; o.li+=c.li; o.f6+=c.f6; } };
+  CART.cl.forEach(c=>{ add(c.v,c); if (CART.sel.has(c.n) && CART.dest!==undefined && CART.dest!==null && CART.dest!=='' && c.v!==CART.dest) { add(c.v,c,-1); add(CART.dest,c,1); } });
+  return Object.values(t).sort((a,b)=>b.r-a.r);
+}
+async function viewCarteiras(){
+  const m=$('#main');
+  if (!CART.cl) { m.innerHTML='<div class="card muted">A carregar os dados guardados…</div>';
+    try { const [a,g]=await Promise.all([cartLerJSON('carteira'), cartLerJSON('geo')]); CART.cl=a?.v||null; CART.em=a?.meta?.em||''; CART.geo=g?.v||{}; } catch(e){ m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; } }
+  if (!location.hash.startsWith('#/carteiras')) return;
+  const vends=Object.values(S.users).filter(u=>u.vendedorPHC && u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome));
+  const nomeV=v=>v?(vendPHCNome(v)||'vendedor '+v):'Sem vendedor';
+  if (!CART.cl) { m.innerHTML=`<div class="card"><h2>Carteiras</h2><p class="muted">Ainda não há dados calculados. O cálculo lê todas as fichas de clientes e os PN dos últimos 4 anos (uma vez; depois fica guardado).</p><button class="btn pri" id="ct-calc">Calcular agora</button> <span id="ct-p" class="muted"></span></div>`;
+    $('#ct-calc').onclick=async()=>{ $('#ct-calc').disabled=true; try { await cartCalcular(t=>$('#ct-p').textContent=t); viewCarteiras(); } catch(e){ toast(errTxt(e),true); $('#ct-calc').disabled=false; } }; return; }
+  const T=cartTotais(), selC=CART.cl.filter(c=>CART.sel.has(c.n)), semGeo=CART.cl.filter(c=>c.cp && !(c.cp in (CART.geo||{}))).length;
+  const vsTodos=[...new Set(CART.cl.map(c=>c.v))]; if (!CART.vis) CART.vis=new Set(vsTodos);
+  m.innerHTML=`<div class="card"><div class="row" style="margin-bottom:8px"><h2 style="margin:0">Carteiras de clientes</h2><span class="muted" style="font-size:12px">dados de ${esc(String(CART.em).slice(0,16).replace('T',' '))} · ${CART.cl.length} clientes · RLMC = mensalidades em fidelização</span><span class="sp"></span>
+      <button class="btn" id="ct-calc" title="Volta a ler as fichas e os PN (gasta leituras: use quando houver mudanças)">⟳ Recalcular</button>
+      <button class="btn" id="ct-geo" title="Localiza no mapa os códigos postais que ainda não foram localizados">📍 Localizar códigos postais${semGeo?` (${semGeo} por localizar)`:''}</button></div>
+    <div id="ct-p" class="muted" style="font-size:12px;margin-bottom:6px"></div>
+    <div class="scroll"><table id="ct-t" data-noord="1"><thead><tr><th></th><th>Vendedor</th><th class="num">NIF</th><th class="num">Famílias</th><th class="num">RLMC em vigor</th><th class="num">Móvel</th><th class="num">Fixo</th><th class="num">Linhas</th><th class="num">A acabar em 6 meses</th>${CART.sel.size&&CART.dest?'<th class="num">Simulação: NIF</th><th class="num">Simulação: RLMC</th>':''}</tr></thead><tbody>
+      ${T.map(o=>`<tr><td><input type="checkbox" data-vv="${esc(o.v)}" ${CART.vis.has(o.v)?'checked':''} title="Mostrar no mapa"> <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${cartCor(o.v)}"></span></td><td><b>${esc(nomeV(o.v))}</b></td><td class="num">${o.n}</td><td class="num">${o.fam.size}</td><td class="num">${eur(o.r)}</td><td class="num">${eur(o.m)}</td><td class="num">${eur(o.x)}</td><td class="num">${o.li}</td><td class="num">${eur(o.f6)}</td>${CART.sel.size&&CART.dest?`<td class="num" style="${o.dn?'font-weight:700;color:'+(o.dn>0?'#15803d':'var(--red-d)'):''}">${o.n+o.dn}${o.dn?` (${o.dn>0?'+':''}${o.dn})`:''}</td><td class="num" style="${o.dr?'font-weight:700':''}">${eur(o.r+o.dr)}</td>`:''}</tr>`).join('')}
+    </tbody></table></div></div>
+    <div class="card"><div class="row" style="margin-bottom:8px"><b>Mapa</b><span class="muted" style="font-size:12px">círculo = cliente (maior = mais RLMC) · cor = vendedor · clique para selecionar (a família vem junta)</span><span class="sp"></span>
+      <button class="btn sm" id="ct-sv">Selecionar o que está à vista no mapa</button><button class="btn sm" id="ct-lx">Limpar seleção</button></div>
+      <div id="ct-map" style="height:560px;border-radius:8px;border:1px solid var(--line)"></div>
+      <div class="muted" style="font-size:11px;margin-top:4px">Mapa © OpenStreetMap. A localização é a do código postal da ficha.</div></div>
+    <div class="card"><div class="row" style="margin-bottom:8px"><b>Seleção (${selC.length} clientes · ${eur(selC.reduce((a,c)=>a+c.r,0))} € de RLMC)</b><span class="sp"></span>
+      <label style="margin:0">Passar para</label><select id="ct-dest" style="max-width:260px"><option value="">— escolher vendedor —</option>${vends.map(u=>`<option value="${esc(u.vendedorPHC)}" ${CART.dest===String(u.vendedorPHC)?'selected':''}>${esc(u.nome)} (${esc(u.vendedorPHC)})</option>`).join('')}</select>
+      <button class="btn pri" id="ct-ap" ${selC.length&&CART.dest?'':'disabled'}>Aplicar a mudança de carteira</button></div>
+      <div class="row" style="margin-bottom:8px"><input id="ct-q" type="search" placeholder="Juntar à seleção: nome, NIF, localidade ou código postal (ex.: 3700)…" style="max-width:420px"><button class="btn sm" id="ct-qa">Juntar os encontrados</button><span id="ct-qn" class="muted" style="font-size:12px"></span></div>
+      <div class="scroll" style="max-height:320px"><table><thead><tr><th>Cliente</th><th>NIF</th><th>Família</th><th>Localidade</th><th>Vendedor atual</th><th class="num">RLMC</th><th></th></tr></thead><tbody>
+        ${selC.sort((a,b)=>b.r-a.r).map(c=>`<tr><td>${esc(c.nm)}</td><td>${esc(c.n)}</td><td>${esc(c.fa)}</td><td>${esc(c.lc)} <span class="muted">${esc(c.cp)}</span></td><td>${esc(nomeV(c.v))}</td><td class="num">${eur(c.r)}</td><td><button class="btn sm ghost" data-rx="${esc(c.n)}">✕</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted">Nada selecionado.</td></tr>'}
+      </tbody></table></div></div>`;
+  $('#ct-calc').onclick=async()=>{ if(!confirm('Recalcular lê todas as fichas e os PN dos últimos 4 anos (alguns milhares de leituras). Continuar?')) return; $('#ct-calc').disabled=true; try { await cartCalcular(t=>$('#ct-p').textContent=t); CART.sel.clear(); viewCarteiras(); } catch(e){ toast(errTxt(e),true); $('#ct-calc').disabled=false; } };
+  $('#ct-geo').onclick=async()=>{ const b=$('#ct-geo'); if (b.dataset.on) { CART.geoParar=true; return; } b.dataset.on='1'; b.textContent='⏸ Parar'; try { const r=await cartGeocodificar(t=>{ const p=$('#ct-p'); if(p) p.textContent=t; }); toast(`${r.feitos} código(s) postal(is) localizado(s)${r.falta?` · faltam ${r.falta}`:''}.`); } catch(e){ toast(errTxt(e),true); } viewCarteiras(); };
+  m.querySelectorAll('[data-vv]').forEach(x=>x.onchange=()=>{ x.checked?CART.vis.add(x.dataset.vv):CART.vis.delete(x.dataset.vv); cartMapa(); });
+  $('#ct-dest').onchange=e=>{ CART.dest=e.target.value; viewCarteiras(); };
+  $('#ct-lx').onclick=()=>{ CART.sel.clear(); viewCarteiras(); };
+  m.querySelectorAll('[data-rx]').forEach(b=>b.onclick=()=>{ cartSel(b.dataset.rx,false); viewCarteiras(); });
+  const procura=()=>{ const t=semAcento($('#ct-q').value).trim(); if (t.length<2) return []; return CART.cl.filter(c=>semAcento(c.nm+' '+c.n+' '+c.lc).includes(t) || c.cp.startsWith(t)); };
+  $('#ct-q').oninput=()=>{ $('#ct-qn').textContent=$('#ct-q').value.trim().length>=2?`${procura().length} encontrado(s)`:''; };
+  $('#ct-qa').onclick=()=>{ const l=procura(); if(!l.length) return toast('Nada encontrado.',true); l.forEach(c=>cartSel(c.n,true)); viewCarteiras(); };
+  $('#ct-sv').onclick=()=>{ if (!CART.mapa) return; const bd=CART.mapa.getBounds(); let k=0; CART.cl.forEach(c=>{ const p=CART.geo?.[c.cp]; if (p && CART.vis.has(c.v) && bd.contains(p)) { cartSel(c.n,true); k++; } }); toast(`${k} cliente(s) selecionado(s).`); viewCarteiras(); };
+  $('#ct-ap').onclick=()=>cartAplicar();
+  cartMapa();
+}
+let LEAFLET=null;
+function leaflet(){ if (window.L) return Promise.resolve(window.L); if (LEAFLET) return LEAFLET;
+  LEAFLET=new Promise((res,rej)=>{ const c=document.createElement('link'); c.rel='stylesheet'; c.href='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'; document.head.appendChild(c);
+    const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'; s.onload=()=>res(window.L); s.onerror=()=>{ LEAFLET=null; rej(new Error('Não foi possível carregar o mapa.')); }; document.head.appendChild(s); });
+  return LEAFLET; }
+async function cartMapa(){
+  const el=$('#ct-map'); if (!el) return; let L; try { L=await leaflet(); } catch(e){ el.innerHTML=`<div class="muted" style="padding:12px">${esc(errTxt(e))}</div>`; return; }
+  if (!el.isConnected) return;
+  const centro=CART.mapa?[CART.mapa.getCenter(), CART.mapa.getZoom()]:null;
+  if (CART.mapa) { try { CART.mapa.remove(); } catch(_){} }
+  const mp=CART.mapa=L.map(el,{preferCanvas:true}); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18, attribution:'© OpenStreetMap'}).addTo(mp);
+  const pts=[]; const nomeV=v=>v?(vendPHCNome(v)||'vendedor '+v):'Sem vendedor';
+  CART.cl.forEach((c,i)=>{ const p=CART.geo?.[c.cp]; if (!p || !CART.vis.has(c.v)) return;
+    const j=[p[0]+((i*7919)%100-50)/40000, p[1]+((i*104729)%100-50)/40000];   // espalha ligeiramente os clientes do mesmo código postal
+    const sel=CART.sel.has(c.n), mk=L.circleMarker(j,{radius:4+Math.min(14,Math.sqrt(c.r)/2), color:sel?'#111':cartCor(c.v), weight:sel?3:1, fillColor:cartCor(c.v), fillOpacity:c.r?0.75:0.25}).addTo(mp);
+    mk.bindTooltip(`<b>${esc(c.nm)}</b><br>${esc(c.n)} · ${esc(c.lc)}<br>${esc(nomeV(c.v))}<br>RLMC ${eur(c.r)} € · ${c.li} linha(s)${c.fa?`<br>👪 ${esc(c.fa)}`:''}`);
+    mk.on('click',()=>{ const on=!CART.sel.has(c.n), k=cartSel(c.n,on); if (k>1) toast(`Família «${c.fa}»: ${k} clientes ${on?'selecionados':'retirados'} juntos.`); viewCarteiras(); });
+    pts.push(j); });
+  if (centro) mp.setView(centro[0], centro[1]); else if (pts.length) mp.fitBounds(pts,{padding:[20,20]}); else mp.setView([40.2,-8.2],7);
+}
+async function cartAplicar(){
+  const dest=CART.dest, l=CART.cl.filter(c=>CART.sel.has(c.n) && c.v!==dest); if (!dest || !l.length) return toast('Nada para mudar.',true);
+  // famílias divididas pela seleção (algum membro fora)
+  const fams=[...new Set(l.map(c=>c.fa).filter(Boolean))].filter(fa=>CART.cl.some(c=>c.fa===fa && !CART.sel.has(c.n)));
+  if (fams.length && !confirm(`Atenção: a seleção divide a(s) família(s) ${fams.join(', ')}. Continuar?`)) return;
+  if (!confirm(`Passar ${l.length} cliente(s) (${eur(l.reduce((a,c)=>a+c.r,0))} € de RLMC) para ${vendPHCNome(dest)}?\n\nAs fichas mudam de vendedor já; os Projetos futuros seguem o vendedor novo.`)) return;
+  const b=$('#ct-ap'); b.disabled=true; let ok=0; const falhas=[], mov=[];
+  for (const c of l) { try { const s=await getDoc(doc(db,'clientesFicha',c.n)); if (!s.exists()) throw new Error('ficha não existe');
+      const f=s.data(); await gravarFicha({...f, vendedor:dest, vendnm:vendPHCNome(dest)}, false); mov.push({n:c.n, de:c.v, para:dest}); c.v=dest; ok++;
+      const p=$('#ct-p'); if (p) p.textContent=`A mudar: ${ok} de ${l.length}…`; }
+    catch(e){ falhas.push(`${c.nm}: ${errTxt(e)}`); } }
+  try { await cartGuardarJSON('carteira', CART.cl);
+    const lg=await getDoc(doc(db,'configFin','carteira_log')); const ant=lg.exists()?(lg.data().l||[]):[];
+    await setDoc(doc(db,'configFin','carteira_log'),{l:[...ant, {em:new Date().toISOString(), por:S.me.nome, para:dest, n:mov.length, nifs:mov.map(x=>x.n+':'+x.de)}].slice(-200)}); } catch(e){ console.warn('registo carteiras', e); }
+  S.cli=null; CART.sel.clear(); toast(`${ok} cliente(s) mudados para ${vendPHCNome(dest)}.${falhas.length?' Falharam: '+falhas.slice(0,5).join('; '):''}`, !!falhas.length); viewCarteiras();
+}
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -540,7 +673,7 @@ async function procurarHistorico(){
   S.filtros.estado=''; S.filtros.estados=[]; toast(docs.length+' processo(s) encontrado(s) no histórico.'); drawLista();
 }
 // a lista só se desenha se o utilizador ainda estiver na lista (uma leitura lenta ou a pesquisa a escrever podem terminar depois de mudar de página)
-const naLista = () => { const h=location.hash; return !h || !['#/rpn/','#/novo','#/projetos','#/clientes','#/atividades','#/catalogo','#/producao','#/admin','#/comissao','#/comissionamento'].some(p=>h.startsWith(p)); };
+const naLista = () => { const h=location.hash; return !h || !['#/rpn/','#/novo','#/projetos','#/clientes','#/atividades','#/catalogo','#/producao','#/admin','#/carteiras','#/comissao','#/comissionamento'].some(p=>h.startsWith(p)); };
 function drawLista(){
   if (!S.me || !S.list || !$('#main') || !naLista()) return;
   const f = S.filtros, all = S.list;
@@ -1904,7 +2037,7 @@ const CLI_SEC = [
   ['Vodafone',[['contaA','Conta Vodafone 1'],['contaB','Conta Vodafone 2'],['contaC','Conta Vodafone 3'],['contaD','Conta Vodafone 4'],
     ['ciclofac','Ciclo de faturação']]],
   ['Observações',[['obs','Observações (PHC)','ta'],['obsvodaf','Observações Vodafone','ta']]],
-  ['Comercial',[['vendedor','Vendedor','vend'],['vendedorTemp','Vendedor temporário (ex.: ausência prolongada)','vend'],['vendedorTempAte','Vendedor temporário até','date'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
+  ['Comercial',[['familia','Família (clientes que ficam sempre no mesmo vendedor)'],['vendedor','Vendedor','vend'],['vendedorTemp','Vendedor temporário (ex.: ausência prolongada)','vend'],['vendedorTempAte','Vendedor temporário até','date'],['vendedorAnterior','Vendedor anterior (PHC)','ro'],['dossiers','Dossiers no PHC','ro'],['criadoPHC','Criado no PHC','ro']]]
 ];
 const CLI_KEYS = CLI_SEC.flatMap(s=>s[1].map(c=>c[0]));
 const CL = {q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}};
@@ -2095,8 +2228,14 @@ function desenharCliente(){
   if (CL.edit) m.querySelectorAll('#cl-form [data-k]').forEach(el=>el.addEventListener('input',()=>{ S.dirty=true; }));
   $('#cl-ed')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
   $('#cl-ed0')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
+  if (tab==='ficha' && !novo && f?.familia && isStaff()) getDocs(query(collection(db,'clientesFicha'), where('familia','==',f.familia))).then(sn=>{
+    const el=$('#cl-form'); if (!el || CL.f!==f) return; const os=sn.docs.map(d=>d.data()).filter(x=>String(x.ncont)!==String(f.ncont));
+    const d=document.createElement('div'); d.className='warnbox'; d.style.cssText='margin-top:12px;background:#eef2ff;border-color:#c7d2fe';
+    d.innerHTML=`👪 <b>Família «${esc(f.familia)}»</b>: ${os.length?os.map(x=>`<a href="#/clientes/${encodeURIComponent(x.ncont)}">${esc(x.nome)}</a> <span class="muted">(${esc(x.ncont)} · ${esc(vendPHCNome(x.vendedor)||'sem vendedor')})</span>`).join(' · '):'<span class="muted">só este cliente</span>'}`;
+    el.appendChild(d); }).catch(()=>{});
   $('#cl-cn')?.addEventListener('click',()=>{ S.dirty=false; if (novo) { location.hash='#/clientes'; return; } CL.edit=false; CL.f=null; cliAbrir(CL.nif); });
   $('#cl-sv')?.addEventListener('click', async()=>{
+    const vAntes=String(CL.f?.vendedor||''), famAntes=String(CL.f?.familia||'');
     m.querySelectorAll('#cl-form [data-k]').forEach(el=>{ if(!el.disabled || ['vendedor','vendedorTemp','vendedorTempAte'].includes(el.dataset.k)) f[el.dataset.k]=el.value.trim(); });
     if (f.vendedorTemp && f.vendedorTemp===String(f.vendedor||'')) return toast('O vendedor temporário tem de ser diferente do vendedor da carteira.',true);
     if (f.vendedorTemp && !f.vendedorTempAte) return toast('Indique até quando fica o vendedor temporário.',true);
@@ -2108,6 +2247,8 @@ function desenharCliente(){
       if (/[\/.#$\[\]]/.test(f.ncont)) return toast('O NIF tem caracteres inválidos.',true);
       if (/^\d+$/.test(f.ncont) && !nifValido(f.ncont) && !confirm(`"${f.ncont}" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?`)) return;
     }
+    f.familia=String(f.familia||'').trim();
+    if (!novo && isBO() && famAntes && String(f.vendedor||'')!==vAntes && !confirm(`Este cliente pertence à família «${famAntes}». Mudar só este cliente de vendedor separa a família.\n\nPara mudar a família inteira use Carteiras. Continuar só com este cliente?`)) return;
     const data={}; CLI_KEYS.forEach(k=>{ if (f[k]!=null) data[k]=f[k]; });
     data.vendedor=String(f.vendedor||''); data.vendnm=vendPHCNome(data.vendedor); data.vendedorTemp=String(f.vendedorTemp||''); data.vendedorTempNome=vendPHCNome(data.vendedorTemp); data.vendedorTempAte=data.vendedorTemp?String(f.vendedorTempAte||''):'';
     const bt=$('#cl-sv'); bt.disabled=true;
