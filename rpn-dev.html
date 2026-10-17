@@ -2228,10 +2228,15 @@ function desenharCliente(){
   if (CL.edit) m.querySelectorAll('#cl-form [data-k]').forEach(el=>el.addEventListener('input',()=>{ S.dirty=true; }));
   $('#cl-ed')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
   $('#cl-ed0')?.addEventListener('click',()=>{ CL.edit=true; desenharCliente(); });
-  if (tab==='ficha' && !novo && f?.familia && isStaff()) getDocs(query(collection(db,'clientesFicha'), where('familia','==',f.familia))).then(sn=>{
-    const el=$('#cl-form'); if (!el || CL.f!==f) return; const os=sn.docs.map(d=>d.data()).filter(x=>String(x.ncont)!==String(f.ncont));
+  // membros da família: a staff vê todos; o comercial vê os da sua carteira (e aqueles em que é vendedor temporário)
+  const famQ = () => { const col=collection(db,'clientesFicha'), meu=String(S.me.vendedorPHC||'');
+    if (isStaff()) return getDocs(query(col, where('familia','==',f.familia))).then(sn=>sn.docs);
+    if (!meu) return Promise.resolve([]);
+    return Promise.all([getDocs(query(col, where('familia','==',f.familia), where('vendedor','==',meu))), getDocs(query(col, where('familia','==',f.familia), where('vendedorTemp','==',meu))).catch(()=>({docs:[]}))]).then(([a,b])=>[...a.docs, ...b.docs]); };
+  if (tab==='ficha' && !novo && f?.familia) famQ().then(docs=>{
+    const el=$('#cl-form'); if (!el || CL.f!==f) return; const vistos=new Set(), os=docs.map(d=>d.data()).filter(x=>String(x.ncont)!==String(f.ncont) && !vistos.has(x.ncont) && vistos.add(x.ncont));
     const d=document.createElement('div'); d.className='warnbox'; d.style.cssText='margin-top:12px;background:#eef2ff;border-color:#c7d2fe';
-    d.innerHTML=`👪 <b>Família «${esc(f.familia)}»</b>: ${os.length?os.map(x=>`<a href="#/clientes/${encodeURIComponent(x.ncont)}">${esc(x.nome)}</a> <span class="muted">(${esc(x.ncont)} · ${esc(vendPHCNome(x.vendedor)||'sem vendedor')})</span>`).join(' · '):'<span class="muted">só este cliente</span>'}`;
+    d.innerHTML=`👪 <b>Família «${esc(f.familia)}»</b>: ${os.length?os.map(x=>`<a href="#/clientes/${encodeURIComponent(x.ncont)}">${esc(x.nome)}</a> <span class="muted">(${esc(x.ncont)} · ${esc(vendPHCNome(x.vendedor)||'sem vendedor')})</span>`).join(' · '):'<span class="muted">só este cliente</span>'}${isStaff()?'':'<div class="muted" style="font-size:11px;margin-top:4px">Mostra os membros da família que estão na sua carteira.</div>'}`;
     el.appendChild(d); }).catch(()=>{});
   $('#cl-cn')?.addEventListener('click',()=>{ S.dirty=false; if (novo) { location.hash='#/clientes'; return; } CL.edit=false; CL.f=null; cliAbrir(CL.nif); });
   $('#cl-sv')?.addEventListener('click', async()=>{
