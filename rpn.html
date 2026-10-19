@@ -488,6 +488,15 @@ function passaGrande(k, b64){ if (String(b64).length<1500) return k+'='+b64;
   try { const id=Date.now().toString(36)+Math.random().toString(36).slice(2,7); localStorage.setItem('rdm-pass-'+id, b64); return k+'k='+id; } catch(e){ return k+'='+b64; } }
 function lerPassagem(u, k){ const id=u.searchParams.get(k); if (!id) return null; u.searchParams.delete(k);
   try { const v=localStorage.getItem('rdm-pass-'+id); localStorage.removeItem('rdm-pass-'+id); return v; } catch(e){ return null; } }
+async function avisoBO(col, id, ant, texto, novos){
+  try { const agora=new Date().toISOString();
+    const partes=[...new Set([ant?.vendedorUid, ant?.boUid, ant?.confUid, ...(novos||[]), ...(ant?.msgUlt?.partes||[])].filter(Boolean))];
+    await addDoc(collection(db,col,id,'mensagens'),{texto:'🔁 '+texto, auto:false, porUid:S.me.uid, porNome:S.me.nome, em:serverTimestamp()});
+    const u={em:agora, porUid:S.me.uid, porNome:S.me.nome, auto:false, pend:true, partes};
+    await setDoc(doc(db,col,id),{msgUlt:u, msgLido:{[S.me.uid]:agora}},{merge:true});
+    const c=col==='rpn'?S.cur:AT.cur; if (c?.id===id) { c.msgUlt=u; c.msgLido={...(c.msgLido||{}),[S.me.uid]:agora}; }
+  } catch(e){ console.warn('avisoBO',e); }
+}
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -714,10 +723,11 @@ function drawFicha(){
   $('#a-agd')?.addEventListener('click',async()=>{ if(S.dirty) return toast('Guarde primeiro as alterações.',true); const r=S.cur, d0=String(r.data||'').slice(0,10);
     if(!confirm(`Tirar o RPN ${r.numero} de ${r.boNome} e entregá-lo a uma BackOffice só no dia ${fmtD(d0)}?${r.grupoId?'\n\n(Os outros RPN do grupo ainda em «Submetido» também.)':''}`)) return;
     try { const ids=[r.id, ...(r.grupoId ? (await irmaos(r)).filter(x=>x.estado==='Submetido' && x.boUid).map(x=>x.id) : [])];
-      for (const id of ids) { await runTransaction(db, async tx=>{ const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO'); const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(); if(o.estado!=='Submetido' || !o.boUid) return;
+      for (const id of ids) { let ant=null; await runTransaction(db, async tx=>{ const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO'); const sn=await tx.get(ref), cs=await tx.get(cargaRef); if(!sn.exists()) return; const o=sn.data(); if(o.estado!=='Submetido' || !o.boUid) return; ant=o;
           const carga={...((cs.exists()?cs.data():{}).carga||{})}; if (o.cargaContada) carga[o.boUid]=Math.max(0,(carga[o.boUid]||0)-o.cargaContada);
           tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,{boUid:null, boNome:'', cargaContada:0, agendadoPara:d0, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
-        await hist('Agendado', `Tirado de ${r.boNome} por ${S.me.nome}: vai para uma BackOffice no dia ${fmtD(d0)}`, id); }
+        await hist('Agendado', `Tirado de ${r.boNome} por ${S.me.nome}: vai para uma BackOffice no dia ${fmtD(d0)}`, id);
+        if (ant) await avisoBO('rpn', id, ant, `BackOffice alterada por ${S.me.nome}\nTirado de ${ant.boNome}: vai para uma BackOffice no dia ${fmtD(d0)}`, []); }
       toast(`Agendado para ${fmtD(d0)}.`); S.grupo=null; viewFicha(r.id); } catch(e){ toast(errTxt(e),true); } });
   $('#a-realc')?.addEventListener('click',()=>realocar('conf'));
   $('#a-pnm')?.addEventListener('click',()=>pnEmailPopup(S.cur));
@@ -1067,7 +1077,7 @@ async function realocarTx(id, tipo, uidNovo, motivo){
   let txt='';
   await runTransaction(db, async tx => {
     const ref=doc(db,'rpn',id), cargaRef=doc(db,'config','cargaBO');
-    const s=await tx.get(ref), cs=await tx.get(cargaRef); const r=s.data(), cd=cs.exists()?cs.data():{};
+    const s=await tx.get(ref), cs=await tx.get(cargaRef); const r=s.data(), cd=cs.exists()?cs.data():{}; realocarTx.ant=r;
     const carga={...(cd.carga||{})}, conf={...(cd.conf||{})}, aus=cd.ausentes||{};
     const upd={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
     if (tipo==='bo') {
@@ -1096,6 +1106,7 @@ async function realocarTx(id, tipo, uidNovo, motivo){
     tx.update(ref,upd);
   });
   await hist('Realocado', `${txt}. Razão: ${motivo}`, id);
+  await avisoBO('rpn', id, realocarTx.ant, `BackOffice alterada por ${S.me.nome}\n${txt}\nRazão: ${motivo}`, [realocarTx.uid]);
   return txt;
 }
 function pedirRazao(titulo, extra, botao, cb){
@@ -2378,12 +2389,13 @@ async function atRealocarTx(id, motivo){
   let txt='';
   await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef); const r=s.data(), cd=cs.exists()?cs.data():{};
     if (!AT_ABERTAS.includes(r.estado)) throw new Error('Já não está em aberto.');
-    const carga={...(cd.carga||{})}, novo=escolherBO(carga, cd.ausentes||{}, [r.boUid]);
+    const carga={...(cd.carga||{})}, novo=escolherBO(carga, cd.ausentes||{}, [r.boUid]); atRealocarTx.ant=r; atRealocarTx.uid=novo.uid;
     if (r.boUid && r.cargaContada) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-r.cargaContada);
     carga[novo.uid]=(carga[novo.uid]||0)+1;
     tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,{boUid:novo.uid, boNome:novo.nome, cargaContada:1, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
     txt=`De ${r.boNome||'—'} para ${novo.nome}. ${motivo||''}`; });
   await atHist(id,'Realocada',txt);
+  await avisoBO('atividades', id, atRealocarTx.ant, `BackOffice alterada por ${S.me.nome}\n${txt}`, [atRealocarTx.uid]);
 }
 function atAnexos(tc, p){
   const r=AT.cur, podeUp=isStaff()||p.own;
