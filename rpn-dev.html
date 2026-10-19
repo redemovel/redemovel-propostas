@@ -524,10 +524,10 @@ function filaBarra(tipo, all){
   const velho = v => v ? ` · mais antig${rpn?"o":"a"}: <b>${esc(String(nm(v)))}</b> <span style="${diasDesde(desde(v))>=FILA_DIAS?'color:var(--red-d);font-weight:700':''}">há ${diasDesde(desde(v))} dias</span>` : '';
   const txt = x => rpn ? `🛠 <b>${x.imp.length}</b> RPN · <b>${L(x.imp)}</b> linhas por implementar · ✔ <b>${x.cf.length}</b> RPN · <b>${L(x.cf)}</b> linhas por conferir · ⏸ ${x.esp.length} à espera (${L(x.esp)} linhas)`
                        : `🛠 <b>${x.imp.length}</b> por tratar · ⏸ ${x.esp.length} à espera`;
-  const eu = bos().some(b=>b.uid===S.me.uid) || all.some(r=>r.boUid===S.me.uid || r.confUid===S.me.uid), me=de(S.me.uid);
+  const eu = perfil()!=='master' && (bos().some(b=>b.uid===S.me.uid) || all.some(r=>r.boUid===S.me.uid || r.confUid===S.me.uid)), me=de(S.me.uid);
   let h = eu ? `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><b>${rpn?'A minha fila':'As minhas Atividades'}:</b> <span>${txt(me)}${velho(me.v)}</span>
     <button class="btn" id="fila-ver" title="Mostra só o que está consigo para fazer, do mais antigo para o mais recente">Ver ${rpn?'a minha fila':'as minhas'}</button></div>` : '';
-  if (perfil()==='master') { const eq=bos().map(b=>({b, x:de(b.uid)})).filter(o=>o.b.uid!==S.me.uid || !eu).sort((a,b)=>a.b.nome.localeCompare(b.b.nome));
+  if (perfil()==='master') { const eq=bos().map(b=>({b, x:de(b.uid)})).sort((a,b)=>a.b.nome.localeCompare(b.b.nome));
     const semConf = rpn ? all.filter(r=>r.estado==='Em Conferência' && !r.confUid).length : 0;
     h += `<div class="muted" style="font-size:12px;margin-top:6px;line-height:1.7">${eq.map(o=>`<b style="color:var(--ink)">${esc(o.b.nome)}</b>: ${rpn?`${o.x.imp.length} RPN/${L(o.x.imp)} linhas a implementar · ${o.x.cf.length} a conferir`:`${o.x.imp.length} por tratar`} · ${o.x.esp.length} à espera${o.x.v?` · mais antig${rpn?"o":"a"} há ${diasDesde(desde(o.x.v))} d`:''}`).join('<br>')}${semConf?`<br>Conferência em fila (sem BO): <b style="color:var(--ink)">${semConf}</b>`:''}</div>`; }
   return h ? `<div class="card" id="fila-bo" style="margin-bottom:12px;padding:10px 14px">${h}</div>` : '';
