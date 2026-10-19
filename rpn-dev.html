@@ -529,8 +529,9 @@ function filaBarra(tipo, all){
     <button class="btn" id="fila-ver" title="Mostra só o que está consigo para fazer, do mais antigo para o mais recente">Ver ${rpn?'a minha fila':'as minhas'}</button></div>` : '';
   if (perfil()==='master') { const eq=bos().map(b=>({b, x:de(b.uid)})).sort((a,b)=>a.b.nome.localeCompare(b.b.nome));
     const semConf = rpn ? all.filter(r=>r.estado==='Em Conferência' && !r.confUid).length : 0;
-    h += `<div class="muted" style="font-size:12px;margin-top:6px;line-height:1.7">${eq.map(o=>`<b style="color:var(--ink)">${esc(o.b.nome)}</b>: ${rpn?`${o.x.imp.length} RPN/${L(o.x.imp)} linhas a implementar · ${o.x.cf.length} a conferir`:`${o.x.imp.length} por tratar`} · ${o.x.esp.length} à espera${o.x.v?` · mais antig${rpn?"o":"a"} há ${diasDesde(desde(o.x.v))} d`:''}`).join('<br>')}${semConf?`<br>Conferência em fila (sem BO): <b style="color:var(--ink)">${semConf}</b>`:''}</div>`; }
-  return h ? `<div class="card" id="fila-bo" style="margin-bottom:12px;padding:10px 14px">${h}</div>` : '';
+    const dd = o => { const n=diasDesde(desde(o.x.v)); return `<span style="${n>=FILA_DIAS?'color:var(--red-d);font-weight:700':''}">${n} d</span>`; };
+    h += `<div style="display:flex;flex-wrap:wrap;gap:4px 22px;align-items:center;font-size:13px" title="${rpn?'🛠 RPN a implementar / linhas · ✔ a conferir · ⏸ à espera · dias do mais antigo':'🛠 por tratar · ⏸ à espera · dias da mais antiga'}"><span class="muted">Fila BO:</span>${eq.map(o=>`<span style="white-space:nowrap"><b>${esc(o.b.nome)}</b> ${o.x.imp.length}${rpn?` RPN/${L(o.x.imp)} lin. <span class="muted">·</span> ${o.x.cf.length} conf.`:' por tratar'} <span class="muted">·</span> ${o.x.esp.length} espera${o.x.v?` <span class="muted">·</span> ${dd(o)}`:''}</span>`).join('')}${semConf?`<span style="white-space:nowrap">Conferência sem BO: <b>${semConf}</b></span>`:''}</div>`; }
+  return h ? `<div class="card" id="fila-bo" style="margin-bottom:12px;padding:8px 14px">${h}</div>` : '';
 }
 // ===================== CARTEIRAS (Master) =====================
 const Q_CLI='Clt VDF Negócios', Q_EX='Ex Clt VDF Negócios', Q_PRO='Prospect';   // as categorias do PHC (Tipificação Cliente)
