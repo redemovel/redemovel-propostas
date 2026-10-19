@@ -497,6 +497,30 @@ async function avisoBO(col, id, ant, texto, novos){
     const c=col==='rpn'?S.cur:AT.cur; if (c?.id===id) { c.msgUlt=u; c.msgLido={...(c.msgLido||{}),[S.me.uid]:agora}; }
   } catch(e){ console.warn('avisoBO',e); }
 }
+const BO_ACAO=['Submetido','Em Implementação','Em Conferência'], BO_ESPERA=['Pendente Comercial','Pendente Documentos','A aguardar','A aguardar ciclo'];
+const AT_ACAO=['Submetido','Em tratamento'], AT_ESPERA=['Pendente Comercial','A aguardar'], FILA_DIAS=3;
+const rpnDesde = r => String((r.estado==='Em Conferência' ? r.implementadoEm : r.submetidoEm) || r.data || '').slice(0,10);
+const atDesde = r => String(r.submetidoEm || r.data || '').slice(0,10);
+// ordem de trabalho da BO: primeiro o que está do lado dela (do mais antigo para o mais recente), depois o que espera por outros, depois o resto
+const ordemFila = (acao, espera, desde) => (a,b) => { const g=r=>acao.includes(r.estado)?0:espera.includes(r.estado)?1:2, ga=g(a), gb=g(b);
+  if (ga!==gb) return ga-gb; return ga<2 ? (desde(a).localeCompare(desde(b)) || (a.numero||0)-(b.numero||0)) : 0; };
+const rpnOrdemBO = ordemFila(BO_ACAO, BO_ESPERA, rpnDesde), atOrdemBO = ordemFila(AT_ACAO, AT_ESPERA, atDesde);
+const diasTag = (d, tit) => { const n=diasDesde(d); return `<div style="font-size:11px;${n>=FILA_DIAS?'color:var(--red-d);font-weight:700':'color:var(--mut)'}" title="${tit}">há ${n} dia${n===1?'':'s'}</div>`; };
+function filaBarra(tipo, all){
+  const rpn=tipo==='rpn', L=x=>x.reduce((a,r)=>a+(r.nLinhas||0),0), nm=r=>rpn?r.numero:atNum(r), desde=rpn?rpnDesde:atDesde;
+  const de = uid => { const imp=all.filter(r=>r.boUid===uid && (rpn?['Submetido','Em Implementação']:AT_ACAO).includes(r.estado)), cf=rpn?all.filter(r=>r.estado==='Em Conferência' && r.confUid===uid):[],
+    esp=all.filter(r=>r.boUid===uid && (rpn?BO_ESPERA:AT_ESPERA).includes(r.estado)), v=[...imp,...cf].sort((a,b)=>desde(a).localeCompare(desde(b)))[0]; return {imp, cf, esp, v}; };
+  const velho = v => v ? ` · mais antig${rpn?"o":"a"}: <b>${esc(String(nm(v)))}</b> <span style="${diasDesde(desde(v))>=FILA_DIAS?'color:var(--red-d);font-weight:700':''}">há ${diasDesde(desde(v))} dias</span>` : '';
+  const txt = x => rpn ? `🛠 <b>${x.imp.length}</b> RPN · <b>${L(x.imp)}</b> linhas por implementar · ✔ <b>${x.cf.length}</b> RPN · <b>${L(x.cf)}</b> linhas por conferir · ⏸ ${x.esp.length} à espera (${L(x.esp)} linhas)`
+                       : `🛠 <b>${x.imp.length}</b> por tratar · ⏸ ${x.esp.length} à espera`;
+  const eu = bos().some(b=>b.uid===S.me.uid) || all.some(r=>r.boUid===S.me.uid || r.confUid===S.me.uid), me=de(S.me.uid);
+  let h = eu ? `<div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><b>${rpn?'A minha fila':'As minhas Atividades'}:</b> <span>${txt(me)}${velho(me.v)}</span>
+    <button class="btn" id="fila-ver" title="Mostra só o que está consigo para fazer, do mais antigo para o mais recente">Ver ${rpn?'a minha fila':'as minhas'}</button></div>` : '';
+  if (perfil()==='master') { const eq=bos().map(b=>({b, x:de(b.uid)})).filter(o=>o.b.uid!==S.me.uid || !eu).sort((a,b)=>a.b.nome.localeCompare(b.b.nome));
+    const semConf = rpn ? all.filter(r=>r.estado==='Em Conferência' && !r.confUid).length : 0;
+    h += `<div class="muted" style="font-size:12px;margin-top:6px;line-height:1.7">${eq.map(o=>`<b style="color:var(--ink)">${esc(o.b.nome)}</b>: ${rpn?`${o.x.imp.length} RPN/${L(o.x.imp)} linhas a implementar · ${o.x.cf.length} a conferir`:`${o.x.imp.length} por tratar`} · ${o.x.esp.length} à espera${o.x.v?` · mais antig${rpn?"o":"a"} há ${diasDesde(desde(o.x.v))} d`:''}`).join('<br>')}${semConf?`<br>Conferência em fila (sem BO): <b style="color:var(--ink)">${semConf}</b>`:''}</div>`; }
+  return h ? `<div class="card" id="fila-bo" style="margin-bottom:12px;padding:10px 14px">${h}</div>` : '';
+}
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
 
@@ -559,10 +583,10 @@ function drawLista(){
     && (!f.txt || [r.numero,r.cliente?.nome,r.cliente?.nif,r.cliente?.email,r.nOportunidade,r.vendedorNome,(r.linhas||[]).map(l=>l.msisdn+' '+l.contratoVDF).join(' ')].join(' ').toLowerCase().includes(f.txt.toLowerCase())));
   const cnt = {}; base.forEach(r=>cnt[r.estado]=(cnt[r.estado]||0)+1);
   if (!f.estados) { try { f.estados=JSON.parse(localStorage.getItem('rpn-estados')||'[]'); } catch(_){ f.estados=[]; } }
-  const rows = base.filter(r=>!f.estados.length || f.estados.includes(r.estado));
+  const rows = base.filter(r=>!f.estados.length || f.estados.includes(r.estado)); if (isBO()) rows.sort((a,b)=>rpnOrdemBO(a,b) || (b.numero||0)-(a.numero||0));
   const vends = [...new Set(all.map(r=>r.vendedorUid))].map(u=>[u,userNome(u)||all.find(r=>r.vendedorUid===u)?.vendedorNome]).sort((a,b)=>(a[1]||'').localeCompare(b[1]||''));
   const tot = rows.reduce((a,r)=>({l:a.l+(r.nLinhas||0),rl:a.rl+(r.totRLMC||0),sc:a.sc+(r.totScore||0)}),{l:0,rl:0,sc:0});
-  $('#main').innerHTML = `
+  $('#main').innerHTML = `${isBO()?filaBarra('rpn', all):''}
     <div class="chips multi" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)">
       <div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todos</span><b>${base.length}</b></div>
       ${[...ESTADOS,...(cnt['Concluído']?['Concluído']:[])].map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}" title="${esc(estTxt(e))}"><span class="muted">${esc(estTxt(e))}</span><b>${cnt[e]||0}</b></div>`).join('')}
@@ -584,7 +608,7 @@ function drawLista(){
       </div>
       <div class="scroll"><table>
         <thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th>NIF</th><th>Vendedor</th><th>BackOffice</th><th data-estf="rpn">Estado</th><th class="num">Linhas</th><th class="num">RLMC €</th><th class="num">Score</th><th>Oportunidade</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?(parcial(r)?' <span class="gp-par" title="Grupo com partes por fechar: uns RPN já seguiram, outros ainda estão em aberto" style="color:#b45309;font-size:11px;font-weight:600">⛓ parcial</span>':' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>'):''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${r.agendadoPara&&!r.boUid?`<span title="Submetido com data futura: vai para uma BackOffice nesse dia" style="color:#8a5a00">⏳ agendado ${fmtD(r.agendadoPara)}</span>`:esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
+        <tbody>${rows.map(r=>`<tr class="click" data-id="${r.id}"><td><b>${r.numero||''}</b>${msgPorLer(r)?' <span class="rp-m" title="Mensagem por ler" style="color:var(--red)">💬</span>':''}${r.grupoId?(parcial(r)?' <span class="gp-par" title="Grupo com partes por fechar: uns RPN já seguiram, outros ainda estão em aberto" style="color:#b45309;font-size:11px;font-weight:600">⛓ parcial</span>':' <span class="muted" title="Faz parte de um grupo de RPN do mesmo negócio">⛓</span>'):''}${r.origem==='PHC'?' <span class="muted" style="font-size:10px">PHC</span>':''}${isBO()&&pnPorEnviar(r)?' <span class="pn-pe" title="PN por enviar ao cliente" style="color:var(--red-d)">✉</span>':''}</td><td>${fmtD(r.data)}${isBO()&&BO_ACAO.includes(r.estado)?diasTag(rpnDesde(r), r.estado==='Em Conferência'?'Desde que foi implementado':'Desde que foi submetido'):''}</td><td>${esc(r.cliente?.nome)}</td><td>${esc(r.cliente?.nif)}</td><td>${esc(r.vendedorNome)}</td><td>${r.agendadoPara&&!r.boUid?`<span title="Submetido com data futura: vai para uma BackOffice nesse dia" style="color:#8a5a00">⏳ agendado ${fmtD(r.agendadoPara)}</span>`:esc(r.boNome||'—')}${r.estado==='Em Conferência'?`<div class="muted" style="font-size:11px">confere: ${esc(r.confNome||'em fila')}</div>`:''}</td><td><span class="badge b-${(r.estado||'').replace(/ /g,'-')} ${esperaVencida(r)?'venc':''}">${esc(estTxt(r.estado))}</span>${r.estado==='A aguardar'?` <span class="${esperaVencida(r)?'':'muted'}" style="font-size:11px;${esperaVencida(r)?'color:var(--red-d);font-weight:600':''}">${esc(esperaTxt(r))}</span>`:''}${(r.motivos||[]).length?` <span class="muted" style="font-size:11px">${esc(r.motivos.join(', '))}</span>`:''}</td><td class="num">${r.nLinhas||0}</td><td class="num">${eur(r.totRLMC)}</td><td class="num">${n3(r.totScore)}</td><td>${esc(r.nOportunidade)}</td></tr>`).join('') || `<tr><td colspan="11" class="muted">Sem RPNs.</td></tr>`}</tbody>
         ${rows.length?`<tfoot><tr class="tot"><td colspan="7">${rows.length} RPN</td><td class="num">${tot.l}</td><td class="num">${eur(tot.rl)}</td><td class="num">${n3(tot.sc)}</td><td></td></tr></tfoot>`:''}
       </table></div>
     </div>`;
@@ -592,6 +616,7 @@ function drawLista(){
     try { localStorage.setItem('rpn-estados', JSON.stringify(f.estados)); } catch(_){} drawLista(); });
   document.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>go('#/rpn/'+t.dataset.id));
   $('#nv').onclick=()=>go('#/novo');
+  $('#fila-ver')?.addEventListener('click',()=>{ f.meus=true; f.estados=['Submetido','Em Implementação','Em Conferência']; try { localStorage.setItem('rpn-estados', JSON.stringify(f.estados)); } catch(_){} drawLista(); });
   $('#fr').onclick=()=>viewLista(true);
   if ($('#aus')) $('#aus').onclick=()=>ausencias().catch(e=>toast(errTxt(e),true));
   const ft=$('#ft'); ft.oninput=()=>{ f.txt=ft.value; clearTimeout(ft._h); ft._h=setTimeout(()=>{ drawLista(); const n=$('#ft'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
@@ -2144,8 +2169,8 @@ function atDesenhaLista(){
   // em cima as datas mais perto de hoje: as de hoje, depois ontem/amanhã… (as agendadas para daqui a meses ficam mais abaixo)
   const atHoje = new Date(hojeLocal()+'T12:00:00'), atPerto = r => { const d=atChave(r); return d ? Math.abs(Math.round((new Date(d+'T12:00:00')-atHoje)/864e5)) : 99999; };
   if (!f.estados) { try { f.estados=JSON.parse(localStorage.getItem('at-estados')||'[]'); } catch(_){ f.estados=[]; } }
-  const rows=base.filter(r=>!f.estados.length || f.estados.includes(r.estado)).sort((a,b)=>atPerto(a)-atPerto(b) || atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
-  $('#main').innerHTML=`
+  const rows=base.filter(r=>!f.estados.length || f.estados.includes(r.estado)).sort((a,b)=>(isBO()?atOrdemBO(a,b):0) || atPerto(a)-atPerto(b) || atChave(b).localeCompare(atChave(a)) || (b.numero||0)-(a.numero||0)), nMsg=all.filter(msgPorLer).length;
+  $('#main').innerHTML=`${isBO()?filaBarra('at', all):''}
     <div class="chips multi" title="Clique nos estados para os mostrar ou esconder (pode escolher vários)"><div class="chip ${!f.estados.length?'on':''}" data-e=""><span class="muted">Todas</span><b>${base.length}</b></div>
       ${AT_ESTADOS.map(e=>`<div class="chip ${f.estados.includes(e)?'on':''}" data-e="${esc(e)}" title="${esc(e)}"><span class="muted">${esc(e)}</span><b>${cnt[e]||0}</b></div>`).join('')}</div>
     <div class="card">
@@ -2164,6 +2189,7 @@ function atDesenhaLista(){
     try { localStorage.setItem('at-estados', JSON.stringify(f.estados)); } catch(_){} atDesenhaLista(); });
   const q=$('#at-q'); q.oninput=()=>{ f.txt=q.value; clearTimeout(q._h); q._h=setTimeout(()=>{ atDesenhaLista(); const n=$('#at-q'); if(!n) return; n.focus(); n.setSelectionRange(n.value.length,n.value.length); },250); };
   $('#at-r').onclick=()=>atLista(true);
+  $('#fila-ver')?.addEventListener('click',()=>{ f.meus=true; f.estados=[...AT_ACAO]; try { localStorage.setItem('at-estados', JSON.stringify(f.estados)); } catch(_){} atDesenhaLista(); });
   $('#at-m').onchange=e=>{ if(e.target.value){ AT.mes=e.target.value; atLista(); } };
   $('#at-fm').onchange=e=>{ f.msg=e.target.checked; atDesenhaLista(); };
   const me=$('#at-me'); if(me) me.onchange=()=>{ f.meus=me.checked; atDesenhaLista(); };
