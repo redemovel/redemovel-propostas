@@ -1931,10 +1931,43 @@ async function projetosAoEntrar(){
 // quem pode ter Projetos: comerciais e qualquer conta com carteira (nº de vendedor PHC), mais quem já tem algum atribuído
 const vendedoresProj = (extra=[]) => Object.entries(S.users).filter(([uid,u])=>(u.ativo!==false && (u.perfil==='comercial' || u.vendedorPHC)) || extra.includes(uid)).map(([uid,u])=>({uid,nome:u.nome})).sort((a,b)=>a.nome.localeCompare(b.nome));
 const PJ = {tab:'tratar', mes:null, vend:'', lista:[], cfg:{}};
+const PJ_TRATADOS=['Em negociação','Ganho','Perdido'];
+async function projResumo(){
+  const m=$('#main'), stf=isStaff(), cur=mesLocal(), meses=[5,4,3,2,1,0].map(i=>somaMeses(cur,-i)), col=collection(db,'projetos');
+  try {
+    const sn = stf ? [await getDocs(query(col, where('mes','in',meses)))] : await Promise.all(meses.map(M=>getDocs(query(col, where('vendedorUid','==',S.me.uid), where('mes','==',M)))));
+    PJ.res = sn.flatMap(x=>x.docs.map(d=>({id:d.id, ...d.data()})));
+  } catch(e){ m.innerHTML=`<div class="card">${esc(errTxt(e))}</div>`; return; }
+  desenharResumo(meses);
+}
+function desenharResumo(meses){
+  if (!S.me || !location.hash.startsWith('#/projetos')) return;
+  const m=$('#main'), stf=isStaff(), v=PJ.rvend||'', vends=vendedoresProj(PJ.res.map(p=>p.vendedorUid));
+  const L=PJ.res.filter(p=>!stf || !v || (v==='__sem' ? !p.vendedorUid : p.vendedorUid===v));
+  const c=(M,f)=>{ const g=L.filter(p=>(!M||p.mes===M) && f(p)); return {n:g.length, rl:g.reduce((a,p)=>a+(+p.totRLMC||0),0)}; };
+  const pt=p=>!PJ_TRATADOS.includes(p.estado), tr=p=>PJ_TRATADOS.includes(p.estado), td=()=>true;
+  const cols=[...meses, null], mn=M=>{ const [y,mm]=M.split('-'); return ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+mm-1]+' '+y; };
+  const lin=(t,f,k,cls)=>`<tr${cls?` class="${cls}"`:''}><td>${t}</td>${cols.map(M=>{ const x=c(M,f); return `<td class="num"${M?'':' style="font-weight:700;background:#f9fafb"'}>${k==='n'?x.n:eur(x.rl)}</td>`; }).join('')}</tr>`;
+  const pct=`<tr class="tot"><td>% tratados</td>${cols.map(M=>{ const a=c(M,td).n, b=c(M,tr).n; return `<td class="num">${a?Math.round(b/a*100)+'%':'—'}</td>`; }).join('')}</tr>`;
+  m.innerHTML=`<div class="card">
+    <div class="row" style="margin-bottom:12px">
+      <div class="tabs" style="margin:0;border:0"><a data-pt="tratar">Para tratar</a><a data-pt="mapa">Mapa do mês</a><a data-pt="resumo" class="on">Resumo</a></div>
+      ${stf?`<select id="pj-rv" style="max-width:240px"><option value="">Todos os vendedores</option><option value="__sem" ${v==='__sem'?'selected':''}>Por atribuir</option>${vends.map(u=>`<option value="${u.uid}" ${v===u.uid?'selected':''}>${esc(u.nome)}</option>`).join('')}</select>`:''}
+    </div>
+    <p class="muted" style="margin:0 0 12px;font-size:12px">Projetos pelo mês do alerta, nos últimos 6 meses. <b>Por tratar</b> = Por tratar + Adiado (ainda sem decisão). <b>Tratados</b> = Em negociação + Ganho + Perdido. RLMC potencial em €.</p>
+    <div class="scroll"><table id="pj-res"><thead><tr><th></th>${cols.map(M=>`<th class="num">${M?mn(M):'Total'}</th>`).join('')}</tr></thead><tbody>
+      ${lin('<b>Por tratar</b> · Nº',pt,'n')}${lin('<b>Por tratar</b> · RLMC €',pt,'rl')}
+      ${lin('<b>Tratados</b> · Nº',tr,'n')}${lin('<b>Tratados</b> · RLMC €',tr,'rl')}
+      ${lin('<b>Total</b> · Nº',td,'n','tot')}${lin('<b>Total</b> · RLMC €',td,'rl','tot')}${pct}
+    </tbody></table></div></div>`;
+  m.querySelectorAll('[data-pt]').forEach(a=>a.onclick=()=>{ PJ.tab=a.dataset.pt; viewProjetos(); });
+  $('#pj-rv')?.addEventListener('change',e=>{ PJ.rvend=e.target.value; desenharResumo(meses); });
+}
 async function viewProjetos(){
   const m=$('#main'); PJ.mes=PJ.mes||mesLocal();
   m.innerHTML=`<div class="card muted">A carregar…</div>`;
   try {
+    if (PJ.tab==='resumo') return projResumo();
     if (PJ.tab==='tratar') PJ.lista=await projPendentes();
     else { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)]; PJ.lista=(await getDocs(query(collection(db,'projetos'), ...meu, where('mes','==',PJ.mes)))).docs.map(d=>({id:d.id, ...d.data()})); }
     if (isMaster()) PJ.cfg=(await getDoc(doc(db,'config','projetos'))).data()||{};
@@ -1964,7 +1997,7 @@ function desenharProjetos(){
   } else corpo=L.map(linha).join('');
   m.innerHTML=`<div class="card">
     <div class="row" style="margin-bottom:12px">
-      <div class="tabs" style="margin:0;border:0"><a data-pt="tratar" class="${tratar?'on':''}">Para tratar</a><a data-pt="mapa" class="${!tratar?'on':''}">Mapa do mês</a></div>
+      <div class="tabs" style="margin:0;border:0"><a data-pt="tratar" class="${tratar?'on':''}">Para tratar</a><a data-pt="mapa" class="${!tratar?'on':''}">Mapa do mês</a><a data-pt="resumo">Resumo</a></div>
       ${!tratar?`<input type="month" id="pj-m" value="${PJ.mes}" style="max-width:170px">`:''}
       ${stf?`<select id="pj-v" style="max-width:220px"><option value="">Todos os vendedores</option><option value="__sem" ${PJ.vend==='__sem'?'selected':''}>Por atribuir</option>${vends.map(v=>`<option value="${v.uid}" ${PJ.vend===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select>`:''}
       <span class="sp"></span>
