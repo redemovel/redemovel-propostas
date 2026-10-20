@@ -1947,8 +1947,8 @@ const vendPHCNome = v => { v=String(v||''); if(!v) return ''; const us=Object.va
 // quem altera fichas: BackOffice e Master, todas; o comercial, as da sua carteira; o Coordenador só consulta (igual à app Propostas)
 // vendedor temporário (cobre uma ausência): vê, edita e recebe os Projetos do cliente até à data indicada
 const tempAtivo = f => !!(f && f.vendedorTemp && (!f.vendedorTempAte || String(f.vendedorTempAte) >= hojeLocal()));
-const cliPodeEditar = f => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC && (String(f?.vendedor||'')===String(S.me.vendedorPHC) || (tempAtivo(f) && String(f.vendedorTemp)===String(S.me.vendedorPHC))));
-const cliPodeCriar = () => isBO() || (perfil()==='comercial' && !!S.me.vendedorPHC);
+const cliPodeEditar = f => isBO() || (['comercial','coordenador'].includes(perfil()) && !!S.me.vendedorPHC && (String(f?.vendedor||'')===String(S.me.vendedorPHC) || (tempAtivo(f) && String(f.vendedorTemp)===String(S.me.vendedorPHC))));
+const cliPodeCriar = () => isBO() || (['comercial','coordenador'].includes(perfil()) && !!S.me.vendedorPHC);
 const natGrupo = l => { const n=String(l.natureza||''); if(/m[óo]vel/i.test(n)) return 'Móvel'; if(/fix/i.test(n)) return 'Fixo';
   const c=S.prodMap[String(l.ref||'').toUpperCase()]?.categoria; return c==='Móvel'||c==='Fixo' ? c : 'Outros'; };
 const idxCli = f => ({ nome:f.nome||'', ncont:String(f.ncont||''), codpost:f.codpost||'', area:f.area||'', local:f.local||'', vendnm:f.vendnm||'', email:f.email||'', tel:[f.telefone,f.tlmvl].filter(Boolean).join(' ') });
@@ -1982,7 +1982,7 @@ function gravarFicha(f, isNew){
 
 function viewClientes(){
   const arg=decodeURIComponent((location.hash.split('/')[2]||'').trim());
-  if (arg==='novo') { if(!cliPodeCriar()) { location.hash='#/clientes'; return; } Object.assign(CL,{nif:null, tab:'ficha', f:{ncont:'', nome:'', vendedor:perfil()==='comercial'?String(S.me.vendedorPHC):''}, edit:true, novo:true, d:{}}); return desenharCliente(); }
+  if (arg==='novo') { if(!cliPodeCriar()) { location.hash='#/clientes'; return; } Object.assign(CL,{nif:null, tab:'ficha', f:{ncont:'', nome:'', vendedor:!isBO()?String(S.me.vendedorPHC):''}, edit:true, novo:true, d:{}}); return desenharCliente(); }
   if (arg) return cliAbrir(arg);
   return cliLista();
 }
