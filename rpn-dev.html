@@ -135,8 +135,8 @@ function proxCiclo(dia, de=new Date()){
 }
 window.__rpn = {proxCiclo};   // exposto só para os testes automáticos
 // esperas do lado da BO: o processo está implementado (ou pedido) e aguarda algo da Vodafone antes de seguir para conferência
-const ESPERAS = [['ciclo','Ciclo de faturação'],['instalacao','Instalação marcada'],['1229','Enviado 1229'],['1229os','1229 via OS'],['portabilidade','Portabilidade enviada'],['aprovacao','Aprovação Vodafone']];
-const ESPERA_TXT = Object.fromEntries(ESPERAS);
+const ESPERAS = [['erro','Operação em erro'],['instalacao','Instalação marcada'],['1229','Enviado 1229'],['1229os','1229 via OS'],['portabilidade','Portabilidade enviada'],['aprovacao','Aprovação Vodafone']];
+const ESPERA_TXT = Object.fromEntries([['ciclo','Ciclo de faturação'], ...ESPERAS]);
 // (versão anterior: estado 'A aguardar ciclo' com cicloData) → 'A aguardar' com motivo e data
 function normEspera(r){ if (r && r.estado==='A aguardar ciclo') { r.estado='A aguardar'; r.esperaMotivo='ciclo'; r.esperaData=r.esperaData||r.cicloData||''; } return r; }
 const diasDesde = iso => iso ? Math.max(0, Math.floor((new Date(hoje()) - new Date(String(iso).slice(0,10))) / 864e5)) : 0;
@@ -974,7 +974,7 @@ function tabPrincipal(tc, dis, p){
       ${isBO()?sel('Vendedor (comercial) *','vendedorUid',vendOpts,boDis):`<div><label>Vendedor</label><input value="${esc(r.vendedorNome)}" disabled></div>`}
       ${sel('Estado','estado',(ESTADOS_MAN.includes(r.estado)?ESTADOS_MAN:[r.estado,...ESTADOS_MAN]).map(e=>[e,estTxt(e)]),isBO()&&r.id&&!['Em Conferência','PN','Concluído'].includes(r.estado)?'':'disabled')}
       <div id="cx-esp" style="${r.estado==='A aguardar'?'':'display:none'};grid-column:span 2"><div class="grid g2" style="gap:10px">
-        <div><label>A aguardar o quê</label><select data-f="esperaMotivo" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${ESPERAS.map(([v,t])=>`<option value="${v}" ${r.esperaMotivo===v?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div><label>A aguardar o quê</label><select data-f="esperaMotivo" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${(r.esperaMotivo==='ciclo'?[['ciclo','Ciclo de faturação'],...ESPERAS]:ESPERAS).map(([v,t])=>`<option value="${v}" ${r.esperaMotivo===v?'selected':''}>${t}</option>`).join('')}</select></div>
         <div id="cx-ciclo" style="${r.esperaMotivo==='ciclo'?'':'display:none'}"><label>Ciclo${r.esperaMotivo==='ciclo'&&r.esperaData?` · fecha a ${fmtD(r.esperaData)}`:''}</label><select data-f="cicloDia" ${isBO()&&p.edit?'':'disabled'}><option value="">— escolher —</option>${CICLOS.map(([v,t])=>`<option value="${v}" ${r.cicloDia===v?'selected':''}>${t}</option>`).join('')}</select></div>
         <div id="cx-edata" style="${r.esperaMotivo&&r.esperaMotivo!=='ciclo'?'':'display:none'}"><label id="lb-edata">${r.esperaMotivo==='instalacao'?'Data da instalação':'Voltar a verificar em (opcional)'}</label><input type="date" data-f="esperaData" value="${esc(r.esperaMotivo!=='ciclo'?(r.esperaData||''):'')}" ${isBO()&&p.edit?'':'disabled'}></div>
       </div></div>
