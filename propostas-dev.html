@@ -2390,7 +2390,7 @@ function abrirProjetoParam(){
   const selCom=document.getElementById('sc');
   for(let i=0;i<selCom.options.length;i++){if(selCom.options[i].value===p.comercial){selCom.selectedIndex=i;break;}}
   fillCom();
-  setTipo('refid');
+  setTipo(p.tipo||'refid');
   document.getElementById('cn').value=p.cliente||'';
   document.getElementById('cli-search').value=p.cliente||'';
   document.getElementById('cnif').value=p.nif||'';

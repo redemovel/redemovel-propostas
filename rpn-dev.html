@@ -1848,6 +1848,55 @@ async function tempExpirados(){
     for (const d of sn.docs) await updateDoc(d.ref,{vendedorTemp:'', vendedorTempNome:'', vendedorTempAte:''});
     try { localStorage.setItem(k,'1'); } catch(_){} } catch(e){ console.warn('vendedor temporário', e); }
 }
+const GAP_JANELA = 7;   // dias: PN do mesmo cliente feitos dentro desta janela ficam no mesmo Projeto
+const somaDias = (d,n) => { const x=new Date(d+'T12:00:00'); x.setDate(x.getDate()+n); return mesLocal(x)+'-'+String(x.getDate()).padStart(2,'0'); };
+const anoAntes = d => (+d.slice(0,4)-1)+d.slice(4);   // texto: 29/02 de um ano não bissexto não existe e serve só de limite
+const projGap = p => p.origem==='gap';
+// um dia T: PN com data de PN entre «T há 1 ano» e «T+1 há 1 ano» (o 29/02 entra a 28/02)
+async function gerarGapDia(T){
+  const a=anoAntes(T), b=anoAntes(somaDias(T,1));
+  const sn=await getDocs(query(collection(db,'rpn'), where('fechadoEm','>=',a), where('fechadoEm','<',b)));
+  const cand={}; sn.forEach(d=>{ const r=d.data(); if(!['PN','Concluído'].includes(r.estado)) return; const nif=String(r.cliente?.nif||'').trim(); if(!nif) return; (cand[nif]=cand[nif]||[]).push({id:d.id, r}); });
+  const porVend={}; Object.entries(S.users).forEach(([uid,u])=>{ if(u.vendedorPHC && u.ativo!==false) porVend[String(u.vendedorPHC)]=uid; });
+  const res={dia:T, clientes:Object.keys(cand).length, criados:0, juntos:0, renov:0, semLinhas:0};
+  for (const nif of Object.keys(cand)) {
+    const [todos, ficha, pjs] = await Promise.all([getDocs(query(collection(db,'rpn'), where('cliente.nif','==',nif))), getDoc(doc(db,'clientesFicha',nif)), getDocs(query(collection(db,'projetos'), where('nif','==',nif)))]);
+    const outros=todos.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>!['Cancelado','Reprovado'].includes(x.estado)), P=pjs.docs.map(d=>({id:d.id, ...d.data()}));
+    const linhas=[];
+    cand[nif].forEach(({id,r})=>{ const dPN=dataPN(r), dia=+dPN.slice(8,10)||1, mPN=r.mesRef||dPN.slice(0,7);
+      (r.linhas||[]).forEach((l,i)=>{ const ms=normMsisdn(l.msisdn), temMs=ms.length>=9, Pz=+l.prazo||24;
+        // número já renegociado depois deste PN, ou com um RPN em curso → não entra
+        if (temMs && outros.some(x=>x.id!==id && (!FECHADOS.includes(x.estado) || dataPN(x)>dPN) && (x.msisdns||listaMsisdn(x.linhas)).includes(ms))) return;
+        linhas.push({ref:l.ref||'', designacao:l.designacao||'', msisdn:l.msisdn||'', natureza:l.natureza||'', rlmc:+l.rlmc||0, prazo:Pz, tier:l.tier||'', score:scoreLinha(l,r), bRef:l.bRef||'', bGid:l.bGid||'',
+          pnId:id, pnNumero:r.numero||'', pnData:dPN, alerta:T, fim:diaNoMes(somaMeses(mPN,Pz),dia), confirmar:!temMs, k:id+'#'+i}); }); });
+    if (!linhas.length) { res.semLinhas++; continue; }
+    const tot=L=>({nLinhas:L.length, totRLMC:Math.round(L.reduce((a,l)=>a+l.rlmc,0)*100)/100, totScore:Math.round(L.reduce((a,l)=>a+(+l.score||0),0)*1000)/1000});
+    const pnsTxt=[...new Set(linhas.map(l=>l.pnNumero))].join(', ');
+    // já há um Projeto de renovação em aberto para o cliente: não se cria outro, fica assinalada a oportunidade nesse Projeto
+    const renov=P.find(x=>!x.origem && ['Por tratar','Em negociação','Adiado'].includes(x.estado));
+    if (renov) { await setDoc(doc(db,'projetos',renov.id),{gap:{em:T, pns:pnsTxt, nLinhas:linhas.length}},{merge:true}); res.renov++; continue; }
+    // Projeto Promo GAP do mesmo cliente começado há menos de 7 dias e ainda sem proposta: as linhas juntam-se a esse
+    const jun=P.find(x=>projGap(x) && x.estado==='Por tratar' && !x.propostaId && (x.alertaOriginal||x.alertaEm||'')>=somaDias(T,-(GAP_JANELA-1)));
+    if (jun) { const ks=new Set((jun.linhas||[]).map(l=>l.k)), L=[...(jun.linhas||[]), ...linhas.filter(l=>!ks.has(l.k))];
+      if (L.length>(jun.linhas||[]).length) { await updateDoc(doc(db,'projetos',jun.id),{linhas:L, ...tot(L), fimEm:L.map(l=>l.fim).sort()[0], atualizadoEm:serverTimestamp()}); res.juntos++; } continue; }
+    const f=ficha.exists()?ficha.data():null, cod=String(tempAtivo(f)&&porVend[String(f.vendedorTemp)] ? f.vendedorTemp : (f?.vendedor||'')), uid=porVend[cod]||null;
+    await setDoc(doc(db,'projetos','gap_'+nif+'_'+T),{nif, clienteNome:f?.nome||cand[nif][0].r.cliente?.nome||'', origem:'gap', mes:T.slice(0,7), alertaEm:T, alertaOriginal:T, fimEm:linhas.map(l=>l.fim).sort()[0],
+      vendedorUid:uid, vendedorNome:uid?S.users[uid].nome:'', vendedorPHC:cod, linhas, ...tot(linhas),
+      estado:'Por tratar', propostaId:'', motivoPerda:'', criadoEm:serverTimestamp(), criadoPor:S.me.uid});
+    res.criados++;
+  }
+  return res;
+}
+// corre na primeira entrada da staff em cada dia; os dias em que ninguém entrou são apanhados a seguir (no máximo 31 para trás)
+async function gerarGap(){
+  const hj=hojeLocal(), ref=doc(db,'config','projetos');
+  let de=null;
+  await runTransaction(db, async tx=>{ const c=(await tx.get(ref)).data()||{}, ate=c.gapAte||''; if (ate>=hj) return;
+    de = ate ? somaDias(ate,1) : hj; if (de<somaDias(hj,-31)) de=somaDias(hj,-31); tx.set(ref,{gapAte:hj, gapPor:S.me.nome, gapEm:new Date().toISOString()},{merge:true}); });
+  if (!de) return; let n=0, r=0;
+  for (let T=de; T<=hj; T=somaDias(T,1)) { try { const x=await gerarGapDia(T); n+=x.criados+x.juntos; r+=x.renov; } catch(e){ console.warn('Promo GAP',T,e); } }
+  if (n||r) toast(`Promo GAP: ${n} Projeto(s) de upgrade${r?` · ${r} cliente(s) já em renovação (assinalados)`:''}.`);
+}
 async function projetosAoEntrar(){
   setTimeout(()=>tempExpirados(), 6000);
   setTimeout(()=>cartSemanal(), 20000);
@@ -1856,6 +1905,7 @@ async function projetosAoEntrar(){
       const cur=mesLocal(), alvo=[cur]; if (new Date().getDate()>=28) alvo.push(somaMeses(cur,1));
       const g=(await getDoc(doc(db,'config','projetos'))).data()?.gerados||{};
       for (const M of alvo) if (!g[M]) { const x=await gerarProjetos(M); if (x.criados) toast(`Projetos de ${M.split('-').reverse().join('/')}: ${x.criados} criados para a equipa.`); }
+      await gerarGap().catch(e=>console.warn('Promo GAP',e));
     } else {
       const L=await projPendentes(), mudou=contarProj(L), livre=!S.dirty && !location.hash.startsWith('#/rpn/') && !location.hash.startsWith('#/novo');
       if (mudou && livre) render();
@@ -1865,11 +1915,11 @@ async function projetosAoEntrar(){
       const ontem=(()=>{ const d=new Date(hj+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
       const desde=ult||ontem, soHoje=desde>=ontem;
       const novos=ult===hj?[]:L.filter(p=>!projAtrasado(p) && (p.alertaEm||'')>desde && (p.alertaEm||'')<=hj).sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||''));
-      const tb=(id,ps,atraso)=>`<div class="scroll" style="max-height:${atraso&&novos.length?180:300}px"><table id="${id}"><thead><tr><th>Alerta</th><th>Cliente</th><th class="num">Linhas</th><th class="num">${atraso?'Há':'RLMC €'}</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b></td><td class="num">${p.nLinhas||0}</td><td class="num">${atraso?diasAtraso(p.alertaEm)+' dias':eur(p.totRLMC)}</td></tr>`).join('')}</tbody></table></div>`;
+      const tb=(id,ps,atraso)=>`<div class="scroll" style="max-height:${atraso&&novos.length?180:300}px"><table id="${id}"><thead><tr><th>Alerta</th><th>Cliente</th><th class="num">Linhas</th><th class="num">${atraso?'Há':'RLMC €'}</th></tr></thead><tbody>${ps.map(p=>`<tr><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b>${projGap(p)?' <span style="font-size:11px;color:#1d4ed8;font-weight:600">⬆ Promo GAP</span>':''}${p.gap?' <span style="font-size:11px;color:#1d4ed8;font-weight:600">+ ⬆ GAP</span>':''}</td><td class="num">${p.nLinhas||0}</td><td class="num">${atraso?diasAtraso(p.alertaEm)+' dias':eur(p.totRLMC)}</td></tr>`).join('')}</tbody></table></div>`;
       const mostrar=()=>{ modal(`${atr.length?`<h2 style="color:var(--red-d)">Tem ${atr.length} Projeto(s) em atraso</h2>
         <p class="muted" style="margin-top:0">São de meses anteriores e ainda não têm decisão. Cada um tem de ficar com proposta criada, adiado (com nova data) ou perdido (com motivo).</p>${tb('pj-av-t',atr,true)}`:''}
         ${novos.length?`<h2 id="pj-hj-h" style="${atr.length?'margin-top:16px':''}">${soHoje?`Hoje chegam à data ${novos.length} Projeto(s)`:`Chegaram à data ${novos.length} Projeto(s) desde ${fmtD(desde)}`}</h2>
-        <p class="muted" style="margin-top:0">Faltam 6 meses para o fim da fidelização destes clientes. Já estão na lista «Para tratar».</p>${tb('pj-hj-t',novos,false)}`:''}
+        <p class="muted" style="margin-top:0">${novos.some(projGap)?'<b style="color:#1d4ed8">⬆ Promo GAP</b>: faz 1 ano do negócio — proponha ao cliente o upgrade. ':''}${novos.some(p=>!projGap(p))?'Os restantes: faltam 6 meses para o fim da fidelização. ':''}Já estão na lista «Para tratar».</p>${tb('pj-hj-t',novos,false)}`:''}
         <div class="row" style="margin-top:14px"><span class="sp"></span><button class="btn" id="c">Fechar</button><button class="btn pri" id="ok">Ver os Projetos</button></div>`, (m,close)=>{
           m.querySelector('#c').onclick=close; m.querySelector('#ok').onclick=()=>{ close(); PJ.tab='tratar'; location.hash='#/projetos'; }; });
         try{ localStorage.setItem(kd,hj); }catch(e){} };
@@ -1904,7 +1954,7 @@ function desenharProjetos(){
   if (stf) PJ.lista.forEach(p=>{ if (tratar && !projParaHoje(p)) return; const k=p.vendedorUid||'__sem', o=porV[k]=porV[k]||{nome:p.vendedorNome||'Por atribuir',n:0,rl:0,sc:0,tr:0,ga:0,at:0,dias:0,mes:0};
     o.n++; o.rl+=+p.totRLMC||0; o.sc+=+p.totScore||0; if(p.estado!=='Por tratar') o.tr++; if(p.estado==='Ganho') o.ga++;
     if (projAtrasado(p)) { o.at++; o.dias=Math.max(o.dias, diasAtraso(p.alertaEm)); } else o.mes++; });
-  const linha = p => `<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}${(p.alertaEm||'')>h?' <span class="muted" style="font-size:11px">· ainda não</span>':''}${tratar&&projAtrasado(p)?` <span style="font-size:11px;color:var(--red-d);font-weight:600">· há ${diasAtraso(p.alertaEm)} dias</span>`:''}</td><td><b>${esc(p.clienteNome)}</b></td><td>${esc(p.nif)}</td>${stf?`<td>${p.vendedorUid?esc(p.vendedorNome):'<span style="color:var(--red-d)">por atribuir</span>'}</td>`:''}<td class="num">${p.nLinhas||0}${(p.linhas||[]).some(l=>l.confirmar)?' <span title="Há linhas sem MSISDN: confirmar se ainda estão ativas" style="color:#b45309">⚠</span>':''}</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${(p.adiamentos||[]).length?` <span class="muted" style="font-size:11px">adiado ${p.adiamentos.length}×</span>`:''}${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}${p.rpnNumero?` <span class="muted" style="font-size:11px">RPN ${esc(p.rpnNumero)}</span>`:''}${p.origem==='manual'?` <span class="muted" style="font-size:11px" title="Criado à mão${p.criadoPorNome?' por '+esc(p.criadoPorNome):''}">✎ manual</span>`:''}</td></tr>`;
+  const linha = p => `<tr class="click" data-pj="${esc(p.id)}"><td>${fmtD(p.alertaEm)}${(p.alertaEm||'')>h?' <span class="muted" style="font-size:11px">· ainda não</span>':''}${tratar&&projAtrasado(p)?` <span style="font-size:11px;color:var(--red-d);font-weight:600">· há ${diasAtraso(p.alertaEm)} dias</span>`:''}</td><td><b>${esc(p.clienteNome)}</b></td><td>${esc(p.nif)}</td>${stf?`<td>${p.vendedorUid?esc(p.vendedorNome):'<span style="color:var(--red-d)">por atribuir</span>'}</td>`:''}<td class="num">${p.nLinhas||0}${(p.linhas||[]).some(l=>l.confirmar)?' <span title="Há linhas sem MSISDN: confirmar se ainda estão ativas" style="color:#b45309">⚠</span>':''}</td><td class="num">${eur(p.totRLMC)}</td><td class="num">${n3(p.totScore)}</td><td>${fmtD(p.fimEm)}</td><td><span class="badge pj-${PROJ_ESTADOS.indexOf(p.estado)}">${esc(p.estado)}</span>${(p.adiamentos||[]).length?` <span class="muted" style="font-size:11px">adiado ${p.adiamentos.length}×</span>`:''}${p.propostaId?` <span class="muted" style="font-size:11px">${esc(p.propostaId)}</span>`:''}${p.rpnNumero?` <span class="muted" style="font-size:11px">RPN ${esc(p.rpnNumero)}</span>`:''}${p.origem==='manual'?` <span class="muted" style="font-size:11px" title="Criado à mão${p.criadoPorNome?' por '+esc(p.criadoPorNome):''}">✎ manual</span>`:''}${projGap(p)?` <span style="font-size:11px;color:#1d4ed8;font-weight:600" title="Faz 1 ano do negócio: propor o upgrade Promo GAP">⬆ Promo GAP</span>`:''}${p.gap?` <span style="font-size:11px;color:#1d4ed8;font-weight:600" title="Também elegível para Promo GAP (1 ano dos PN ${esc(p.gap.pns||'')})">+ ⬆ GAP</span>`:''}</td></tr>`;
   const cols = stf?9:8, sep = (t,cor) => `<tr class="pj-sep"><td colspan="${cols}" style="background:${cor};font-weight:700;font-size:12px">${t}</td></tr>`;
   let corpo='';
   if (tratar) {   // em atraso (por mês, do mais antigo para o mais recente) e depois o mês corrente
@@ -2036,7 +2086,7 @@ function projParaProposta(p){
     const ref=l.bRef||l.ref, pr=S.prodMap[String(ref).toUpperCase()];
     const irm=l.bGid?(p.linhas||[]).filter(x=>x.bGid===l.bGid):[l];
     ls.push({ref, des:pr?.designacao||l.designacao||'', msisdn:normMsisdn(irm.map(x=>x.msisdn).find(Boolean)||''), prazo:l.prazo, desc:!!(pr?(pr.descontinuado||pr.inativo):true)}); });
-  const d={id:p.id, cliente:p.clienteNome, nif:p.nif, comercial:p.vendedorNome||'', linhas:ls};
+  const d={id:p.id, cliente:p.clienteNome, nif:p.nif, comercial:p.vendedorNome||'', linhas:ls, ...(projGap(p)?{tipo:'upgrade'}:{})};
   return btoa(unescape(encodeURIComponent(JSON.stringify(d)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 function abrirProjeto(p, apos){
@@ -2048,6 +2098,8 @@ function abrirProjeto(p, apos){
     <p class="muted" style="margin-top:0">NIF ${esc(p.nif)} · vendedor: <b>${p.vendedorUid?esc(p.vendedorNome):'por atribuir'}</b> · alerta ${fmtD(p.alertaEm)}${p.fimEm?` · primeiro fim de contrato ${fmtD(p.fimEm)}`:''}${p.propostaId?` · proposta <b>${esc(p.propostaId)}</b>`:''}${p.motivoPerda?`<br>Motivo: ${esc(p.motivoPerda)}`:''}</p>
     <div id="pj-ct" style="margin:-4px 0 10px;font-size:13px;line-height:1.6">${p.contactoEmail||p.contactoTel?`✉ ${esc(p.contactoEmail||'—')} · ☎ ${esc(p.contactoTel||'—')}`:''}</div>
     ${(p.adiamentos||[]).length?`<div class="warnbox" id="pj-ad-h" style="background:#f5f3ff;border-color:#ddd6fe"><b>Adiado ${p.adiamentos.length}×</b> (alerta original ${fmtD(orig)})${p.adiamentos.map(a=>`<br>${fmtD(String(a.em).slice(0,10))} · ${esc(a.porNome)}: ${fmtD(a.de)} → <b>${fmtD(a.para)}</b> — ${esc(a.motivo)}`).join('')}</div>`:''}
+    ${projGap(p)?`<div class="warnbox" style="background:#eff6ff;border-color:#bfdbfe"><b>⬆ Upgrade · Promo GAP</b> — faz 1 ano dos negócios abaixo (PN ${esc([...new Set((p.linhas||[]).map(l=>l.pnNumero))].join(', '))}). Proponha ao cliente o upgrade do tarifário: mais por um pouco mais de mensalidade. «Criar proposta» abre já como Upgrade.</div>`:''}
+    ${p.gap?`<div class="warnbox" style="background:#eff6ff;border-color:#bfdbfe"><b>⬆ Também elegível para Promo GAP</b> — a ${fmtD(p.gap.em)} fez 1 ano dos PN ${esc(p.gap.pns||'')} (${p.gap.nLinhas||0} linha(s)). Aproveite esta renegociação para propor o upgrade.</div>`:''}
     ${p.origem==='manual'?`<div class="warnbox" style="background:#f0f7ff;border-color:#cfe3ff"><b>Projeto criado à mão</b>${p.criadoPorNome?` por ${esc(p.criadoPorNome)}`:''}${p.natureza?` · ${esc(p.natureza)}`:''}${p.totRLMC?` · RLMC potencial ${eur(p.totRLMC)} €`:''}<br>${esc(p.descricao||'')}</div>`:''}
     ${p.rpnId?`<p style="margin:6px 0">Ligado ao ${stf||meu?`<a href="#/rpn/${esc(p.rpnId)}" data-pn><b>RPN ${esc(p.rpnNumero||'')}</b></a>`:`<b>RPN ${esc(p.rpnNumero||'')}</b>`}</p>`:''}
     ${(p.linhas||[]).length?'':'<!--sem-linhas-->'}<div class="scroll" style="max-height:320px;${(p.linhas||[]).length?'':'display:none'}"><table id="pj-l"><thead><tr><th>Referência</th><th>Designação</th><th>MSISDN</th><th class="num">Prazo</th><th class="num">RLMC €</th><th class="num">Score</th><th>Fim do contrato</th><th>PN de origem</th></tr></thead>
