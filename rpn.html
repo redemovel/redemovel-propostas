@@ -2963,12 +2963,15 @@ async function viewProducao(){
         try{ await setDoc(doc(db,'config','producaoBO'),{pesos:{impl:v('#pi'),conf:v('#pc'),canc:v('#px'),pen:v('#pp'),ativ:v('#pa')}, bolo:{[PROD_MES]:v('#pb')}, boloPadrao:v('#pb'), atualizadoEm:serverTimestamp()},{merge:true}); toast('Guardado.'); viewProducao(); }catch(e){ toast(errTxt(e),true); } };
       $('#tr-ok')?.addEventListener('click', async()=>{ const t=$('#tr-t').value, de=$('#tr-de').value, pa=$('#tr-pa').value; if(!de) return toast('Não há produção para passar.',true); if(de===pa) return toast('Escolha outra pessoa em «Para».',true);
         try { const fa=(await getDoc(doc(db,'config','producao'))).data()?.fechadoAte||''; if (fa && PROD_MES<=fa) return toast(`O mês ${fmtD(PROD_MES)} já está fechado (RUN finalizado).`,true); } catch(_){}
-        const conf=t==='lc', alvo=fechados.filter(r=>r.estado==='PN' && (conf ? r.conferidoPorUid===de : (r.implPorUid||r.boUid)===de)), ok=alvo.filter(r=>conf ? (r.implPorUid||r.boUid)!==pa : r.conferidoPorUid!==pa);
-        if (!ok.length) return toast(alvo.length?'Em todos esses PN a BO de destino fez a outra parte.':'Não há nada para passar.',true);
+        const conf=t==='lc', alvo=fechados.filter(r=>r.estado==='PN' && (conf ? r.conferidoPorUid===de : (r.implPorUid||r.boUid)===de)), mesma=r=>conf ? (r.implPorUid||r.boUid)===pa : r.conferidoPorUid===pa;
+        if (!alvo.length) return toast('Não há nada para passar.',true);
+        let ok=alvo.filter(r=>!mesma(r)); const nm=alvo.length-ok.length;
+        if (nm && confirm(`Exceção: em ${nm} PN foi ${userNome(pa)} quem ${conf?'implementou':'conferiu'}. Normalmente a mesma BO não faz as duas partes.\n\nQuer atribuir-lhe também ${conf?'a conferência':'a implementação'} desses PN, a título excecional?`)) ok=alvo;
+        if (!ok.length) return;
         const nl=ok.reduce((a,r)=>a+(r.nLinhas||0),0), nde=userNome(de), npa=userNome(pa);
-        if (!confirm(`Passar ${conf?'a conferência':'a implementação'} de ${ok.length} PN (${nl} linhas) de ${nde} para ${npa}?${alvo.length>ok.length?`\n\n${alvo.length-ok.length} PN ficam como estão (${npa} fez a outra parte).`:''}`)) return;
+        if (!confirm(`Passar ${conf?'a conferência':'a implementação'} de ${ok.length} PN (${nl} linhas) de ${nde} para ${npa}?${alvo.length>ok.length?`\n\n${alvo.length-ok.length} PN ficam como estão (${npa} fez a outra parte).`:''}${nm&&ok===alvo?`\n\nInclui ${nm} PN por exceção (${npa} fez as duas partes).`:''}`)) return;
         try { for (const r of ok) { await updateDoc(doc(db,'rpn',r.id), conf ? {conferidoPorUid:pa, conferidoPorNome:npa, confUid:pa, confNome:npa} : {implPorUid:pa, implPorNome:npa});
-            await hist('Produção corrigida', `${conf?'Conferência':'Implementação'}: ${nde} → ${npa} (Produção BO, por ${S.me.nome})`, r.id); }
+            await hist('Produção corrigida', `${conf?'Conferência':'Implementação'}: ${nde} → ${npa} (Produção BO, por ${S.me.nome})${mesma(r)?' · exceção: a mesma BO fez as duas partes':''}`, r.id); }
           toast(`${ok.length} PN passados para ${npa}.`); viewProducao(); } catch(e){ toast(errTxt(e),true); } });
       document.querySelectorAll('[data-anl]').forEach(b=>b.onclick=async()=>{ const anular=b.dataset.v==='1';
         if(!confirm(anular?'Anular a penalização desta devolução?':'Repor a penalização desta devolução?')) return;
