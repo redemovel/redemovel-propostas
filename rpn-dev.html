@@ -2001,6 +2001,7 @@ function desenharProjetos(){
       ${!tratar?`<input type="month" id="pj-m" value="${PJ.mes}" style="max-width:170px">`:''}
       ${stf?`<select id="pj-v" style="max-width:220px"><option value="">Todos os vendedores</option><option value="__sem" ${PJ.vend==='__sem'?'selected':''}>Por atribuir</option>${vends.map(v=>`<option value="${v.uid}" ${PJ.vend===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select>`:''}
       <span class="sp"></span>
+      ${stf?`<button class="btn" id="pj-sa" title="Projetos em aberto sem vendedor, de qualquer mês">Por atribuir (todos os meses)</button>`:''}
       <button class="btn pri" id="pj-new" title="Projeto criado à mão: um cliente visitado (ou novo) com um potencial negócio a seguir no futuro">+ Novo Projeto</button>
       ${stf&&!tratar?`<button class="btn" id="pj-g" title="Procura os PN que chegam aos 6 meses do fim do contrato neste mês. Não duplica os que já existem.">Gerar Projetos de ${PJ.mes.split('-').reverse().join('/')}</button>`:''}
     </div>
@@ -2022,6 +2023,13 @@ function desenharProjetos(){
   const pm=$('#pj-m'); if(pm) pm.onchange=()=>{ if(pm.value){ PJ.mes=pm.value; viewProjetos(); } };
   const pv=$('#pj-v'); if(pv) pv.onchange=()=>{ PJ.vend=pv.value; desenharProjetos(); };
   const pnw=$('#pj-new'); if(pnw) pnw.onclick=()=>novoProjeto();
+  $('#pj-sa')?.addEventListener('click', async()=>{ try {
+      const L=(await getDocs(query(collection(db,'projetos'), where('vendedorUid','==',null)))).docs.map(d=>({id:d.id, ...d.data()})).filter(p=>!['Ganho','Perdido'].includes(p.estado)).sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||''));
+      modal(`<h2>Projetos por atribuir (${L.length})</h2><p class="muted" style="margin-top:0">Em aberto e sem vendedor, de todos os meses. Clique num para o abrir e atribuir.</p>
+        <div class="scroll" style="max-height:420px"><table><thead><tr><th>Alerta</th><th>Cliente</th><th>NIF</th><th>Origem</th><th class="num">Linhas</th><th class="num">RLMC €</th></tr></thead><tbody>${L.map(p=>`<tr class="click" data-sa="${esc(p.id)}"><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b></td><td>${esc(p.nif)}</td><td>${p.origem==='phc'?`PHC · ${esc(p.vendedorNome||'')}`:p.origem==='gap'?'Promo GAP':p.origem==='manual'?'manual':'renovação'}</td><td class="num">${p.nLinhas||0}</td><td class="num">${eur(p.totRLMC)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Não há Projetos por atribuir.</td></tr>'}</tbody></table></div>
+        <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{ m.querySelector('#c').onclick=close;
+        m.querySelectorAll('[data-sa]').forEach(t=>t.onclick=()=>{ close(); abrirProjeto(L.find(p=>p.id===t.dataset.sa)); }); });
+    } catch(e){ toast(errTxt(e),true); } });
   const pg=$('#pj-g'); if(pg) pg.onclick=async()=>{ if(!confirm(`Gerar os Projetos de ${PJ.mes.split('-').reverse().join('/')}?\n\nProcura os PN que chegam aos 6 meses do fim do contrato nesse mês. Os Projetos que já existem não são alterados.`)) return; pg.disabled=true; pg.textContent='A gerar…';
     try{ const x=await gerarProjetos(PJ.mes); toast(`${x.criados} Projeto(s) criados (${x.linhas} linhas) · ${x.jaHavia} já existiam · ${x.tiradas} linha(s) já renegociadas ou em curso · ${x.semVendedor} por atribuir.`); viewProjetos(); }catch(e){ toast(errTxt(e),true); pg.disabled=false; } };
   const bc=$('#pj-bc'); if(bc) bc.onclick=e=>{ e.preventDefault(); desenharProjetos(); };
