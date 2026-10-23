@@ -2001,6 +2001,7 @@ function desenharProjetos(){
       ${!tratar?`<input type="month" id="pj-m" value="${PJ.mes}" style="max-width:170px">`:''}
       ${stf?`<select id="pj-v" style="max-width:220px"><option value="">Todos os vendedores</option><option value="__sem" ${PJ.vend==='__sem'?'selected':''}>Por atribuir</option>${vends.map(v=>`<option value="${v.uid}" ${PJ.vend===v.uid?'selected':''}>${esc(v.nome)}</option>`).join('')}</select>`:''}
       <span class="sp"></span>
+      <input id="pj-q" type="search" autocomplete="off" placeholder="Nº PHC ou NIF + Enter" style="max-width:190px" title="Procura um Projeto pelo nº do PHC (ex.: 26833) ou todos os Projetos de um NIF">
       ${stf?`<button class="btn" id="pj-sa" title="Projetos em aberto sem vendedor, de qualquer mês">Por atribuir (todos os meses)</button>`:''}
       <button class="btn pri" id="pj-new" title="Projeto criado à mão: um cliente visitado (ou novo) com um potencial negócio a seguir no futuro">+ Novo Projeto</button>
       ${stf&&!tratar?`<button class="btn" id="pj-g" title="Procura os PN que chegam aos 6 meses do fim do contrato neste mês. Não duplica os que já existem.">Gerar Projetos de ${PJ.mes.split('-').reverse().join('/')}</button>`:''}
@@ -2023,6 +2024,17 @@ function desenharProjetos(){
   const pm=$('#pj-m'); if(pm) pm.onchange=()=>{ if(pm.value){ PJ.mes=pm.value; viewProjetos(); } };
   const pv=$('#pj-v'); if(pv) pv.onchange=()=>{ PJ.vend=pv.value; desenharProjetos(); };
   const pnw=$('#pj-new'); if(pnw) pnw.onclick=()=>novoProjeto();
+  $('#pj-q')?.addEventListener('keydown', async e=>{ if (e.key!=='Enter') return; const v=e.target.value.replace(/\s/g,''); if(!v) return;
+    try { let L=[];
+      if (/^\d{1,7}$/.test(v)) { const d=await getDoc(doc(db,'projetos','phc_'+v)); if (d.exists()) L=[{id:d.id, ...d.data()}]; }
+      if (!L.length) { const meu=isStaff()?[]:[where('vendedorUid','==',S.me.uid)]; L=(await getDocs(query(collection(db,'projetos'), ...meu, where('nif','==',v)))).docs.map(d=>({id:d.id, ...d.data()})); }
+      if (!L.length) return toast('Não encontrei nenhum Projeto com esse nº do PHC ou NIF.',true);
+      if (L.length===1) return abrirProjeto(L[0]);
+      L.sort((a,b)=>(b.alertaEm||'').localeCompare(a.alertaEm||''));
+      modal(`<h2>Projetos do NIF ${esc(v)} (${L.length})</h2><div class="scroll" style="max-height:420px"><table><thead><tr><th>Alerta</th><th>Cliente</th><th>Origem</th><th>Vendedor</th><th>Estado</th><th class="num">RLMC €</th></tr></thead><tbody>${L.map(p=>`<tr class="click" data-pq="${esc(p.id)}"><td>${fmtD(p.alertaEm)}</td><td><b>${esc(p.clienteNome)}</b></td><td>${p.origem==='phc'?'PHC nº '+esc(String(p.phcObrano||'')):p.origem==='gap'?'Promo GAP':p.origem==='manual'?'manual':'renovação'}</td><td>${p.vendedorUid?esc(p.vendedorNome):'<span style="color:var(--red-d)">por atribuir</span>'}</td><td>${esc(p.estado)}</td><td class="num">${eur(p.totRLMC)}</td></tr>`).join('')}</tbody></table></div>
+        <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{ m.querySelector('#c').onclick=close;
+        m.querySelectorAll('[data-pq]').forEach(t=>t.onclick=()=>{ close(); abrirProjeto(L.find(p=>p.id===t.dataset.pq)); }); });
+    } catch(err){ toast(errTxt(err),true); } });
   $('#pj-sa')?.addEventListener('click', async()=>{ try {
       const L=(await getDocs(query(collection(db,'projetos'), where('vendedorUid','==',null)))).docs.map(d=>({id:d.id, ...d.data()})).filter(p=>!['Ganho','Perdido'].includes(p.estado)).sort((a,b)=>(a.alertaEm||'').localeCompare(b.alertaEm||''));
       modal(`<h2>Projetos por atribuir (${L.length})</h2><p class="muted" style="margin-top:0">Em aberto e sem vendedor, de todos os meses. Clique num para o abrir e atribuir.</p>
