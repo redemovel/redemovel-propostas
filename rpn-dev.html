@@ -4881,11 +4881,11 @@ const PJ_PHC_SQL = `-- Redemóvel · exportação dos Projetos do PHC (dossier 1
 USE ARPURO;
 SELECT bo.obrano, CONVERT(char(10),bo.dataobra,23) AS alerta, bo.no AS ncliente, RTRIM(bo.nome) AS nome, RTRIM(bo.ncont) AS nif,
        bo.vendedor, RTRIM(bo.vendnm) AS vendnm, RTRIM(bo.obranome) AS tipo, RTRIM(bo.trab5) AS probabilidade, RTRIM(bo.segmento) AS prazo_txt,
-       RTRIM(bo.cobranca) AS contacto, RTRIM(bo.ean) AS telefone, RTRIM(bo.dprocesso) AS email,
-       CONVERT(char(10),bo.xpddata,23) AS fim_contrato, bo.fechada, REPLACE(REPLACE(REPLACE(CAST(bo.obs AS varchar(2000)),CHAR(13),' '),CHAR(10),' '),CHAR(9),' ') AS obs,
+       RTRIM(bo.cobranca) AS contacto, RTRIM(bo.ean) AS telefone, RTRIM(bo2.dprocesso) AS email,
+       CONVERT(char(10),bo2.xpddata,23) AS fim_contrato, bo.fechada, REPLACE(REPLACE(REPLACE(CAST(bo.obs AS varchar(2000)),CHAR(13),' '),CHAR(10),' '),CHAR(9),' ') AS obs,
        RTRIM(bi.ref) AS ref, RTRIM(bi.design) AS design, RTRIM(bi.bifref) AS msisdn, bi.u_qtt AS rlmc, bi.qtt AS score,
        RTRIM(bi.u_natureza) AS natureza, bi.u_pzperm AS prazo, RTRIM(bi.lobs2) AS conta, RTRIM(bi.usr5) AS tipo_servico
-FROM bo JOIN bi ON bi.bostamp = bo.bostamp
+FROM bo JOIN bi ON bi.bostamp = bo.bostamp LEFT JOIN bo2 ON bo2.bo2stamp = bo.bostamp
 WHERE bo.ndos = 110 AND bo.fechada = 0 AND bo.dataobra > '20261030' AND bo.dataobra < '20300101'
 ORDER BY bo.dataobra, bo.obrano, bi.lordem;`;
 function pjPhcParse(txt){
