@@ -3405,7 +3405,7 @@ function drawComissao(podeEscolher, vends){
       .cm-hero{display:grid;grid-template-columns:1.25fr 1fr;gap:20px}@media(max-width:820px){.cm-hero,.cm-two{grid-template-columns:1fr!important}}
       .cm-pan{font-size:13.5px}.cm-pan .card{padding:14px 16px;margin-bottom:12px}.cm-pan h2{font-size:15.5px}.cm-pan table th,.cm-pan table td{padding:5px 8px;font-size:12.5px}
       .cm-pan .cm-msg{padding:8px 11px;margin-top:6px;font-size:13px}.cm-pan .cm-msg i{font-size:15px}.cm-pan .cm-big{font-size:30px!important}.cm-pan .cm-big small{font-size:14px}
-      .cm-pan .cm-k b{font-size:17px}.cm-pan .cm-agc svg{max-width:150px!important}.cm-pan .cm-agc>div:first-child{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important;margin-bottom:4px!important}.cm-pan .cm-lad{height:11px;margin:26px 0 12px}.cm-pan .cm-ch svg{max-height:260px}
+      .cm-pan .cm-k b{font-size:17px}.cm-pan .cm-agc svg{max-width:150px!important}.cm-pan #cm-objg svg{max-width:200px!important}.cm-pan .cm-agc>div:first-child{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important;margin-bottom:4px!important}.cm-pan .cm-lad{height:11px;margin:26px 0 12px}.cm-pan .cm-ch svg{max-height:260px}
       .cm-big{font-size:42px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}.cm-big small{font-size:17px;color:var(--mut);font-weight:600}
       .cm-lad{position:relative;height:14px;background:#ece9ea;border-radius:7px;margin:30px 0 14px}
       .cm-lad .f{position:absolute;inset:0 auto 0 0;background:var(--red);border-radius:7px}
@@ -3466,12 +3466,13 @@ function drawComissao(podeEscolher, vends){
       <div class="card"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">${eu?'O teu treinador':'Treinador'}</div>
         ${msgs.map(([k,i,t])=>`<div class="cm-msg ${k}"><i aria-hidden="true">${i}</i><p>${t}</p></div>`).join('')}</div>
       <div class="card scroll"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Objetivos · ${T.n}.º trimestre</div>
-        <div id="cm-objg" class="cm-agc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 6px;margin:8px 0 6px">${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), real=o.trim?tq/o.trim*100:0, dec=duT?duTF/duT:1;
+        <div id="cm-objg" class="cm-agc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px 2px;margin:8px -8px 6px">${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), real=o.trim?tq/o.trim*100:0, dec=duT?duTF/duT:1;
           const pj=o.trim ? (atual && dec<1 ? real/dec : real) : 0, rl=atual && dec<1 ? real : null;
           return `<div data-og="${esc(o.id)}" data-pj="${pj}" data-rl="${rl??''}" data-dec="${atual&&dec<1?dec:1}" data-sub="${esc(`${f1(tq)} de ${o.trim} eventos`)}" data-nm="${esc(o.nome)}" title="${rl!=null?`Ao ritmo atual fecha em ~${Math.round(pj)} % · feito ${Math.round(rl)} %`:''}"><div class="cm-g">${gaugeSVG(pj, o.nome, `${f1(tq)} de ${o.trim} eventos`, rl, {semRodape:true})}</div><div class="cm-eq" style="font-size:12px;text-align:center;margin-top:2px"></div></div>`; }).join('')}</div>
-        <table><thead><tr><th>Métrica</th><th class="num">Mês</th><th class="num">Obj. mês</th><th class="num">Trimestre</th><th style="width:26%">%</th></tr></thead>
+        <table><thead><tr><th>Métrica</th><th class="num">Mês</th><th class="num">Obj. mês</th><th class="num">Trimestre</th><th style="width:30%">Atingimento trimestre</th></tr></thead>
         <tbody>${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), pr=o.mes?Math.min(100,o.feito/o.mes*100):0;
-          return `<tr><td>${esc(o.nome)}</td><td class="num">${f1(o.feito)}</td><td class="num">${f1(o.mes)}</td><td class="num">${f1(tq)} / ${o.trim}</td><td><div class="cm-bar"><span class="${pr<100?'lo':''}" style="width:${pr}%"></span></div></td></tr>`; }).join('')}</tbody></table>
+          const dq=duT?duTF/duT:1, pq=o.trim?tq/o.trim*100:0;
+          return `<tr><td>${esc(o.nome)}</td><td class="num">${f1(o.feito)}</td><td class="num">${f1(o.mes)}</td><td class="num">${f1(tq)} / ${o.trim}</td><td>${o.trim?barraTrim(pq, dq*100, atual&&dq<1?pq/dq:pq):'—'}</td></tr>`; }).join('')}</tbody></table>
         <p class="muted" style="font-size:12px;margin-bottom:0">Objetivo do mês = ⅓ do trimestral. Para o escalão, ${Object.entries(v.pesos).filter(([,x])=>x!==1).map(([n,x])=>`${esc(n)} conta ${String(x).replace('.',',')}×`).join(', ')||'todos os eventos contam 1×'}.</p></div>
     </div>
     ${premioCard({v, obj, evTrim, T, atual, duT, duTF, eu})}
@@ -4838,6 +4839,9 @@ async function agDelta(antes, depois){
       AG_MEM=null; }
   } catch(e){ console.warn('velocímetro (atualização do dia):', e); } }
 // velocímetro: 0–150 %, vermelho até 90 %, amarelo 90–100 %, verde acima de 100 %
+const corProj = p => p>=100 ? 'var(--ok)' : p>=90 ? '#d4a000' : 'var(--red-d)';
+function barraTrim(pc, dec, pj){ const c=corProj(pj ?? pc);
+  return `<div style="display:flex;align-items:center;gap:8px" title="${pj!=null?`Ao ritmo atual fecha em ~${Math.round(pj)} %`:''}"><div style="flex:1;min-width:90px;position:relative;height:6px;background:#ece9ea;border-radius:3px"><span style="display:block;height:100%;border-radius:3px;width:${Math.min(100,Math.max(0,pc))}%;background:${c}"></span><i style="position:absolute;left:${Math.min(100,dec)}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${c};min-width:44px;text-align:right">${Math.round(pc)} %</b></div>`; }
 function gaugeSVG(pct, titulo, sub, real, op={}){
   // real != null → trimestre em curso: o ponteiro mostra a PROJEÇÃO ao ritmo atual (pct) e por baixo o realizado
   const cx=100, cy=90, R=74, W=16, MAX=150, ang = p => Math.PI*(1-Math.min(MAX,Math.max(0,p))/MAX);
@@ -4845,12 +4849,13 @@ function gaugeSVG(pct, titulo, sub, real, op={}){
   const arco = (a,b,cor) => { const [x1,y1]=pt(a,R), [x2,y2]=pt(b,R); return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${cor}" stroke-width="${W}"/>`; };
   const [nx,ny]=pt(pct, R-8), [tx,ty]=pt(90, R+12), cor = pct>=100?'#2e7d32':pct>=90?'#b58900':'#c00000';
   const proj = real!=null, txt = proj ? (pct>MAX ? `> ${MAX} %` : `~${Math.round(pct)} %`) : `${Math.round(pct)} %`;
-  return `<div style="text-align:center;min-width:0"><svg viewBox="${op.marcas?'-26 -10 252 152':'0 0 200 142'}" style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${proj?'projeção ':''}${Math.round(pct)} %">
+  return `<div style="text-align:center;min-width:0"><svg viewBox="${op.marcas?'-34 -16 268 158':'0 0 200 142'}" ${op.marcas?'class="g-mk"':''} style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${proj?'projeção ':''}${Math.round(pct)} %">
     ${arco(0,90,'#e00000')}${arco(90,100,'#f5b400')}${arco(100,MAX,'#9bbb59')}
     <text x="${cx-R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">0</text><text x="${cx+R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">150</text>
     <text x="${tx.toFixed(1)}" y="${(ty+2).toFixed(1)}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">90</text>
-    ${(op.marcas||[]).map(k=>{ const [a1,b1]=pt(k.p,R-W/2-3), [a2,b2]=pt(k.p,R+W/2+3), [lx,ly]=pt(k.p,k.dentro?R-W/2-12:R+W/2+11); const p2=Math.min(MAX,Math.max(0,k.p));
-      return `<line x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}" stroke="${k.cor||'#1d4ed8'}" stroke-width="3" stroke-linecap="round"><title>${esc(k.tit||k.lab)}</title></line><text x="${lx.toFixed(1)}" y="${(ly+3).toFixed(1)}" text-anchor="${k.dentro?(p2<60?'start':p2>90?'end':'middle'):(p2<60?'end':p2>90?'start':'middle')}" style="font:700 9px system-ui;fill:${k.cor||'#1d4ed8'}">${esc(k.lab)}</text>`; }).join('')}
+    ${(op.marcas||[]).map(k=>{ const [a1,b1]=pt(k.p,R-W/2-3), [a2,b2]=pt(k.p,R+W/2+3), [lx,ly]=pt(k.p,k.dentro?R-W/2-14:R+W/2+13); const p2=Math.min(MAX,Math.max(0,k.p));
+      const ln=(w,c)=>`<line x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/>`;
+      return `<g><title>${esc(k.tit||k.lab)}</title>${ln(7,'#fff')}${ln(3.5,k.cor||'#1d4ed8')}<text x="${lx.toFixed(1)}" y="${(ly+4-(!k.dentro&&(p2<20||p2>130)?12:0)).toFixed(1)}" text-anchor="${k.dentro?(p2<60?'start':p2>90?'end':'middle'):(p2<20||p2>130?'middle':p2<60?'end':p2>90?'start':'middle')}" style="font:700 13px system-ui;fill:${k.cor||'#1d4ed8'};paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round">${esc(k.lab)}</text></g>`; }).join('')}
     <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#111" stroke-width="3.5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="6" fill="#111"/>
     <text x="${cx}" y="${cy+30}" text-anchor="middle" style="font:800 20px system-ui;fill:${cor}">${txt}</text>
     <text x="${cx}" y="${cy+48}" text-anchor="middle" style="font:12px system-ui;fill:#6b6b70">${esc(sub)}</text></svg>
@@ -4869,7 +4874,7 @@ function agenteHTML(A, trim, compacto){
   const curto = {NM:'Nova Móvel (RLMC 1)', RM:'Ref. Móvel (RLMC 2)', NF:'Nova Fixo (RLMC 3)', RF:'Ref. Fixo (RLMC 4)', SS:'Nova Smart (RLMC 5)'};
   const gauges = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 8px;margin-bottom:12px">${L.filter(x=>x.oe>0).map(x=>(x.pj!=null ? gaugeSVG(x.pj, curto[x.m.id], `${Math.round(x.re)} de ${Math.round(x.oe)} eventos`, x.pc) : gaugeSVG(x.pc, curto[x.m.id], `${Math.round(x.re)} de ${Math.round(x.oe)} eventos`))).join('')}</div>`;
   const rows = L.map(x=>`<tr><td><b>${esc(x.m.nome)}</b></td><td class="num">${x.oe?Math.round(x.oe):'—'}</td><td class="num">${Math.round(x.re)}</td>
-      <td style="min-width:150px"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:90px;position:relative;height:6px;background:#ece9ea;border-radius:3px"><span style="display:block;height:100%;border-radius:3px;width:${Math.min(100,x.pc)}%;background:${cor(x.pc)}"></span><i style="position:absolute;left:${dec}%;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.35"></i></div><b style="color:${cor(x.pc)};min-width:48px;text-align:right">${x.oe?Math.round(x.pc)+' %':'—'}</b></div></td>
+      <td style="min-width:150px">${x.oe?barraTrim(x.pc, dec, x.pj):'—'}</td>
       <td class="num" title="Ao ritmo atual, no fim do trimestre">${x.pj!=null?`~${Math.round(x.pj)} %`:'—'}</td><td class="num">${x.y==null?'—':Math.round(x.y)+' %'}</td></tr>`).join('');
   const caixa = podeRpn ? `<label style="display:inline-flex;gap:6px;align-items:center;margin:0 0 6px;font-size:13px;color:var(--ink);cursor:pointer"><input type="checkbox" class="ag-rpn" ${comRpn?'checked':''}> Incluir os RPN em curso <span class="muted">(${RT.nRpn||0} RPN em curso, ainda não PN)</span></label>` : '';
   return caixa + gauges + `${compacto?'<details><summary class="muted" style="cursor:pointer;font-size:12px">Ver a tabela</summary>':''}<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
