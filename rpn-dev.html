@@ -3413,12 +3413,14 @@ function drawComissao(podeEscolher, vends){
   const pnMes = CM.dados.pns.filter(r=>r.mesRef===CM.mes), pnTrim = CM.dados.pns;
   const ev = eventosDe(pnMes), evCurso = eventosDe(CM.dados.curso), evTrim = eventosDe(pnTrim);
   const c = comCalc(v, ev, obj);
+  CM.args=[podeEscolher, vends];
   const atual = CM.mes===mesLocal(), hojeS = hojeLocal(), duF = atual ? Math.max(1, diasUteis(CM.mes, hojeS)) : diasUteis(CM.mes), duM = diasUteis(CM.mes);
   // projeção: PN do mês + RPN em curso (devem passar a PN este mês) + o ritmo de PN nos dias úteis que faltam
   const k = (duM-duF)/duF, p = comCalc(v, somaEv(somaEv(ev, evCurso), escalarEv(ev, k)), obj);
   const cc = comCalc(v, somaEv(ev, evCurso), obj);   // se os RPN em curso passarem a PN este mês
   const duT = T.meses.reduce((a,x)=>a+diasUteis(x),0), duTF = T.meses.filter(x=>x<CM.mes).reduce((a,x)=>a+diasUteis(x),0)+duF;
   const nome = S.users[CM.uid]?.nome || S.me.nome, eu = CM.uid===S.me.uid;
+  const comRpnT = atual && AG_RPN && Object.keys(evCurso).length>0, evTq = comRpnT ? somaEv(evTrim, evCurso) : evTrim;   // atingimento do trimestre: só PN ou PN + RPN em curso (mesmo botão da Performance)
   const MAXP = Math.max(130, Math.ceil(Math.max(p.pts, cc.pts)*1.1/10)*10), pc = x => Math.min(100, x/MAXP*100);
   // celebração: primeira vez que o próprio vê o escalão novo neste mês
   let festa=false; if (eu && atual) { const kL='com-esc-'+CM.uid+'-'+CM.mes; try { const ant=+(localStorage.getItem(kL)??-1); if (c.i>ant && c.i>=0) festa = ant>=0 || c.i>0; localStorage.setItem(kL, String(c.i)); } catch(_){} }
@@ -3493,12 +3495,12 @@ function drawComissao(podeEscolher, vends){
     <div class="cm-two">
       <div class="card"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">${eu?'O teu treinador':'Treinador'}</div>
         ${msgs.map(([k,i,t])=>`<div class="cm-msg ${k}"><i aria-hidden="true">${i}</i><p>${t}</p></div>`).join('')}</div>
-      <div class="card scroll"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Objetivos · ${T.n}.º trimestre</div>
-        <div id="cm-objg" class="cm-agc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px 2px;margin:8px -8px 6px">${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), real=o.trim?tq/o.trim*100:0, dec=duT?duTF/duT:1;
+      <div class="card scroll"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Objetivos · ${T.n}.º trimestre</div><span class="sp"></span>${atual&&CM.dados.curso.length?agRpnBotoes(AG_RPN, CM.dados.curso.length):''}</div>
+        <div id="cm-objg" class="cm-agc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px 2px;margin:8px -8px 6px">${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTq[n]||0),0), real=o.trim?tq/o.trim*100:0, dec=duT?duTF/duT:1;
           const pj=o.trim ? (atual && dec<1 ? real/dec : real) : 0, rl=atual && dec<1 ? real : null;
           return `<div data-og="${esc(o.id)}" data-pj="${pj}" data-rl="${rl??''}" data-dec="${atual&&dec<1?dec:1}" data-sub="${esc(`${f1(tq)} de ${o.trim} eventos`)}" data-nm="${esc(o.nome)}" title="${rl!=null?`Ao ritmo atual fecha em ~${Math.round(pj)} % · feito ${Math.round(rl)} %`:''}"><div class="cm-g">${gaugeSVG(pj, o.nome, `${f1(tq)} de ${o.trim} eventos`, rl, {semRodape:true})}</div><div class="cm-eq" style="font-size:12px;text-align:center;margin-top:2px"></div></div>`; }).join('')}</div>
         <table><thead><tr><th>Métrica</th><th class="num">Mês</th><th class="num">Obj. mês</th><th class="num">Trimestre</th><th style="width:30%">Atingimento trimestre</th></tr></thead>
-        <tbody>${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), pr=o.mes?Math.min(100,o.feito/o.mes*100):0;
+        <tbody>${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTq[n]||0),0), pr=o.mes?Math.min(100,o.feito/o.mes*100):0;
           const dq=duT?duTF/duT:1, pq=o.trim?tq/o.trim*100:0;
           return `<tr><td>${esc(o.nome)}</td><td class="num">${f1(o.feito)}</td><td class="num">${f1(o.mes)}</td><td class="num">${f1(tq)} / ${o.trim}</td><td>${o.trim?barraTrim(pq, dq*100, atual&&dq<1?pq/dq:pq):'—'}</td></tr>`; }).join('')}</tbody></table>
         <p class="muted" style="font-size:12px;margin-bottom:0">Objetivo do mês = ⅓ do trimestral. Para o escalão, ${Object.entries(v.pesos).filter(([,x])=>x!==1).map(([n,x])=>`${esc(n)} conta ${String(x).replace('.',',')}×`).join(', ')||'todos os eventos contam 1×'}.</p></div>
@@ -3517,6 +3519,7 @@ function drawComissao(podeEscolher, vends){
   desenharAgente($('#cm-ag'), CM.mes, true);
   // comparação com a equipa (média e melhor atingimento do trimestre, sem nomes): vem do recálculo diário em agente/{trimestre}
   agenteDados(trimId(CM.mes)).then(A=>{ const eq=(A.real[trimId(CM.mes)]||{}).equipa||{}, ev=evTrim;
+    document.querySelectorAll('.cm-pan [data-agr]').forEach(b=>b.onclick=()=>agRpnMudar(b.dataset.agr==='1'));
     document.querySelectorAll('#cm-objg [data-og]').forEach(b=>{ const o=c.objs.find(x=>x.id===b.dataset.og), q=eq[b.dataset.og], el=b.querySelector('.cm-eq'); if(!o||!el) return;
       if (!q) return;
       const meu=o.trim?o.nat.reduce((a,n)=>a+(ev[n]||0),0)/o.trim*100:0, cor=x=>x>=q.media?'var(--ok)':'var(--red-d)', dc=+b.dataset.dec||1, rl=b.dataset.rl===''?null:+b.dataset.rl;
@@ -4904,13 +4907,19 @@ function agenteHTML(A, trim, compacto){
   const rows = L.map(x=>`<tr><td><b>${esc(x.m.nome)}</b></td><td class="num">${x.oe?Math.round(x.oe):'—'}</td><td class="num">${Math.round(x.re)}</td>
       <td style="min-width:150px">${x.oe?barraTrim(x.pc, dec, x.pj):'—'}</td>
       <td class="num" title="Ao ritmo atual, no fim do trimestre">${x.pj!=null?`~${Math.round(x.pj)} %`:'—'}</td><td class="num">${x.y==null?'—':Math.round(x.y)+' %'}</td></tr>`).join('');
-  const caixa = podeRpn ? `<label style="display:inline-flex;gap:6px;align-items:center;margin:0 0 6px;font-size:13px;color:var(--ink);cursor:pointer"><input type="checkbox" class="ag-rpn" ${comRpn?'checked':''}> Incluir os RPN em curso <span class="muted">(${RT.nRpn||0} RPN em curso, ainda não PN)</span></label>` : '';
+  const caixa = podeRpn ? `<div style="margin:0 0 8px">${agRpnBotoes(comRpn, RT.nRpn||0)}</div>` : '';
   return caixa + gauges + `${compacto?'<details><summary class="muted" style="cursor:pointer;font-size:12px">Ver a tabela</summary>':''}<div class="scroll"><table><thead><tr><th>Objetivo Vodafone</th><th class="num">Objetivo (eventos)</th><th class="num">Realizado</th><th>Atingimento</th><th class="num">Fim do trimestre</th><th class="num">YTD ${trim.split('-T')[0]}</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="muted" style="font-size:12px;margin-bottom:0">${trimTxt(trim)} · ${Math.round(dec)} % do trimestre decorrido (traço na barra).${dec<100?' Os velocímetros mostram a projeção para o fim do trimestre ao ritmo atual; o «feito» é o atingimento até hoje.':''} Realizado = eventos dos PN de toda a equipa, pela data do PN${comRpn?', mais todos os RPN em curso (em elaboração, submetidos, em implementação, a aguardar ou em conferência)':''}${A.real[trim]?.dia?`, recálculo completo em ${fmtD(A.real[trim].dia)}${A.real[trim].incN?` e ${A.real[trim].incN} atualização(ões) desde então (a última às ${String(A.real[trim].incEm||'').slice(11,16)} UTC)`:''}`:''}. A Vodafone considera o objetivo atingido a partir de 90 %.</p>${compacto?'</details>':''}`;
 }
+// «Só PN confirmados» / «PN + RPN em curso»: um só interruptor para a Performance e o atingimento do vendedor (fica lembrado)
+function agRpnBotoes(com, n){
+  const b=(v,t,tt)=>`<button type="button" class="btn sm" data-agr="${v}" title="${tt}" style="${(v==='1')===!!com?'background:var(--ink);color:#fff;border-color:var(--ink)':''};border-radius:${v==='0'?'8px 0 0 8px':'0 8px 8px 0'};margin:0">${t}</button>`;
+  return `<span style="display:inline-flex" role="group" aria-label="O que conta">${b('0','Só PN confirmados','Conta apenas a produção já confirmada (PN)')}${b('1',`PN + RPN em curso${n?` (${n})`:''}`,'Soma os RPN em curso, que ainda não são PN')}</span>`;
+}
+function agRpnMudar(v){ AG_RPN=!!v; try { localStorage.setItem('ag-rpn', AG_RPN?'1':'0'); } catch(_){} if (location.hash.startsWith('#/comissao') && CM.args) drawComissao(...CM.args); }
 async function desenharAgente(box, mes, compacto){
   try { const t = trimId(mes||mesLocal()), A = await agenteDados(t);
-    const pinta = () => { box.innerHTML = agenteHTML(A, t, compacto); box.querySelector('.ag-rpn')?.addEventListener('change', e=>{ AG_RPN = e.target.checked; try { localStorage.setItem('ag-rpn', AG_RPN?'1':'0'); } catch(_){} pinta(); }); };
+    const pinta = () => { box.innerHTML = agenteHTML(A, t, compacto); box.querySelectorAll('[data-agr]').forEach(b=>b.onclick=()=>{ if (location.hash.startsWith('#/comissao') && CM.args) return agRpnMudar(b.dataset.agr==='1'); AG_RPN = b.dataset.agr==='1'; try { localStorage.setItem('ag-rpn', AG_RPN?'1':'0'); } catch(_){} pinta(); }); };
     pinta(); }
   catch(e){ box.innerHTML = `<p class="muted" style="margin:0">Indisponível (${esc(errTxt(e))}).</p>`; }
 }
