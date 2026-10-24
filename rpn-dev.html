@@ -3521,11 +3521,12 @@ function drawComissao(podeEscolher, vends){
     <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div></div>`;
   desenharAgente($('#cm-ag'), CM.mes, true);
   // comparação com a equipa (média e melhor atingimento do trimestre, sem nomes): vem do recálculo diário em agente/{trimestre}
-  agenteDados(trimId(CM.mes)).then(A=>{ const eq=(A.real[trimId(CM.mes)]||{}).equipa||{}, ev=evTrim;
+  agenteDados(trimId(CM.mes)).then(A=>{ const RTq=A.real[trimId(CM.mes)]||{}, eq=((atual && AG_RPN) ? RTq.equipaRpn : RTq.equipa)||{}, ev=evTq;   // marcas e veredicto na mesma base do ponteiro (só PN, ou PN + RPN em curso)
     document.querySelectorAll('.cm-pan [data-agr]').forEach(b=>b.onclick=()=>agRpnMudar(b.dataset.agr==='1'));
-    document.querySelectorAll('#cm-objg [data-og]').forEach(b=>{ const o=c.objs.find(x=>x.id===b.dataset.og), q=eq[b.dataset.og], el=b.querySelector('.cm-eq'); if(!o||!el) return;
+    document.querySelectorAll('#cm-objg [data-og]').forEach(b=>{ const o=c.objs.find(x=>x.id===b.dataset.og), el=b.querySelector('.cm-eq'); let q=eq[b.dataset.og]; if(!o||!el) return;
       if (!q) return;
       const meu=o.trim?o.nat.reduce((a,n)=>a+(ev[n]||0),0)/o.trim*100:0, cor=x=>x>=q.media?'var(--ok)':'var(--red-d)', dc=+b.dataset.dec||1, rl=b.dataset.rl===''?null:+b.dataset.rl;
+      if (meu > q.melhor) q = {...q, melhor: meu};   // os números da equipa são do recálculo do dia: se entretanto o vendedor passou à frente, ele é o melhor
       // marcas no velocímetro na mesma escala do ponteiro (projeção ao ritmo atual): o melhor colega e a média da equipa
       const marcas=[{p:q.media/dc, lab:'média', cor:'#8a8a90', dentro:true, tit:`Média da equipa: ${Math.round(q.media)} % feito`}, {p:q.melhor/dc, lab:'melhor', cor:'#1d4ed8', tit:`Melhor da equipa: ${Math.round(q.melhor)} % feito`}];
       b.querySelector('.cm-g').innerHTML=gaugeSVG(+b.dataset.pj, b.dataset.nm, b.dataset.sub, rl, {semRodape:true, marcas});
@@ -4835,7 +4836,7 @@ async function agenteDados(trim){
   let euros = {}; if (isMaster()) { try { const f=await getDoc(doc(db,'configFin','agenteObjetivos')); euros = f.exists() ? (f.data().trimestres||{}) : {}; } catch(_){} }
   tAno.forEach((t,i)=>{ if (rS[i]?.exists()) real[t]=rS[i].data(); });
   // staff: recalcula o trimestre em curso (1×/dia) e os anteriores do ano que faltem
-  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && (String(r.dia||'') < hojeLocal() || r.evRpn===undefined || r.equipa===undefined || r.rpnTodos!==true)) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
+  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && (String(r.dia||'') < hojeLocal() || r.evRpn===undefined || r.equipaRpn===undefined || r.rpnTodos!==true)) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
     if (velho) { try { real[t] = await agenteRecalcular(t); } catch(e){ console.warn('agente', e); } } }
   return (AG_MEM = {trim, obj, euros, real, tAno, em:Date.now()});
 }
@@ -4843,17 +4844,21 @@ async function agenteRecalcular(t){
   const meses = trimMeses(t).filter(m=>m<=mesLocal());
   const sn = await getDocs(query(collection(db,'rpn'), where('mesRef','in',meses)));
   const pnsT = sn.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN'), ev = eventosDe(pnsT);
-  // objetivos trimestrais dos vendedores: média e melhor atingimento da equipa (só agregados, sem nomes), para o painel de cada um
-  const equipa = {}; try { await lerPlano(); const mRef = trimMeses(t)[0], v = versaoDe(PLANO.versoes, mRef);
-    const vs = vendedoresProj().filter(x=>S.users[x.uid]?.perfil!=='master' && S.users[x.uid]?.ativo!==false);
-    v.objetivos.forEach(o=>{ const pcs = vs.map(x=>{ const ob=+objDe(x.uid, v, mRef)[o.id]||0; if (!ob) return null; const e=eventosDe(pnsT.filter(r=>r.vendedorUid===x.uid)); return o.nat.reduce((a,n)=>a+(e[n]||0),0)/ob*100; }).filter(x=>x!=null);
-      if (pcs.length) equipa[o.id] = {media: Math.round(pcs.reduce((a,x)=>a+x,0)/pcs.length*10)/10, melhor: Math.round(Math.max(...pcs)*10)/10, n: pcs.length}; });
-  } catch(e){ console.warn('equipa', e); }
-  // RPN em curso (todos, incluindo em elaboração; ainda não PN): eventos à parte, para o velocímetro poder somá-los (caixa «incluir RPN em curso»)
-  let evRpn = {}, nRpn = 0;
+  // RPN em curso (todos, incluindo em elaboração; ainda não PN): eventos à parte, para o velocímetro poder somá-los (botão «PN + RPN em curso»)
+  let evRpn = {}, nRpn = 0, rs = [];
   if (t===trimId(mesLocal())) { const sr = await getDocs(query(collection(db,'rpn'), where('estado','in', EM_CURSO)));
-    const rs = sr.docs.map(d=>({id:d.id,...d.data()})); nRpn = rs.length; evRpn = eventosDe(rs); }
-  const d = {trim:t, ev, evRpn, nRpn, equipa, rpnTodos:true, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
+    rs = sr.docs.map(d=>({id:d.id,...d.data()})); nRpn = rs.length; evRpn = eventosDe(rs); }
+  // objetivos trimestrais dos vendedores: média e melhor atingimento da equipa (só agregados, sem nomes), para o painel de cada um.
+  // Duas contas, como o botão do painel: só PN (equipa) e PN + RPN em curso sem os «Em Elaboração» (equipaRpn), igual ao que o vendedor soma no seu painel
+  const equipa = {}, equipaRpn = {}; try { await lerPlano(); const mRef = trimMeses(t)[0], v = versaoDe(PLANO.versoes, mRef);
+    const vs = vendedoresProj().filter(x=>S.users[x.uid]?.perfil!=='master' && S.users[x.uid]?.ativo!==false), rsV = rs.filter(r=>r.estado!=='Em Elaboração');
+    const est = (pcs) => pcs.length ? {media: Math.round(pcs.reduce((a,x)=>a+x,0)/pcs.length*10)/10, melhor: Math.round(Math.max(...pcs)*10)/10, n: pcs.length} : null;
+    v.objetivos.forEach(o=>{ const a=[], b=[];
+      vs.forEach(x=>{ const ob=+objDe(x.uid, v, mRef)[o.id]||0; if (!ob) return; const e=eventosDe(pnsT.filter(r=>r.vendedorUid===x.uid)), er=eventosDe(rsV.filter(r=>r.vendedorUid===x.uid));
+        const f=o.nat.reduce((s2,n)=>s2+(e[n]||0),0), fr=o.nat.reduce((s2,n)=>s2+(er[n]||0),0); a.push(f/ob*100); b.push((f+fr)/ob*100); });
+      const x1=est(a), x2=est(b); if (x1) equipa[o.id]=x1; if (x2) equipaRpn[o.id]=x2; });
+  } catch(e){ console.warn('equipa', e); }
+  const d = {trim:t, ev, evRpn, nRpn, equipa, equipaRpn, rpnTodos:true, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
   await setDoc(doc(db,'agente',t), d); return d;
 }
 // velocímetro: atualização incremental durante o dia. O recálculo completo (1.º acesso da staff em cada dia) substitui tudo e corrige
