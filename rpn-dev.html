@@ -3467,7 +3467,8 @@ function drawComissao(podeEscolher, vends){
         ${msgs.map(([k,i,t])=>`<div class="cm-msg ${k}"><i aria-hidden="true">${i}</i><p>${t}</p></div>`).join('')}</div>
       <div class="card scroll"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Objetivos · ${T.n}.º trimestre</div>
         <div id="cm-objg" class="cm-agc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px 6px;margin:8px 0 6px">${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), real=o.trim?tq/o.trim*100:0, dec=duT?duTF/duT:1;
-          return `<div data-og="${esc(o.id)}">${gaugeSVG(o.trim ? (atual && dec<1 ? real/dec : real) : 0, o.nome, `${f1(tq)} de ${o.trim} eventos`, atual && dec<1 ? real : null)}<div class="cm-eq muted" style="font-size:12px;text-align:center;margin-top:2px"></div></div>`; }).join('')}</div>
+          const pj=o.trim ? (atual && dec<1 ? real/dec : real) : 0, rl=atual && dec<1 ? real : null;
+          return `<div data-og="${esc(o.id)}" data-pj="${pj}" data-rl="${rl??''}" data-dec="${atual&&dec<1?dec:1}" data-sub="${esc(`${f1(tq)} de ${o.trim} eventos`)}" data-nm="${esc(o.nome)}" title="${rl!=null?`Ao ritmo atual fecha em ~${Math.round(pj)} % · feito ${Math.round(rl)} %`:''}"><div class="cm-g">${gaugeSVG(pj, o.nome, `${f1(tq)} de ${o.trim} eventos`, rl, {semRodape:true})}</div><div class="cm-eq" style="font-size:12px;text-align:center;margin-top:2px"></div></div>`; }).join('')}</div>
         <table><thead><tr><th>Métrica</th><th class="num">Mês</th><th class="num">Obj. mês</th><th class="num">Trimestre</th><th style="width:26%">%</th></tr></thead>
         <tbody>${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTrim[n]||0),0), pr=o.mes?Math.min(100,o.feito/o.mes*100):0;
           return `<tr><td>${esc(o.nome)}</td><td class="num">${f1(o.feito)}</td><td class="num">${f1(o.mes)}</td><td class="num">${f1(tq)} / ${o.trim}</td><td><div class="cm-bar"><span class="${pr<100?'lo':''}" style="width:${pr}%"></span></div></td></tr>`; }).join('')}</tbody></table>
@@ -3488,9 +3489,12 @@ function drawComissao(podeEscolher, vends){
   // comparação com a equipa (média e melhor atingimento do trimestre, sem nomes): vem do recálculo diário em agente/{trimestre}
   agenteDados(trimId(CM.mes)).then(A=>{ const eq=(A.real[trimId(CM.mes)]||{}).equipa||{}, ev=evTrim;
     document.querySelectorAll('#cm-objg [data-og]').forEach(b=>{ const o=c.objs.find(x=>x.id===b.dataset.og), q=eq[b.dataset.og], el=b.querySelector('.cm-eq'); if(!o||!el) return;
-      if (!q) { el.textContent='Equipa: sem dados ainda'; return; }
-      const meu=o.trim?o.nat.reduce((a,n)=>a+(ev[n]||0),0)/o.trim*100:0, cor=x=>x>=q.media?'var(--ok)':'var(--red-d)';
-      el.innerHTML=`Equipa: média <b>${Math.round(q.media)} %</b> · melhor <b>${Math.round(q.melhor)} %</b><br><span style="color:${cor(meu)};font-weight:600">${meu>=q.melhor-0.05?(eu?'🏆 És o melhor da equipa':'🏆 O melhor da equipa'):meu>=q.media?'▲ Acima da média':'▼ Abaixo da média'}</span>`; }); }).catch(()=>{});
+      if (!q) return;
+      const meu=o.trim?o.nat.reduce((a,n)=>a+(ev[n]||0),0)/o.trim*100:0, cor=x=>x>=q.media?'var(--ok)':'var(--red-d)', dc=+b.dataset.dec||1, rl=b.dataset.rl===''?null:+b.dataset.rl;
+      // marcas no velocímetro na mesma escala do ponteiro (projeção ao ritmo atual): o melhor colega e a média da equipa
+      const marcas=[{p:q.media/dc, lab:'média', cor:'#8a8a90', dentro:true, tit:`Média da equipa: ${Math.round(q.media)} % feito`}, {p:q.melhor/dc, lab:'melhor', cor:'#1d4ed8', tit:`Melhor da equipa: ${Math.round(q.melhor)} % feito`}];
+      b.querySelector('.cm-g').innerHTML=gaugeSVG(+b.dataset.pj, b.dataset.nm, b.dataset.sub, rl, {semRodape:true, marcas});
+      el.innerHTML=`<span style="color:${cor(meu)};font-weight:600">${meu>=q.melhor-0.05?(eu?'🏆 És o melhor da equipa':'🏆 O melhor da equipa'):meu>=q.media?'▲ Acima da média':'▼ Abaixo da média'}</span>`; }); }).catch(()=>{});
   desenharRanking($('#cm-rank'), CM.mes);
   // simulador (só no browser, sem leituras)
   const simUpd = () => { const extra={}; let tem=false; m.querySelectorAll('[id^="sim-"][data-n]').forEach((el,i)=>{ const x=+el.value||0; m.querySelector('#sim-o-'+i).textContent=f1(x); if (x){ extra[el.dataset.n]=x; tem=true; } });
@@ -4834,22 +4838,24 @@ async function agDelta(antes, depois){
       AG_MEM=null; }
   } catch(e){ console.warn('velocímetro (atualização do dia):', e); } }
 // velocímetro: 0–150 %, vermelho até 90 %, amarelo 90–100 %, verde acima de 100 %
-function gaugeSVG(pct, titulo, sub, real){
+function gaugeSVG(pct, titulo, sub, real, op={}){
   // real != null → trimestre em curso: o ponteiro mostra a PROJEÇÃO ao ritmo atual (pct) e por baixo o realizado
   const cx=100, cy=90, R=74, W=16, MAX=150, ang = p => Math.PI*(1-Math.min(MAX,Math.max(0,p))/MAX);
   const pt = (p, r) => [cx + r*Math.cos(ang(p)), cy - r*Math.sin(ang(p))];
   const arco = (a,b,cor) => { const [x1,y1]=pt(a,R), [x2,y2]=pt(b,R); return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} A${R} ${R} 0 0 1 ${x2.toFixed(1)} ${y2.toFixed(1)}" fill="none" stroke="${cor}" stroke-width="${W}"/>`; };
   const [nx,ny]=pt(pct, R-8), [tx,ty]=pt(90, R+12), cor = pct>=100?'#2e7d32':pct>=90?'#b58900':'#c00000';
   const proj = real!=null, txt = proj ? (pct>MAX ? `> ${MAX} %` : `~${Math.round(pct)} %`) : `${Math.round(pct)} %`;
-  return `<div style="text-align:center;min-width:0"><svg viewBox="0 0 200 142" style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${proj?'projeção ':''}${Math.round(pct)} %">
+  return `<div style="text-align:center;min-width:0"><svg viewBox="${op.marcas?'-26 -10 252 152':'0 0 200 142'}" style="width:100%;max-width:230px;height:auto" role="img" aria-label="${esc(titulo)}: ${proj?'projeção ':''}${Math.round(pct)} %">
     ${arco(0,90,'#e00000')}${arco(90,100,'#f5b400')}${arco(100,MAX,'#9bbb59')}
     <text x="${cx-R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">0</text><text x="${cx+R}" y="${cy+14}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">150</text>
     <text x="${tx.toFixed(1)}" y="${(ty+2).toFixed(1)}" text-anchor="middle" style="font:10px system-ui;fill:#8a8a90">90</text>
+    ${(op.marcas||[]).map(k=>{ const [a1,b1]=pt(k.p,R-W/2-3), [a2,b2]=pt(k.p,R+W/2+3), [lx,ly]=pt(k.p,k.dentro?R-W/2-12:R+W/2+11); const p2=Math.min(MAX,Math.max(0,k.p));
+      return `<line x1="${a1.toFixed(1)}" y1="${b1.toFixed(1)}" x2="${a2.toFixed(1)}" y2="${b2.toFixed(1)}" stroke="${k.cor||'#1d4ed8'}" stroke-width="3" stroke-linecap="round"><title>${esc(k.tit||k.lab)}</title></line><text x="${lx.toFixed(1)}" y="${(ly+3).toFixed(1)}" text-anchor="${k.dentro?(p2<60?'start':p2>90?'end':'middle'):(p2<60?'end':p2>90?'start':'middle')}" style="font:700 9px system-ui;fill:${k.cor||'#1d4ed8'}">${esc(k.lab)}</text>`; }).join('')}
     <line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#111" stroke-width="3.5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="6" fill="#111"/>
     <text x="${cx}" y="${cy+30}" text-anchor="middle" style="font:800 20px system-ui;fill:${cor}">${txt}</text>
     <text x="${cx}" y="${cy+48}" text-anchor="middle" style="font:12px system-ui;fill:#6b6b70">${esc(sub)}</text></svg>
     <div style="font-weight:700;margin-top:-2px">${esc(titulo)}</div>
-    ${proj?`<div style="font-size:12px;color:#6b6b70;margin-top:2px">ao ritmo atual fecha em ${txt} · feito ${Math.round(real)} %</div>`:''}</div>`;
+    ${proj&&!op.semRodape?`<div style="font-size:12px;color:#6b6b70;margin-top:2px">ao ritmo atual fecha em ${txt} · feito ${Math.round(real)} %</div>`:''}</div>`;
 }
 function agenteHTML(A, trim, compacto){
   const RT = A.real[trim]||{}, podeRpn = trim===trimId(mesLocal()) && RT.evRpn!==undefined, comRpn = podeRpn && AG_RPN;
