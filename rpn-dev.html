@@ -3333,11 +3333,14 @@ function premioCalc(v, evTrim, obj, ind){
     const evR=(c.natRef||[]).reduce((a,n)=>a+(evTrim[n]||0),0), obR=(+obj[c.ref]||0), atR=obR>0?Math.min(1, evR/obR):0;
     const at = P.regra==='minimo' ? Math.min(atN, atR) : atN;
     return {...c, ev, ob, atN, evR, obR, atR, at, val: ev*P.valorEvento*at}; });
-  const apurado = cats.reduce((a,c)=>a+c.val,0), pt = [...P.patamares].map(Number).sort((a,b)=>a-b), topo = pt.at(-1);
-  const patamar = apurado >= topo-1e-9 ? Math.min(+P.teto||Infinity, apurado) : (pt.filter(x=>apurado>=x-1e-9).pop()||0);
+  // índice < 100 %: «patamares» (versões do plano a partir de out/2026) → os patamares e o teto baixam na mesma proporção e o prémio é o patamar ajustado;
+  // «premio» (versões anteriores, como no mapa Excel) → patamares cheios e o prémio é patamar × índice
+  const porPat = P.indice==='patamares', k = porPat ? ind : 1;
+  const apurado = cats.reduce((a,c)=>a+c.val,0), pt = [...P.patamares].map(Number).sort((a,b)=>a-b).map(x=>r2(x*k)), topo = pt.at(-1), teto = (+P.teto||Infinity)*k;
+  const patamar = apurado >= topo-1e-9 ? Math.min(teto, apurado) : (pt.filter(x=>apurado>=x-1e-9).pop()||0);
   const prox = apurado >= topo-1e-9 ? null : pt.find(x=>apurado<x-1e-9);
-  const premio = r2(patamar*ind);
-  return {P, cats, apurado, patamar, premio, prox, ind, prest: k => k<P.prestacoes ? r2(premio/P.prestacoes) : r2(premio-(P.prestacoes-1)*r2(premio/P.prestacoes))};
+  const premio = r2(porPat ? patamar : patamar*ind);
+  return {P, cats, apurado, patamar, premio, prox, ind, pts:pt, teto, prest: k => k<P.prestacoes ? r2(premio/P.prestacoes) : r2(premio-(P.prestacoes-1)*r2(premio/P.prestacoes))};
 }
 // eventos Nova que faltam numa categoria para chegar a um valor apurado
 function premioFalta(v, evTrim, obj, ind, alvo, cat){
@@ -3547,15 +3550,15 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
   const ind = indiceDe(CM.uid, CM.mes), q = premioCalc(v, evTrim, obj, ind), P = q.P, tId = trimId(CM.mes), fechado = !atual || T.meses[2] < mesLocal();
   const pctE = x => Math.round(x*100)+' %';
   const fim = !fechado && duTF>0 && duTF<duT && duTF/duT>=0.2 ? premioCalc(v, escalarEv(evTrim, duT/duTF), obj, ind) : null;
-  const pts = [...P.patamares].map(Number).sort((a,b)=>a-b);
+  const pts = q.pts;
   const chip = (x, on, lab) => `<span style="display:inline-block;padding:4px 10px;border-radius:14px;margin:0 6px 6px 0;font-weight:700;font-variant-numeric:tabular-nums;${on?'background:var(--ok);color:#fff':'background:#f0eef0;color:var(--mut)'}">${lab}</span>`;
   const escada = pts.map((x,i)=>chip(x, q.patamar>=x-1e-9, i===pts.length-1 ? eur0(x)+'+' : eur0(x))).join('');
   let dica = '';
   if (!fechado) {
     if (q.prox) { const f = P.cats.map(c=>({c, x:premioFalta(v, evTrim, obj, ind, q.prox, c.id)})).filter(o=>o.x!=null).sort((a,b)=>a.x-b.x);
       if (f.length) dica = `Faltam <b>${f1(f[0].x)} eventos Nova ${esc(f[0].c.nome)}</b>${f[1]?` (ou ${f1(f[1].x)} Nova ${esc(f[1].c.nome)})`:''} para chegar ao patamar de <b>${eur0(q.prox)}</b>.`; }
-    else if (q.patamar < (+P.teto||Infinity)) dica = `Já passou os ${eur0(pts.at(-1))}: a partir daqui cada evento Nova conta por inteiro, até ${eur0(P.teto)}.`;
-    else dica = `Atingiu o teto do prémio (${eur0(P.teto)}).`;
+    else if (q.patamar < q.teto) dica = `Já passou os ${eur0(pts.at(-1))}: a partir daqui cada evento Nova conta por inteiro, até ${eur0(q.teto)}.`;
+    else dica = `Atingiu o teto do prémio (${eur0(q.teto)}).`;
   }
   const cap = q.cats.filter(c=>c.at<1 && c.ev>0);
   // prestação em pagamento neste RUN
@@ -3569,12 +3572,12 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
       ${qq ? `<div class="cm-big" style="font-size:34px">${eur(gr.length ? gr.reduce((a,x)=>a+(+x.valor||0),0) : qq.prest(pp.k))} € <small>prestação ${pp.k} de ${pp.n}</small></div>
         <p class="muted" style="font-size:13px;margin:6px 0 0">Prémio do trimestre: <b>${eur(qq.premio)} €</b> (apurado ${eur(qq.apurado)} €${qq.ind!==1?` · índice ${pctE(qq.ind)}`:''}) · ${qq.cats.map(c=>`Nova ${esc(c.nome)} ${f1(c.ev)} ev. (${pctE(c.at)})`).join(' · ')}.<br>
         Prestações nos recibos de ${runs.map(m=>mesTxt(m).split(' ')[0]).join(', ')}. ${gr.length?'<b>Já gravado neste RUN.</b>':'Estimativa até a comissão do RUN ser gravada.'}</p>
-        ${qq.premio<=0?`<div class="cm-msg"><i aria-hidden="true">ℹ️</i><p>O ${trimTxt(pp.trim)} não chegou ao primeiro patamar (${eur0(pts[0])}).</p></div>`:''}` : `<p class="muted">Não foi possível ler os PN desse trimestre.</p>`}`;
+        ${qq.premio<=0?`<div class="cm-msg"><i aria-hidden="true">ℹ️</i><p>O ${trimTxt(pp.trim)} não chegou ao primeiro patamar (${eur0(qq.pts[0])}).</p></div>`:''}` : `<p class="muted">Não foi possível ler os PN desse trimestre.</p>`}`;
   }
   return `<div class="card"><h2 style="margin-bottom:4px">Prémio trimestral</h2>
     <div class="cm-two" style="align-items:start">
       <div><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">${fechado?'Prémio apurado':'Em construção'} · ${trimTxt(tId)}${!fechado?' (até hoje)':''}</div>
-        <div class="cm-big" style="font-size:34px;margin:6px 0">${eur(q.premio)} € <small>${q.ind!==1?`patamar ${eur0(q.patamar)} × índice ${pctE(q.ind)}`:'patamar atingido'}</small></div>
+        <div class="cm-big" style="font-size:34px;margin:6px 0">${eur(q.premio)} € <small>${q.ind===1?'patamar atingido':P.indice==='patamares'?`patamar atingido · patamares a ${pctE(q.ind)} (índice)`:`patamar ${eur0(q.patamar)} × índice ${pctE(q.ind)}`}</small></div>
         <div style="margin:8px 0 4px">${escada}</div>
         <table style="margin-top:6px"><thead><tr><th>Categoria</th><th class="num">Eventos Nova</th><th class="num">Objetivo Nova</th><th class="num">Atingimento</th><th class="num">Valor</th></tr></thead>
         <tbody>${q.cats.map(c=>`<tr><td>${esc(c.nome)}</td><td class="num">${f1(c.ev)}</td><td class="num">${f1(c.ob)}</td><td class="num">${pctE(c.at)}</td><td class="num">${eur(c.val)}</td></tr>`).join('')}</tbody>
@@ -3584,7 +3587,7 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
       </div>
       <div>${pg || `<p class="muted">Nenhum prémio trimestral em pagamento no recibo de ${reciboTxt(CM.mes)}.</p>`}</div>
     </div>
-    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × ${P.regra==='minimo'?'a % mais baixa entre os objetivos Nova e Refidelização da categoria':'% do objetivo trimestral Nova atingido'} (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(P.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind!==1?` Índice de ${pctE(q.ind)} sobre o prémio.`:''}</p></div>`;
+    <p class="muted" style="font-size:12px;margin-bottom:0">Em cada categoria (Móvel e Fixo): eventos Nova × ${eur0(P.valorEvento)} × ${P.regra==='minimo'?'a % mais baixa entre os objetivos Nova e Refidelização da categoria':'% do objetivo trimestral Nova atingido'} (máx. 100 %). A soma fica no patamar abaixo (${pts.map(x=>eur0(x)).join(' · ')}); a partir de ${eur0(pts.at(-1))} paga o valor apurado, até ${eur0(q.teto)}. Pago em ${P.prestacoes} prestações iguais, a partir do ${P.atraso}.º mês depois do fim do trimestre.${q.ind===1?'':P.indice==='patamares'?` Com índice de ${pctE(q.ind)}, os patamares e o teto baixam na mesma proporção (base: ${[...P.patamares].map(Number).sort((a,b)=>a-b).map(x=>eur0(x)).join(' · ')}, teto ${eur0(P.teto)}).`:` Índice de ${pctE(q.ind)} sobre o prémio.`}</p></div>`;
 }
 // mensagens do «treinador»: só regras e números do próprio vendedor (nada de valores Vodafone)
 function comCoach(o){
@@ -4292,6 +4295,7 @@ async function cmsPlano(box){
           <div><label>Prestações</label>${inp('pr-n',PR0.prestacoes,60,'1')}</div>
           <div><label>Recibo: meses depois do RUN</label>${inp('pr-rc',PR0.recibo??2,60,'1')}</div>
           <div><label>Prémio: 1.º recibo, meses após o fim do trimestre</label>${inp('pr-at',PR0.atraso,60,'1')}</div>
+          <div><label>Índice do vendedor (&lt; 100 %)</label><select id="pr-ix"><option value="premio" ${PR0.indice!=='patamares'?'selected':''}>Multiplica o prémio (como no Excel)</option><option value="patamares" ${PR0.indice==='patamares'?'selected':''}>Baixa os patamares e o teto na mesma proporção</option></select></div>
           <div><label>Atingimento de cada categoria</label><select id="pr-rg"><option value="nova" ${PR0.regra!=='minimo'?'selected':''}>Só o objetivo Nova (como no Excel)</option><option value="minimo" ${PR0.regra==='minimo'?'selected':''}>O mais baixo entre Nova e Refidelização (plano escrito)</option></select></div>
         </div>
         <p class="muted" style="font-size:12px;margin-bottom:0">Móvel e Fixo: eventos Nova × € por evento × % de atingimento da categoria (máx. 100 %). A soma fica no patamar abaixo; a partir do último patamar paga o valor apurado até ao teto. Comissão mensal: o RUN de um mês é pago no recibo ${PR0.recibo??2} meses depois (RUN de julho → recibo de ${mesTxt(somaMeses('2026-07',+(PR0.recibo??2))).split(' ')[0]}). Prémio: o do 1.º trimestre paga-se nos recibos de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(m).split(' ')[0]).join(', ')}, juntamente com os RUN de ${runsDoPremio(v,'2026-T1').map(m=>mesTxt(somaMeses(m,-(+(PR0.recibo??2)))).split(' ')[0]).join(', ')}. Júnior/assistente: escreva os objetivos dele (ex.: 19,5 / 16,5) e índice 50 % no separador «Vendedores»; o índice reduz só o prémio, depois do patamar.</p></div>
@@ -4310,7 +4314,7 @@ async function cmsPlano(box){
       nv.pesos = Object.fromEntries(NAT_COM.map(n=>[n, num('pl-p-'+n.replace(/\W/g,''))]));
       nv.maj = v.maj.map((x,i)=>({n:+$('#pl-mn-'+i).value, pct:num('pl-mp-'+i)}));
       nv.objetivos = v.objetivos.map(o=>({...o, trim:num('ob-d-'+o.id)}));
-      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at'))), recibo:Math.max(0,Math.round(num('pr-rc'))), regra:$('#pr-rg').value};
+      nv.premio = {...PR0, valorEvento:num('pr-ve'), patamares:PR0.patamares.map((x,i)=>num('pr-pt-'+i)), teto:num('pr-teto'), prestacoes:Math.max(1,Math.round(num('pr-n'))), atraso:Math.max(0,Math.round(num('pr-at'))), recibo:Math.max(0,Math.round(num('pr-rc'))), regra:$('#pr-rg').value, indice:$('#pr-ix').value};
       const ov = PLANO.objVend||{};
       return {nv, nf, ov};
     };
