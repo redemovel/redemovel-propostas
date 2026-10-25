@@ -4357,12 +4357,14 @@ function vendLista(mes){
       val:{cat:c?.cat??o.cat??'', indice:c?.indice??o.indice??'', NM:c?.NM??o.NM??'', NF:c?.NF??o.NF??'', RM:c?.RM??o.RM??'', RF:c?.RF??o.RF??''}, desde:c?.desde||'', ult: hist.length ? [...hist].sort((a,b)=>a.desde<b.desde?-1:1).at(-1) : null}; });
 }
 const VD = {mesRef:null, desde:null, sort:'nome', dir:1, f:{}, draft:{}, inat:false, otT:null, ot:null};
+// quem conta para a média e o melhor da equipa (comparação entre colegas): por omissão todos menos o Master; configurável em «Vendedores»
+const contaComparar = uid => { const c = PLANO?.comparaVend?.[uid]; return c!=null ? !!c : S.users[uid]?.perfil!=='master'; };
 async function cmsVendedores(box){
   box.innerHTML = `<div class="card muted">A carregar…</div>`;
   try { await lerPlano(true); } catch(e){ box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; return; }
   VD.mesRef = VD.mesRef || mesLocal(); VD.desde = VD.desde || mesLocal(); VD.draft = {}; VD.ot = JSON.parse(JSON.stringify(PLANO.objTrim||{})); VD.otT = VD.otT || trimId(mesLocal());
   const v = versaoDe(PLANO.versoes, VD.mesRef), objs = v.objetivos, P = premioDe(v);
-  const COLS = [['aviso',''],['nome','Nome'],['perfil','Perfil'],['ativo','Ativo'],['phc','Nº PHC'],['sfid','SFID'],['cat','Categoria'],['indice','Índice prémio %'],...objs.map(o=>[o.id,'Obj. '+o.nome]),['desde','Em vigor desde']];
+  const COLS = [['aviso',''],['nome','Nome'],['perfil','Perfil'],['ativo','Ativo'],['phc','Nº PHC'],['sfid','SFID'],['cat','Categoria'],['indice','Índice prémio %'],...objs.map(o=>[o.id,'Obj. '+o.nome]),['comp','Compara'],['desde','Em vigor desde']];
   const OT_LISTA = Array.from({length:10},(_,k)=>trimId(somaMeses(mesLocal(), 3-3*k)));
   box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap"><h2 style="margin:0">Vendedores · comissionamento</h2><span class="sp"></span>
       <div><label>Ver o que estava em vigor em</label><input type="month" id="vd-ref" value="${VD.mesRef}" style="width:160px"></div>
@@ -4386,14 +4388,19 @@ async function cmsVendedores(box){
   const campo = (k) => ['indice',...objs.map(o=>o.id)].includes(k);
   const desenhar = () => {
     let L = vendLista(VD.mesRef).filter(x=>VD.inat || x.ativo);
-    const txt = (x,k) => k==='ativo' ? (x.ativo?'sim':'não') : k==='desde' ? (x.desde?x.desde.split('-').reverse().join('/'):'') : k in x.val ? String(VD.draft[x.uid]?.[k] ?? x.val[k] ?? '') : String(x[k]??'');
+    const txt = (x,k) => k==='comp' ? (contaComparar(x.uid)?'sim':'não') : k==='ativo' ? (x.ativo?'sim':'não') : k==='desde' ? (x.desde?x.desde.split('-').reverse().join('/'):'') : k in x.val ? String(VD.draft[x.uid]?.[k] ?? x.val[k] ?? '') : String(x[k]??'');
     Object.entries(VD.f).forEach(([k,f])=>{ if (f) L = L.filter(x=>txt(x,k).toLowerCase().includes(f.toLowerCase())); });
     L.sort((a,b)=>{ const k=VD.sort==='aviso'?'nome':VD.sort, A=txt(a,k), B=txt(b,k), na=parseFloat(A), nb=parseFloat(B); return VD.dir*(!isNaN(na)&&!isNaN(nb) ? na-nb : A.localeCompare(B,'pt')); });
     $('#vd-b').innerHTML = L.map(x=>{ const dv=k=>VD.draft[x.uid]?.[k] ?? x.val[k] ?? '', mud=k=>VD.draft[x.uid] && k in VD.draft[x.uid];
       return `<tr style="${x.ativo?'':'opacity:.55'}"><td title="${x.cfg?'Configurado':'Sem configuração própria: usa o padrão'}">${x.cfg?'':'⚠'}</td><td><b>${esc(x.nome)}</b></td><td>${esc(x.perfil)}</td><td>${x.ativo?'sim':'não'}</td><td>${esc(x.phc)}</td><td>${esc(x.sfid)}</td>
         <td><select data-k="${x.uid}|cat" style="font-size:12px;min-width:118px;${mud('cat')?'outline:2px solid var(--warn)':''}"><option value="">—</option>${CATS_VEND.map(c=>`<option ${dv('cat')===c?'selected':''}>${c}</option>`).join('')}</select></td>
         ${['indice',...objs.map(o=>o.id)].map(k=>`<td class="num"><input type="number" step="any" data-k="${x.uid}|${k}" value="${esc(dv(k))}" placeholder="${k==='indice'?100:(objs.find(o=>o.id===k)?.trim??'')}" style="width:70px;${mud(k)?'outline:2px solid var(--warn)':''}"></td>`).join('')}
+        <td style="text-align:center" title="Conta para a média e o melhor da equipa no painel dos vendedores (a produção conta sempre para a empresa)"><input type="checkbox" data-cmp="${x.uid}" ${contaComparar(x.uid)?'checked':''}></td>
         <td style="font-size:12px">${x.desde?x.desde.split('-').reverse().join('/'):'—'}${x.versoes>1?` <span class="muted">(${x.versoes} versões)</span>`:''}</td></tr>`; }).join('') || `<tr><td colspan="${COLS.length}" class="muted">Nenhum vendedor.</td></tr>`;
+    $('#vd-b').querySelectorAll('[data-cmp]').forEach(el=>el.onchange=async()=>{ const uid=el.dataset.cmp, v=el.checked;
+      try { await setDoc(doc(db,'config','planoVendedor'),{comparaVend:{[uid]:v}},{merge:true}); PLANO.comparaVend={...(PLANO.comparaVend||{}),[uid]:v};
+        toast(`${userNome(uid)} ${v?'passa a contar':'deixa de contar'} para a comparação entre colegas.`);
+        AG_MEM=null; agenteRecalcular(trimId(mesLocal())).catch(()=>{}); } catch(e){ el.checked=!v; toast(errTxt(e),true); } });
     $('#vd-b').querySelectorAll('[data-k]').forEach(el=>el.onchange=()=>{ const [uid,k]=el.dataset.k.split('|'), x=vendLista(VD.mesRef).find(y=>y.uid===uid), novo = campo(k) ? (el.value===''?'':+el.value) : el.value;
       if (String(novo)===String(x.val[k]??'')) { if (VD.draft[uid]) { delete VD.draft[uid][k]; if (!Object.keys(VD.draft[uid]).length) delete VD.draft[uid]; } } else (VD.draft[uid]=VD.draft[uid]||{})[k]=novo;
       el.style.outline = VD.draft[uid] && k in VD.draft[uid] ? '2px solid var(--warn)' : ''; contar(); });
@@ -4851,7 +4858,7 @@ async function agenteRecalcular(t){
   // objetivos trimestrais dos vendedores: média e melhor atingimento da equipa (só agregados, sem nomes), para o painel de cada um.
   // Duas contas, como o botão do painel: só PN (equipa) e PN + RPN em curso sem os «Em Elaboração» (equipaRpn), igual ao que o vendedor soma no seu painel
   const equipa = {}, equipaRpn = {}; try { await lerPlano(); const mRef = trimMeses(t)[0], v = versaoDe(PLANO.versoes, mRef);
-    const vs = vendedoresProj().filter(x=>S.users[x.uid]?.perfil!=='master' && S.users[x.uid]?.ativo!==false), rsV = rs.filter(r=>r.estado!=='Em Elaboração');
+    const vs = vendedoresProj().filter(x=>contaComparar(x.uid) && S.users[x.uid]?.ativo!==false), rsV = rs.filter(r=>r.estado!=='Em Elaboração');
     const est = (pcs) => pcs.length ? {media: Math.round(pcs.reduce((a,x)=>a+x,0)/pcs.length*10)/10, melhor: Math.round(Math.max(...pcs)*10)/10, n: pcs.length} : null;
     v.objetivos.forEach(o=>{ const a=[], b=[];
       vs.forEach(x=>{ const ob=+objDe(x.uid, v, mRef)[o.id]||0; if (!ob) return; const e=eventosDe(pnsT.filter(r=>r.vendedorUid===x.uid)), er=eventosDe(rsV.filter(r=>r.vendedorUid===x.uid));
