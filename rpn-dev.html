@@ -106,7 +106,7 @@ import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/10.
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword,
          sendPasswordResetEmail, updatePassword, connectAuthEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { getFirestore, doc, getDoc, getDocs, setDoc as _setDoc, updateDoc as _updateDoc, addDoc as _addDoc, deleteDoc as _deleteDoc, collection, query, where, orderBy,
-         limit, runTransaction as _runTransaction, serverTimestamp, writeBatch as _writeBatch, onSnapshot, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+         limit, arrayUnion, runTransaction as _runTransaction, serverTimestamp, writeBatch as _writeBatch, onSnapshot, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject, connectStorageEmulator } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js';
 
 // economia de leituras: a lista de RPN fica em memória 1 minuto; qualquer escrita feita nesta sessão obriga a reler
@@ -206,6 +206,7 @@ onAuthStateChanged(auth, async user => {
     S.projN = 0; S.projAtr = 0; Object.assign(AT,{lista:null, mes:null, listaMes:null, extra:[], f:{estado:'',txt:'',meus:null}, cur:null, tab:'pedido', pend:null}); AT_EM = 0; Object.assign(CL,{q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}}); Object.assign(PJ,{tab:'tratar', mes:null, vend:'', lista:[], cfg:{}});
     await Promise.all([loadUsers(), loadProdutos()]);
     handlePropostaParam();
+    comissaoSemanal();
     render();
     projetosAoEntrar();   // não bloqueia a entrada
     setTimeout(()=>atAgendadasDistribuir(), 2500);
@@ -3672,7 +3673,32 @@ const mesDoRun = (run, nomeF) => { const a=String(nomeF||'').match(/Detalhe_(\d{
   const b=String(run||'').match(/(\d{4})\s+(\d{2})/); return b ? b[1]+'-'+b[2] : ''; };
 
 // a partir do RUN de agosto de 2026 o apuramento é só da plataforma: o «pago» importado do PHC desses meses sai (uma vez) e o Histórico PHC deixa de os importar
-const PHC_ATE = '2026-07'; let PHC_VISTO = false;
+// 1.ª abertura da semana (tipicamente 2.ª feira): entra em «A minha comissão» (por browser; um link direto a um processo não conta)
+function comissaoSemanal(){
+  try {
+    if (!(perfil()==='backoffice' || ['comercial','coordenador'].includes(perfil()) || S.me.vendedorPHC || isFin())) return;
+    const d=new Date(); d.setDate(d.getDate()-((d.getDay()+6)%7));
+    const sem=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, k='rpn-comSem-'+S.me.uid;
+    let ult=null; try { ult=localStorage.getItem(k); } catch(_){ return; }
+    if (ult===sem) return;
+    const h=location.hash||''; if (/^#\/(rpn|atividades|projetos|clientes)\/./.test(h) || h.startsWith('#/novo')) return;
+    try { localStorage.setItem(k, sem); } catch(_){ return; }
+    history.replaceState(null,'',location.pathname+location.search+'#/comissao');
+    setTimeout(()=>toast('Nova semana: comece pela sua comissão.'), 600);
+  } catch(_){}
+}
+const PHC_ATE = '2026-07'; let PHC_VISTO = false, LOGPCT_VISTO = false;
+// registos antigos do Plano com as % dos escalões: passam para configFin/planoLog (só Master) e o registo geral fica sem %
+async function limparLogPct(){
+  LOGPCT_VISTO = true;
+  try { const f = await getDoc(doc(db,'configFin','planoLog')); if (f.exists() && f.data().limpoEm) return 0;
+    const sn = await getDocs(collection(db,'comissoes','log','alteracoes')), RX = /escalão (\d+): [^;]*?% → [^;]*?%/g, mov = [];
+    for (const d of sn.docs) { const x=d.data(), r=String(x.resumo||''); if (!RX.test(r)) continue; RX.lastIndex=0;
+      mov.push({quando:x.quando||'', por:x.por||'', desde:x.desde||'', resumo:r});
+      await updateDoc(d.ref, {resumo: r.replace(RX, (m,n)=>`escalão ${n}: % alterada`)}); }
+    await setDoc(doc(db,'configFin','planoLog'), {...(mov.length?{itens:arrayUnion(...mov)}:{}), limpoEm:new Date().toISOString()}, {merge:true});
+    return mov.length; } catch(e){ console.warn('limparLogPct', e); return 0; }
+}
 async function limparPHCdepois(){
   PHC_VISTO = true;
   try { const ref=doc(db,'configFin','phcCorte'), c=await getDoc(ref); if (c.exists() && c.data().ate===PHC_ATE && c.data().limpo) return 0;
@@ -3685,6 +3711,7 @@ async function limparPHCdepois(){
   } catch(e){ console.warn('PHC depois do corte', e); return 0; }
 }
 function viewComissionamento(){
+  if (isMaster() && !LOGPCT_VISTO) limparLogPct();
   if (isMaster() && !PHC_VISTO) { limparPHCdepois().then(n=>{ if (n) { toast(`Retirado o «pago» do PHC a partir de ${mesTxt(somaMeses(PHC_ATE,1))}: o apuramento desses RUN é só da plataforma.`); viewComissionamento(); } }); }
   const m=$('#main'); if (!CMS_MES) CMS_MES = somaMeses(mesLocal(), -1);
   m.innerHTML = `<div class="card" style="border-left:4px solid var(--red)"><b>Zona confidencial.</b> <span class="muted">Valores recebidos da Vodafone: só o Master e a BO Financeiro têm acesso. Não partilhar capturas de ecrã.</span></div>
@@ -4364,7 +4391,10 @@ async function cmsPlano(box){
       try { const b = writeBatch(db);
         b.set(doc(db,'config','planoVendedor'), {versoes:pv, objVend:ov, objTrim:PLANO.objTrim||{}, vendCfg:PLANO.vendCfg||{}, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
         b.set(doc(db,'configFin','comissao'), {versoes:pf, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.nome});
-        await b.commit(); await logAlt({tipo:'Plano', desde, resumo: (vs.some(x=>x.desde===desde)?'Versão de '+mesTxt(desde)+' corrigida':'Nova versão a partir de '+mesTxt(desde))+': '+difPlano(versaoDe(PLANO.versoes, desde), nv, versaoDe(FIN.versoes, desde), nf)});
+        await b.commit(); const tit=(vs.some(x=>x.desde===desde)?'Versão de '+mesTxt(desde)+' corrigida':'Nova versão a partir de '+mesTxt(desde))+': ';
+        await logAlt({tipo:'Plano', desde, resumo: tit+difPlano(versaoDe(PLANO.versoes, desde), nv, versaoDe(FIN.versoes, desde), nf, false)});
+        // as % ficam só no registo do Master (configFin): a BO Financeiro lê o registo geral, mas não pode saber as %
+        try { const pc=difPlano(versaoDe(PLANO.versoes, desde), nv, versaoDe(FIN.versoes, desde), nf, true); if (pc) await setDoc(doc(db,'configFin','planoLog'), {itens:arrayUnion({quando:new Date().toISOString(), por:S.me.nome, desde, resumo:tit+pc})}, {merge:true}); } catch(e){ console.warn('planoLog', e); }
         PLANO=null; CM.dados=null; toast('Plano guardado.'); cmsPlano(box); } catch(e){ toast(errTxt(e), true); } };
     $('#pl-s').onclick = () => gravar(v.desde);
     $('#pl-c').onclick = () => cmsPlano(box);
@@ -4373,8 +4403,10 @@ async function cmsPlano(box){
 }
 // ---- registo de alterações ao comissionamento (comissoes/log/alteracoes: só Master e BO Financeiro leem) ----
 const logAlt = d => addDoc(collection(db,'comissoes','log','alteracoes'), {...d, em:serverTimestamp(), quando:new Date().toISOString(), porUid:S.me.uid, por:S.me.nome}).catch(e=>console.warn('logAlt', e));
-function difPlano(v0, v1, f0, f1){ const d=[];
-  v1.escaloes.forEach((e,i)=>{ const a=v0?.escaloes?.[i]||{}; if (+a.min!==+e.min) d.push(`escalão ${escNum(i)}: ${a.min??'—'} → ${e.min} eventos`); if (+f0?.pct?.[i]!==+f1.pct[i]) d.push(`escalão ${escNum(i)}: ${f0?.pct?.[i]??'—'} % → ${f1.pct[i]} %`); });
+// soPct=false: texto para o registo geral (sem %); soPct=true: só as mudanças de % (registo do Master em configFin/planoLog)
+function difPlano(v0, v1, f0, f1, soPct){ const d=[];
+  if (soPct) { v1.escaloes.forEach((e,i)=>{ if (+f0?.pct?.[i]!==+f1.pct[i]) d.push(`escalão ${escNum(i)}: ${f0?.pct?.[i]??'—'} % → ${f1.pct[i]} %`); }); return d.join('; '); }
+  v1.escaloes.forEach((e,i)=>{ const a=v0?.escaloes?.[i]||{}; if (+a.min!==+e.min) d.push(`escalão ${escNum(i)}: ${a.min??'—'} → ${e.min} eventos`); if (+f0?.pct?.[i]!==+f1.pct[i]) d.push(`escalão ${escNum(i)}: % alterada`); });
   if (+f0?.valorEvento?.ref!==+f1.valorEvento.ref || +f0?.valorEvento?.nova!==+f1.valorEvento.nova) d.push('comissão VDF por evento alterada');
   (v1.maj||[]).forEach((m,i)=>{ if (+v0?.maj?.[i]?.pct!==+m.pct) d.push(`majoração ${m.n} objetivos: ${v0?.maj?.[i]?.pct??'—'} → ${m.pct} %`); });
   (v1.objetivos||[]).forEach(o=>{ const a=(v0?.objetivos||[]).find(x=>x.id===o.id); if (+a?.trim!==+o.trim) d.push(`objetivo padrão ${o.nome}: ${a?.trim??'—'} → ${o.trim}`); });
@@ -4480,6 +4512,7 @@ async function cmsVendedores(box){
   $('#vd-log-go').onclick = async () => { $('#vd-log').textContent='A carregar…';
   try { const sn = await getDocs(query(collection(db,'comissoes','log','alteracoes'), orderBy('quando','desc'), limit(80)));
     const L = sn.docs.map(d=>d.data());
+    if (isMaster()) { try { const f=await getDoc(doc(db,'configFin','planoLog')); (f.data()?.itens||[]).forEach(x=>L.push({...x, tipo:'Plano · % 🔒'})); L.sort((a,b)=>String(b.quando).localeCompare(String(a.quando))); } catch(_){} }
     $('#vd-log').innerHTML = L.length ? `<table><thead><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Em vigor desde</th><th>Alteração</th></tr></thead><tbody>${L.map(l=>`<tr><td style="white-space:nowrap">${esc(String(l.quando||'').slice(0,16).replace('T',' '))}</td><td>${esc(l.por||'')}</td><td>${esc(l.tipo||'')}${l.nome?` · <b>${esc(l.nome)}</b>`:''}</td><td>${l.desde?mesTxt(l.desde):''}</td><td style="font-size:12px">${esc(l.resumo||'')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted" style="margin:0">Ainda sem alterações registadas.</p>';
   } catch(e){ $('#vd-log').textContent = 'Histórico indisponível ('+errTxt(e)+').'; } };
 }
