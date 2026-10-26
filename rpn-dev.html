@@ -3671,7 +3671,21 @@ const numX = x => typeof x==='number' ? x : (parseFloat(String(x||'').replace(/\
 const mesDoRun = (run, nomeF) => { const a=String(nomeF||'').match(/Detalhe_(\d{4})(\d{2})/); if (a) return a[1]+'-'+a[2];
   const b=String(run||'').match(/(\d{4})\s+(\d{2})/); return b ? b[1]+'-'+b[2] : ''; };
 
+// a partir do RUN de agosto de 2026 o apuramento é só da plataforma: o «pago» importado do PHC desses meses sai (uma vez) e o Histórico PHC deixa de os importar
+const PHC_ATE = '2026-07'; let PHC_VISTO = false;
+async function limparPHCdepois(){
+  PHC_VISTO = true;
+  try { const ref=doc(db,'configFin','phcCorte'), c=await getDoc(ref); if (c.exists() && c.data().ate===PHC_ATE && c.data().limpo) return 0;
+    const sn=await getDocs(query(collection(db,'comissoesVend'), where('origem','==','PHC'))), del=sn.docs.filter(d=>String(d.data().mes||'')>PHC_ATE), meses=[...new Set(del.map(d=>d.data().mes))];
+    for (let i=0;i<del.length;i+=400){ const b=writeBatch(db); del.slice(i,i+400).forEach(d=>b.delete(d.ref)); await b.commit(); }
+    for (const m of meses) await setDoc(doc(db,'runs',m),{comPHC:false},{merge:true}).catch(()=>{});
+    await setDoc(ref,{ate:PHC_ATE, limpo:true, em:serverTimestamp(), por:S.me.nome, apagados:del.length, meses});
+    if (del.length) { await logAlt({tipo:'Histórico PHC retirado', desde:meses[0], resumo:`Comissões pagas do PHC retiradas de ${meses.join(', ')} (${del.length} registos): a partir de ${mesTxt(somaMeses(PHC_ATE,1))} o apuramento é só da plataforma`}).catch(()=>{}); CMS_CASA=null; CMS_RUN=null; }
+    return del.length;
+  } catch(e){ console.warn('PHC depois do corte', e); return 0; }
+}
 function viewComissionamento(){
+  if (isMaster() && !PHC_VISTO) { limparPHCdepois().then(n=>{ if (n) { toast(`Retirado o «pago» do PHC a partir de ${mesTxt(somaMeses(PHC_ATE,1))}: o apuramento desses RUN é só da plataforma.`); viewComissionamento(); } }); }
   const m=$('#main'); if (!CMS_MES) CMS_MES = somaMeses(mesLocal(), -1);
   m.innerHTML = `<div class="card" style="border-left:4px solid var(--red)"><b>Zona confidencial.</b> <span class="muted">Valores recebidos da Vodafone: só o Master e a BO Financeiro têm acesso. Não partilhar capturas de ecrã.</span></div>
     <div id="cms-aviso"></div><div class="tabs">${[['agente','Objetivos Vodafone'],['run','RUN Vodafone'],['valid','Validação'],['vend',isMaster()?'Comissões por vendedor':'Conciliação'],...(isMaster()?[['vendedores','Vendedores'],['plano','Plano e objetivos'],['hist','Histórico PHC']]:[]),['manual','📘 Manual']].map(([k,t])=>`<a data-t="${k}" class="${CMS_TAB===k?'on':''}">${t}</a>`).join('')}</div><div id="cms"></div>`;
@@ -4614,6 +4628,9 @@ function cmsHist(box){
       const nm=semAcento(String(u.nome||'')), alvo=semAcento(String(nomesPHC[k]||'')), bate = alvo && (nm===alvo || alvo.includes(nm) || nm.includes(alvo));
       if (!porVend[k] || (bate && !porVend[k].bate)) porVend[k]={uid, bate}; });
     Object.keys(porVend).forEach(k=>porVend[k]=porVend[k].uid);
+    const depois=[...new Set([...Object.keys(mesesA),...Object.keys(mesesB)])].filter(m=>m>PHC_ATE).sort();
+    depois.forEach(m=>{ delete mesesA[m]; delete mesesB[m]; });   // a partir de agosto de 2026 o apuramento é só da plataforma
+    if (depois.length) toast(`Ignorados ${depois.map(m=>m.split('-').reverse().join('/')).join(', ')}: a partir de ${mesTxt(somaMeses(PHC_ATE,1))} as comissões apuram-se só na plataforma.`);
     const todos=[...new Set([...Object.keys(mesesA),...Object.keys(mesesB)])].sort();
     const linhaRes = m => { const a=mesesA[m]||[], b=mesesB[m]||[], ex=existentes[m]; const salta = ex && ex.origem!=='PHC' && !$('#hi-sub').checked;
       return `<tr><td>${m.split('-').reverse().join('/')}</td><td class="num">${a.length}</td><td class="num">${eur(a.reduce((s,l)=>s+l[RL.val],0))}</td><td>${a.length?(salta?'<span class="badge">mantém o RUN xlsx</span>':ex?'substitui':'novo'):'—'}</td>
