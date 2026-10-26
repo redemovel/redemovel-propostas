@@ -3828,8 +3828,8 @@ function cmsVend(box){
   box.innerHTML = `<div class="card muted">A ler o RUN e a conciliar com os PN…</div>`;
   lerRun(CMS_MES).then(async R=>{
     if (!R.existe) { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
-      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div>${cardGrav}<div id="cms-mapa"></div><div id="cms-pt"></div>`; desenharPremios($('#cms-pt'));
-      cardMapa(CMS_MES, null).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
+      box.innerHTML = `<div class="card"><div class="row" style="gap:16px;align-items:flex-end">${cmsMesSel()}</div><p class="muted">Sem RUN importado para ${mesTxt(CMS_MES)}. Importe-o no separador «RUN Vodafone».</p></div><div id="cms-mapa"></div><div id="cms-pt"></div>`; desenharPremios($('#cms-pt'));
+      cardMapa(CMS_MES, null).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h||cardGrav; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); el.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); }); } });
       box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
       ligaMes(()=>cmsVend(box)); return; }
     const avisoPHC = CMS_RUN.comPHC ? `<div class="warnbox">As comissões deste RUN foram importadas do PHC (o que foi efetivamente pago). ${isMaster()?'Gravar de novo substitui-as pelo cálculo da plataforma.':''}</div>` : '';
@@ -3840,11 +3840,11 @@ function cmsVend(box){
     else { const {grav, nomeV, cardGrav} = await cardGravado(CMS_MES);
       box.innerHTML = `${avisoPHC}<div class="card"><div class="row" style="gap:16px;align-items:flex-end;flex-wrap:wrap">${cmsMesSel()}<span class="sp"></span><button class="btn pri" id="cms-conc">Conciliar RUN com os PN</button></div>
         <p class="muted" style="font-size:13px;margin-bottom:0">RUN de ${mesTxt(CMS_MES)}: ${R.linhas.length} linhas, ${eur(R.linhas.reduce((a,l)=>a+l[RL.val],0))} €. Para obter o cálculo por vendedor, as linhas por imputar, as diferenças com o PHC e o botão «Fechar RUN», carregue em <b>«Conciliar RUN com os PN»</b> (lê os PN da plataforma).</p></div>
-        ${cardGrav}<div id="cms-mapa"></div><div id="cms-pt"></div>`;
+        <div id="cms-mapa"></div><div id="cms-pt"></div>`;
       $('#cms-conc').onclick = () => { CMS_CONC = CMS_MES; cmsVend(box); };
       ligaMes(()=>cmsVend(box)); desenharPremios($('#cms-pt'));
       box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
-      cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
+      cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h||cardGrav; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); el.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); }); } });
       return; }
     const pv = {}; casa.forEach(x=>{ if (!x.uid || x.f==='ag') return; const o=pv[x.uid]=pv[x.uid]||{uid:x.uid, rec:0, com:0, n:0, cb:0, meses:{}}; o.rec+=x.l[RL.val]; o.com+=x.com; o.n++; if (x.l[RL.val]<0) o.cb+=x.com;
       const mm=o.meses[x.mesPN]=o.meses[x.mesPN]||{rec:0,com:0,t:x.t}; mm.rec+=x.l[RL.val]; mm.com+=x.com; });
@@ -3856,7 +3856,7 @@ function cmsVend(box){
         ${R.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">🔒 RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))}</span>${isMaster()?'<button class="btn" id="cms-reab">Reabrir RUN</button>':''}`
           : `${isMaster()?'':'<!--'}<button class="btn pri" id="cms-g" title="Grava o mapa do mês: o ranking (visível a todos) e o detalhe por PN (visível a cada vendedor)">${CMS_RUN.comPHC?'Gravar rascunho (substitui o PHC)':'Gravar rascunho'}</button>${isMaster()&&(CMS_RUN.rascEm||CMS_RUN.comPHC||CMS_RUN.gravadoEm)?'<button class="btn pri" id="cms-fecha" title="Publica as comissões aos vendedores, guarda o cálculo e fecha a produção do mês">Finalizar RUN</button>':''}${isMaster()?'':'-->'}`}</div>
       <p class="muted" style="font-size:12px;margin-bottom:0">Cada linha do RUN é imputada ao PN pelo POS e ao vendedor desse PN.${isMaster()?' A % é a do escalão que o vendedor atingiu no mês do PN, com a majoração desse mês.':''} ${CMS_RUN.gravadoEm?`<b>Gravado ${tsTxt(CMS_RUN.gravadoEm)}.</b>`:''}</p></div>
-      ${cardGrav}
+      <div id="cms-mapa"><div class="card muted">A carregar o mapa de pagamentos…</div></div>
       <div id="cms-pt"></div>
 ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN de ${mesTxt(CMS_MES)}</h2>
       <table><thead><tr><th>Vendedor</th><th>Mês do PN · escalão · %</th><th class="num">Linhas</th><th class="num">Recebido</th><th class="num">Charge-backs</th><th class="num">Comissão calculada</th><th class="num">Gravado</th><th class="num">Margem</th></tr></thead>
@@ -3889,11 +3889,16 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
         <p class="muted" style="font-size:12px;margin-bottom:0">Total: ${eur(naAg.reduce((a,x)=>a+x.l[RL.val],0))} €</p></div>`:''}
       ${(()=>{ const man=Object.fromEntries(Object.entries(R.manual||{}).filter(([,m])=>!m.agencia)), ks=Object.keys(man); if (!ks.length) return ''; const ch=chavesLinhas(R.linhas);
         return `<div class="card scroll"><h2>Atribuições manuais deste RUN (${ks.length})</h2><table><thead><tr><th>Código</th><th>POS</th><th>MSISDN</th><th class="num">Valor</th><th>PN</th><th>Por</th><th></th></tr></thead><tbody>${ks.map(k=>{ const i=ch.indexOf(k), l=R.linhas[i]||[]; return `<tr><td>${esc(l[RL.cod]||k.split('|')[0])}</td><td>${esc(l[RL.pos]||'')}</td><td>${esc(l[RL.msisdn]||'')}</td><td class="num">${l.length?eur(l[RL.val]):'—'}</td><td><b>${esc(man[k].numero||'')}</b>${i<0?' <span class="muted">(linha já não existe no RUN)</span>':''}</td><td style="font-size:12px">${esc(man[k].por||'')} ${esc(String(man[k].em||'').slice(0,10).split('-').reverse().join('/'))}</td><td>${R.fechado?'':`<button class="btn sm" data-desf="${esc(k)}">Desfazer</button>`}</td></tr>`; }).join('')}</tbody></table></div>`; })()}
-      <div id="cms-mapa"></div>`;
+      `;
     ligaMes(()=>cmsVend(box)); desenharPremios($('#cms-pt'));
     box.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); });
     if ($('#cms-g')) $('#cms-g').onclick = () => gravarComissoes(casa, lst).then(()=>cmsVend(box));
-    $('#cms-fecha')?.addEventListener('click', async()=>{ try { if (await finalizarRun(CMS_MES, casa, R)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
+    $('#cms-fecha')?.addEventListener('click', async()=>{ finalizarRun.etapa=''; try { if (await finalizarRun(CMS_MES, casa, R)) cmsVend(box); } catch(e){ console.error('Finalizar RUN', e);
+      // o erro fica numa janela (para se poder copiar), com o passo em que parou
+      modal(`<h2>Erro ao finalizar o RUN de ${mesTxt(CMS_MES)}</h2><p>Parou no passo <b>${esc(finalizarRun.etapa||'antes de começar')}</b>.</p>
+        <textarea readonly rows="5" style="width:100%;font-family:monospace;font-size:12px">${esc((e?.code?e.code+' · ':'')+(e?.message||String(e)))}</textarea>
+        <p class="muted" style="font-size:12px">Copie este texto e envie-o. O que ficou feito até esse passo mantém-se; pode tentar outra vez.</p>
+        <div class="row"><span class="sp"></span><button class="btn" id="c">Fechar</button></div>`, (m,close)=>{ m.querySelector('#c').onclick=()=>{ close(); cmsVend(box); }; }); } });
     box.querySelectorAll('[data-dif]').forEach(a=>a.onclick=e=>{ e.preventDefault(); compararPHC(a.dataset.dif, casa, gravDe(a.dataset.dif), CMS_MES); });
     $('#cms-reab')?.addEventListener('click', async()=>{ try { if (await fecharRun(CMS_MES, false)) cmsVend(box); } catch(e){ toast(errTxt(e), true); } });
     $('#rs-q')?.addEventListener('input', e=>{ const q=e.target.value.trim().toUpperCase(), qd=q.replace(/\D/g,''), el=$('#rs-r'); if (q.length<4) { el.innerHTML=''; return; }
@@ -3918,7 +3923,7 @@ ${isMaster()?`      <div class="card scroll"><h2>Cálculo da plataforma · RUN d
     box.querySelectorAll('[data-agx]').forEach(b=>b.onclick=()=>linhaNaAgenciaDesfazer(casa.find(x=>x.i===+b.dataset.agx), R, ev=>refazer(ev, box, cmsVend)));
     box.querySelectorAll('[data-desf]').forEach(b=>b.onclick=async()=>{ const man={...(R.manual||{})}; delete man[b.dataset.desf];
       try { await updateDoc(doc(db,'runs',CMS_MES), {manual:man}); await logAlt({tipo:'Atribuição manual desfeita', desde:CMS_MES, resumo:b.dataset.desf.split('#')[0]}); R.manual=man; refazer({tipo:'solta', chave:b.dataset.desf}, box, cmsVend); } catch(e){ toast(errTxt(e), true); } });
-    cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); } });
+    cardMapa(CMS_MES, R).then(h=>{ const el=$('#cms-mapa'); if (el) { el.innerHTML=h||cardGrav; $('#mp-x')?.addEventListener('click', ()=>descarregarMapa(CMS_MES).catch(e=>toast(errTxt(e),true))); el.querySelectorAll('[data-gv]').forEach(b=>b.onclick=()=>{ const g=grav.find(x=>x.id===b.dataset.gv); if (g) verGravado(g, nomeV(g.uid)); }); } });
   }).catch(e=>{ console.error(e); box.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; });
 }
 // prémio trimestral de toda a equipa para um RUN (BO Financeiro / Master): uma leitura dos PN do trimestre
@@ -4123,7 +4128,7 @@ async function finalizarRun(mes, casa, R){
       m.style.maxWidth='860px'; m.querySelector('#fz-c').onclick=()=>{ close(); res(null); };
       m.querySelector('#fz-ok').onclick=()=>{ const mot = m.querySelector('#fz-mot')?.value.trim()||''; if (abertos.length && mot.length<5) return toast('Escreva o motivo (ou feche primeiro os RPN em aberto).', true); close(); res({mot}); }; }));
   if (!ok) return false;
-  toast('A finalizar…');
+  toast('A finalizar…'); finalizarRun.etapa='1 · publicar o rascunho aos vendedores';
   // 1) publicar o rascunho (substitui o que estava publicado para este RUN)
   if (R.rascEm) { const rS = await getDocs(collection(db,'runs',mes,'rasc')), pub = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
     let b = writeBatch(db), n = 0; const flush = async () => { await b.commit(); b = writeBatch(db); n = 0; };
@@ -4132,9 +4137,9 @@ async function finalizarRun(mes, casa, R){
     for (const d of rS.docs) { b.set(doc(db,'comissoesVend',d.id), {...d.data(), publicadoEm:serverTimestamp()}); if (++n>=200) await flush(); }
     await flush(); }
   // 2) fotografia do cálculo + rentabilidade + RUN fechado
-  await fecharRun(mes, true, casa);
+  finalizarRun.etapa='2 · guardar o cálculo e fechar o RUN'; await fecharRun(mes, true, casa);
   // 3) fecho da produção do mês
-  const p = await getDoc(doc(db,'config','producao')), ate = p.exists() ? (p.data().fechadoAte||'') : '';
+  finalizarRun.etapa='3 · fechar a produção do mês'; const p = await getDoc(doc(db,'config','producao')), ate = p.exists() ? (p.data().fechadoAte||'') : '';
   await setDoc(doc(db,'config','producao'), {fechadoAte: ate>mes ? ate : mes, meses:{[mes]:{em:new Date().toISOString(), por:S.me.nome, rpnAbertos:abertos.length, motivo:ok.mot||''}}, atualizadoEm:serverTimestamp()}, {merge:true});
   await setDoc(doc(db,'runs',mes), {gravadoEm:serverTimestamp(), gravadoPor:S.me.nome, publicadoEm:new Date().toISOString()}, {merge:true});
   await logAlt({tipo:'RUN finalizado', desde:mes, resumo:`RUN de ${mesTxt(mes)}: comissões ${R.rascEm?'publicadas':'do PHC mantidas'}; produção de ${mesTxt(mes)} fechada${abertos.length?`; ${abertos.length} RPN em aberto (${ok.mot})`:''}`});
@@ -4186,20 +4191,21 @@ function compararPHC(uid, casa, g, mes){
 }
 // mapa de pagamentos do RUN (o que foi gravado): para a contabilidade
 async function mapaPagamentos(mes){
-  let sn = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes)));
-  if (!sn.docs.length) { const rS = await getDocs(collection(db,'runs',mes,'rasc')).catch(()=>null); if (rS?.docs.length) sn = rS; }
-  const rank = sn.docs.find(d=>!d.data().uid)?.data()?.ranking||[], det = sn.docs.filter(d=>d.data().uid).map(d=>d.data());
+  let sn = await getDocs(query(collection(db,'comissoesVend'), where('mes','==',mes))), rasc = false;
+  if (!sn.docs.length) { const rS = await getDocs(collection(db,'runs',mes,'rasc')).catch(()=>null); if (rS?.docs.length) { sn = rS; rasc = true; } }
+  mapaPagamentos.rasc = rasc;
+  const rank = sn.docs.find(d=>!d.data().uid)?.data()?.ranking||[], det = sn.docs.filter(d=>d.data().uid).map(d=>({...d.data(), _id:d.id}));
   const linhas = det.map(g=>{ const pr = (g.detalhe||[]).filter(p=>p.premio || (!p.rpnId && (p.linhas||[]).some(l=>/prémio trimestral/i.test(l.tipo||'')))).reduce((a,p)=>a+(+p.valor||0),0), u=S.users[g.uid]||{};
-    return {nome: userNome(g.uid) || rank.find(x=>x.uid===g.uid)?.nome || g.uid, phc:u.vendedorPHC||'', cat:'Vendedor', inativo: u.ativo===false, categoria: cfgVend(g.uid, mes)?.cat||'', com: r2((+g.valor||0)-pr), premio: r2(pr), total: r2(+g.valor||0), origem:g.origem||'Plataforma'}; });
+    return {gid:g._id, uid:g.uid, nPN:(g.detalhe||[]).filter(p=>p.rpnId||!p.premio).length, nLin:(g.detalhe||[]).reduce((a2,p)=>a2+(p.linhas||[]).length,0), orig:g.origem||'', nome: userNome(g.uid) || rank.find(x=>x.uid===g.uid)?.nome || g.uid, phc:u.vendedorPHC||'', cat:'Vendedor', inativo: u.ativo===false, categoria: cfgVend(g.uid, mes)?.cat||'', com: r2((+g.valor||0)-pr), premio: r2(pr), total: r2(+g.valor||0), origem:g.origem||'Plataforma'}; });
   rank.filter(x=>x.cat==='BackOffice').forEach(x=>linhas.push({nome:x.nome, phc:S.users[x.uid]?.vendedorPHC||'', cat:'BackOffice', categoria:'', com:r2(x.valor), premio:0, total:r2(x.valor), origem:'Produção BO'}));
   return linhas.sort((a,b)=>a.cat.localeCompare(b.cat)||a.nome.localeCompare(b.nome,'pt'));
 }
 async function cardMapa(mes, R){
   const L = await mapaPagamentos(mes); if (!L.length) return '';
-  return `<div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Mapa de pagamentos · recibo de ${reciboTxt(mes)} (RUN de ${mesTxt(mes)})</h2>${R?.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(R.fechado.por||'')}</span>`:'<span class="badge">por fechar</span>'}<span class="sp"></span><button class="btn sm" id="mp-x">Descarregar Excel</button></div>
-    <table style="margin-top:8px"><thead><tr><th>Colaborador</th><th>Nº PHC</th><th>Tipo</th><th>Categoria</th><th class="num">Comissão do RUN</th><th class="num">Prémio trimestral</th><th class="num">Total a pagar</th></tr></thead>
-    <tbody>${L.map(x=>`<tr style="${x.inativo?'background:#fff4d6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Utilizador inativo: os incentivos cessam com o fim do vínculo">inativo</span>':''}</td><td>${esc(x.phc)}</td><td>${x.cat}</td><td>${esc(x.categoria)}</td><td class="num">${eur(x.com)}</td><td class="num">${x.premio?eur(x.premio):'—'}</td><td class="num"><b>${eur(x.total)}</b></td></tr>`).join('')}</tbody>
-    <tfoot><tr class="tot"><td colspan="4">Total</td><td class="num">${eur(L.reduce((a,x)=>a+x.com,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.premio,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.total,0))}</td></tr></tfoot></table>
+  return `<div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Mapa de pagamentos · recibo de ${reciboTxt(mes)} (RUN de ${mesTxt(mes)})</h2>${mapaPagamentos.rasc?'<span class="badge" style="background:#fff4d6;color:#8a5a00" title="Rascunho: ainda não visível aos vendedores; fica publicado ao «Finalizar RUN»">📝 rascunho</span>':''}${R?.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(R.fechado.por||'')}</span>`:'<span class="badge">por fechar</span>'}<span class="sp"></span><button class="btn sm" id="mp-x">Descarregar Excel</button></div>
+    <table style="margin-top:8px"><thead><tr><th>Colaborador</th><th>Nº PHC</th><th>Tipo</th><th>Categoria</th><th class="num">PN · linhas</th><th class="num">Comissão do RUN</th><th class="num">Prémio trimestral</th><th class="num">Total a pagar</th><th></th></tr></thead>
+    <tbody>${L.map(x=>`<tr style="${x.inativo?'background:#fff4d6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Utilizador inativo: os incentivos cessam com o fim do vínculo">inativo</span>':''}${x.orig==='PHC'?' <span class="badge" title="Valor importado do PHC (o que foi pago)">PHC</span>':''}</td><td>${esc(x.phc)}</td><td>${x.cat}</td><td>${esc(x.categoria)}</td><td class="num" style="font-size:12px">${x.gid?`${x.nPN} · ${x.nLin}`:''}</td><td class="num">${eur(x.com)}</td><td class="num">${x.premio?eur(x.premio):'—'}</td><td class="num"><b>${eur(x.total)}</b></td><td>${x.gid?`<button class="btn sm" data-gv="${esc(x.gid)}" title="Detalhe PN a PN do que está gravado">Ver PN</button>`:''}</td></tr>`).join('')}</tbody>
+    <tfoot><tr class="tot"><td colspan="5">Total</td><td class="num">${eur(L.reduce((a,x)=>a+x.com,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.premio,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.total,0))}</td><td></td></tr></tfoot></table>
     <p class="muted" style="font-size:12px;margin-bottom:0">A pagar no recibo de ${reciboTxt(mes)}. Valores gravados para o RUN de ${mesTxt(mes)} (comissões dos vendedores com charge-backs, prestação do prémio trimestral e parte de cada BO na Produção BO). Valores negativos = a descontar.</p></div>`;
 }
 async function descarregarMapa(mes){
