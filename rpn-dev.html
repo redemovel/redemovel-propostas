@@ -3758,11 +3758,12 @@ async function conciliarRun(R){
   const vistos = new Set();
   await emLotes([...blocos(faltaMs,30).map(b=>query(col, where('msisdns','array-contains-any', b))), ...blocos(faltaMs,30).map(b=>query(col, where('msisdnsAntigos','array-contains-any', b)))], r=>{ if (r.estado!=='PN' || vistos.has(r.id)) return; vistos.add(r.id);
     [...new Set([...(r.msisdns||[]), ...(r.msisdnsAntigos||[])])].forEach(ms=>{ (porMs[ms]=porMs[ms]||[]).push(r); }); });
-  linhas.forEach(x=>{ const p=x.l[RL.pos]; if (!p || porPos[p] || !x.l[RL.msisdn]) return;
+  // charge-backs (CR_…) nunca pelo MSISDN: só se cobra pelo POS do PN; sem POS → «por imputar», para decidir (simetria com o upfront)
+  linhas.forEach(x=>{ const p=x.l[RL.pos]; if (!p || porPos[p] || !x.l[RL.msisdn] || x.f==='cb') return;
     // só um PN do mesmo NIF com data perto da ativação da linha (até 90 dias): um PN antigo do mesmo número é outro contrato (ex.: refidelização nova)
     const cri=String(x.l[RL.cri]||'').slice(0,10), perto=r=>{ const d=String(r.dataPN||r.fechadoEm||r.data||'').slice(0,10); if (!cri || !d) return false; return Math.abs((new Date(d+'T12:00:00')-new Date(cri+'T12:00:00'))/864e5) <= 90; };
     const c=(porMs[normMsisdn(x.l[RL.msisdn])]||[]).filter(r=>String(r.cliente?.nif||'')===String(x.l[RL.nif]) && perto(r)).sort((a,b)=>String(b.mesRef||'').localeCompare(String(a.mesRef||'')))[0];
-    if (c) { porPos[p]=c; x.porMsisdn=true; } });
+    if (c) { x.rMs=c; x.porMsisdn=true; } });
   // atribuições manuais deste RUN (linha → PN), feitas em «Linhas por imputar»
   const man = R.manual||{}, chaves = chavesLinhas(R.linhas), manIds = [...new Set(Object.values(man).map(m=>m.rpnId).filter(Boolean))], manR = {};
   (await Promise.all(manIds.map(id=>getDoc(doc(db,'rpn',id)).catch(()=>null)))).forEach(sn=>{ if (sn?.exists()) manR[sn.id]={id:sn.id, ...sn.data()}; });
@@ -3771,7 +3772,7 @@ async function conciliarRun(R){
   let posAg = {}; try { const sa = await getDoc(doc(db,'comissoes','posAgencia')); posAg = sa.exists() ? (sa.data().pos||{}) : {}; } catch(_){}
   linhas.forEach(x=>{ const m=man[chaves[x.i]], pa=posAg[String(x.l[RL.pos]||'').trim().toUpperCase()]; if (m?.agencia) x.agencia=m; else if (pa && !x.manualR) x.agencia={...pa, porPOS:true}; });
   const sfidUid = {}; Object.entries(S.users).forEach(([uid,u])=>{ if (u.sfid) sfidUid[String(u.sfid).trim()]=uid; });
-  const casa = linhas.map(x=>{ const r=x.agencia ? null : (x.manualR || porPos[x.l[RL.pos]]); return {...x, r, uid: r?.vendedorUid || null, mesPN: r?.mesRef || null, sfidUid: sfidUid[x.l[RL.sfid]]||null}; });
+  const casa = linhas.map(x=>{ const r=x.agencia ? null : (x.manualR || porPos[x.l[RL.pos]] || (x.f!=='cb' ? x.rMs : null)); return {...x, r, uid: r?.vendedorUid || null, mesPN: r?.mesRef || null, sfidUid: sfidUid[x.l[RL.sfid]]||null}; });
   // escalão de cada vendedor em cada mês de PN envolvido
   const mesesPN = [...new Set(casa.filter(x=>x.mesPN).map(x=>x.mesPN))], tier = {};
   for (const mp of mesesPN) {
