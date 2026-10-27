@@ -275,7 +275,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);m
           </div>
           <div class="fr" style="margin-top:10px">
             <div class="fg"><label class="flbl">Nome / Empresa</label><input class="finp" id="cn" placeholder="Empresa XYZ Lda" oninput="markU()" style="margin-bottom:0"></div>
-            <div class="fg"><label class="flbl">Nº Contribuinte</label><input class="finp" id="cnif" placeholder="500000000" oninput="markU();this.style.borderColor=(this.value.trim()&&!nifValido(limpaNif(this.value)))?'#E60000':'';this.title=this.style.borderColor?'NIF inválido: o dígito de controlo não confere':''" style="margin-bottom:0"></div>
+            <div class="fg"><label class="flbl">Nº Contribuinte</label><input class="finp" id="cnif" placeholder="500000000" oninput="markU();this.style.borderColor=(this.value.trim()&&!nifValido(limpaNif(this.value)))?'#E60000':'';this.title=this.style.borderColor?'NIF inválido: português com 9 dígitos e dígito de controlo certo; estrangeiro como B02430940 ou FR12345678901':''" style="margin-bottom:0"></div>
           </div>
           <div class="fg" style="margin-top:10px"><label class="flbl">Simulador <span style="font-weight:400;text-transform:none;letter-spacing:0">— referência interna, segue para o RPN e o PN; não aparece na proposta do cliente</span></label><input class="finp" id="csim" placeholder="ex.: nº ou nome da simulação" oninput="markU()" autocomplete="off" style="margin-bottom:0"></div>
           <div class="fr" style="margin-top:10px">
@@ -1256,7 +1256,7 @@ function saveP(){
   if(!cli){toast('⚠','Introduza o nome do cliente');return;}
   if(!TIPO){toast('⚠','Selecione o tipo de proposta');return;}
   {const c0=CM.find(c=>c.nome===document.getElementById('sc').value);if(!c0||c0.funcao==='backoffice'){toast('⚠','Escolha o comercial a quem fica atribuída a proposta');return;}}
-  {const n0=limpaNif(document.getElementById('cnif').value);if(!/^\d{9}$/.test(n0)){toast('⚠','Indique o NIF do cliente (9 dígitos) ou escolha o cliente da lista');return;}if(!nifValido(n0)){toast('⚠','O NIF '+n0+' não é válido: o dígito de controlo não confere');return;}}
+  {const n0=limpaNif(document.getElementById('cnif').value);if(!n0){toast('⚠','Indique o NIF do cliente ou escolha o cliente da lista');return;}if(!nifValido(n0)){toast('⚠','O NIF '+n0+' não é válido'+(/^\d+$/.test(n0)?' (português: 9 dígitos e o dígito de controlo tem de conferir)':' (estrangeiro: ex. B02430940 em Espanha, ou o código do país + número, ex. FR12345678901)'));return;}}
   const mens=document.getElementById('cm').value;
   const dur=document.getElementById('cd').value;
   const cNm=document.getElementById('sc').value;
@@ -2153,11 +2153,21 @@ const CLI_SEC=[
 const CLI_KEYS=CLI_SEC.flatMap(s=>s[2].map(c=>c[0]));
 let CLI_CUR=null,CLI_NOVO=false,CLI_TAB='ident',CLI_EDIT=false;
 
-function nifValido(n){
+// NIF português (9 dígitos, dígito de controlo) ou estrangeiro: Espanha (DNI, NIE, CIF, ex.: B02430940) ou código do país + número (ex.: FR12345678901)
+function nifPT(n){
   if(!/^\d{9}$/.test(n))return false;
   let s=0;for(let i=0;i<8;i++)s+=(+n[i])*(9-i);
   const r=s%11;return (r<2?0:11-r)===+n[8];
 }
+function nifES(n){n=String(n).replace(/^ES(?=[A-Z0-9]{9}$)/,'');const L='TRWAGMYFPDXBNJZSQVHLCKE';
+  if(/^\d{8}[A-Z]$/.test(n))return L[+n.slice(0,8)%23]===n[8];
+  if(/^[XYZ]\d{7}[A-Z]$/.test(n))return L[+('XYZ'.indexOf(n[0])+n.slice(1,8))%23]===n[8];
+  if(/^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(n)){let s=0;for(let i=1;i<=7;i++){const d=+n[i];if(i%2){const x=d*2;s+=Math.floor(x/10)+x%10;}else s+=d;}
+    const c=(10-s%10)%10;return n[8]===String(c)||n[8]==='JABCDEFGHI'[c];}
+  return false;}
+const NIF_PAISES=['AT','BE','BG','CY','CZ','DE','DK','EE','EL','FI','FR','HR','HU','IE','IT','LT','LU','LV','MT','NL','PL','RO','SE','SI','SK','GB','XI','CH','NO','LI','IS','MC','AD','SM'];
+function nifValido(n){n=String(n||'').toUpperCase().replace(/[\s.\-]/g,'');if(/^\d{9}$/.test(n))return nifPT(n);if(nifES(n))return true;
+  return NIF_PAISES.includes(n.slice(0,2))&&/^[A-Z0-9]{4,15}$/.test(n.slice(2))&&/\d/.test(n.slice(2));}
 function limpaNif(v){return String(v||'').replace(/\s/g,'').toUpperCase();}
 function cliPodeEditar(f){
   if(!CU)return false;
@@ -2284,7 +2294,7 @@ async function cliGravar(){
   if(!f.ncont){toast('⚠','O NIF é obrigatório');CLI_TAB='ident';desenharCli();return;}
   if(CLI_NOVO){
     if(/[\/.#$\[\]]/.test(f.ncont)){toast('⚠','O NIF tem caracteres inválidos');return;}
-    if(/^\d+$/.test(f.ncont)&&!nifValido(f.ncont)&&!confirm('"'+f.ncont+'" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?'))return;
+    if(!nifValido(f.ncont)&&!confirm(/^\d+$/.test(f.ncont)?'"'+f.ncont+'" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?':'"'+f.ncont+'" não parece um NIF estrangeiro válido (ex.: B02430940 em Espanha, FR12345678901).\n\nGravar mesmo assim?'))return;
   }
   const data={};CLI_KEYS.forEach(k=>{if(f[k]!=null)data[k]=f[k];});
   data.vendedor=String(f.vendedor||'');data.vendnm=vendNome(data.vendedor);

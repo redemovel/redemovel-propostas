@@ -466,7 +466,7 @@ document.addEventListener('click', e=>{
 })();
 // ===== validação de NIF e MSISDN; ficha de cliente obrigatória =====
 const msisdnOk = v => { const d=String(v||'').replace(/[\s.\-]/g,''); return !d || /^(351\d{9}|[125689]\d{8}|499\d{9})$/.test(d); };
-const nifCampoOk = v => { const d=String(v||'').replace(/\s/g,''); return !d || nifValido(d); };
+const nifCampoOk = v => { const d=String(v||'').replace(/\s/g,''); return !d || nifValido(d); };   // (nifValido aceita também NIF estrangeiro)
 function marcaCampo(el){ if (!el || el.disabled) { el?.classList.remove('inv'); return; }
   const ms=el.matches('[data-l="msisdn"]'), ok = ms ? msisdnOk(el.value) : nifCampoOk(el.value);
   el.classList.toggle('inv', !ok); el.title = ok ? '' : (ms ? 'MSISDN inválido: 351 + 9 dígitos (ex.: 351912345678); começado por 1, 2, 5, 6 ou 9 com 9 dígitos; ou 499 com 12 dígitos' : 'NIF inválido: o dígito de controlo não confere');
@@ -493,7 +493,7 @@ function fichaRapida(c, vendUid){ return new Promise(res=>{ const u=S.users[vend
       try { await gravarFicha(f, true); FICHA_OK.add(c.nif); toast('Ficha de cliente criada.'); fim(true); }
       catch(e){ b.disabled=false; if (e.code==='ja-existe') { FICHA_OK.add(c.nif); fim(true); } else toast(errTxt(e),true); } };
   }); }); }
-async function exigirFicha(c, vendUid){ const nif=String(c?.nif||'').replace(/\s/g,''); if (!/^\d{9}$/.test(nif)) return true;
+async function exigirFicha(c, vendUid){ const nif=nifNorm(c?.nif); if (!nifValido(nif)) return true;
   if (await fichaExiste(nif)) return true; return fichaRapida({...c, nif}, vendUid); }
 // dados grandes entre RPN e Propostas (mesmo site): ficam no browser e o endereço leva só uma chave
 function passaGrande(k, b64){ if (String(b64).length<1500) return k+'='+b64;
@@ -1278,7 +1278,7 @@ function diffTxt(a,b){
 // ---------- 8. GUARDAR / SUBMETER (com distribuição automática da BO) ----------
 function validarSubmissao(r){
   const e=[];
-  if(!r.cliente?.nome) e.push('nome do cliente'); if(!/^\d{9}$/.test(String(r.cliente?.nif||'').trim())) e.push('NIF (9 dígitos)'); else if(!nifValido(String(r.cliente.nif).trim())) e.push('NIF válido (o dígito de controlo não confere)');
+  if(!r.cliente?.nome) e.push('nome do cliente'); if(!nifNorm(r.cliente?.nif)) e.push('NIF'); else if(!nifValido(r.cliente.nif)) e.push(/^\d+$/.test(nifNorm(r.cliente.nif))?'NIF válido (português: 9 dígitos e o dígito de controlo tem de conferir)':'NIF válido (estrangeiro: ex. B02430940 em Espanha, ou o código do país + número, ex. FR12345678901)');
   (r.linhas||[]).forEach((l,i)=>{ if (!msisdnOk(l.msisdn)) e.push(`MSISDN da linha ${i+1} (351 + 9 dígitos; 1, 2, 5, 6 ou 9 com 9 dígitos; 499 com 12 dígitos)`); });
   if(!r.linhas.length) e.push('pelo menos 1 linha');
   r.linhas.forEach((l,i)=>{ if(!l.ref) e.push(`referência da linha ${i+1}`); if(l.bGid){ if(!(+l.bTot>0) && l.bGid!==r.linhas[i-1]?.bGid) e.push(`RLMC total do bundle ${l.bRef}`); } else if(!(+l.rlmc>0)) e.push(`RLMC da linha ${i+1}`); });
@@ -2068,7 +2068,7 @@ function novoProjeto(){
   const stf=isStaff(), vends=vendedoresProj([S.me.uid]), hj=hojeLocal();
   modal(`<h2>Novo Projeto</h2>
     <p class="muted" style="margin-top:0">Para um cliente visitado — com ou sem negócio connosco — onde há um potencial negócio a seguir no futuro. Na data de alerta aparece em «Para tratar», como os Projetos de renegociação.</p>
-    <div class="grid g2"><div><label>NIF do cliente</label><div class="row" style="gap:6px"><input id="np-nif" inputmode="numeric" maxlength="9" placeholder="9 dígitos"><button class="btn sm" id="np-b" type="button">Procurar ficha</button></div></div>
+    <div class="grid g2"><div><label>NIF do cliente</label><div class="row" style="gap:6px"><input id="np-nif" maxlength="17" placeholder="9 dígitos (estrangeiro: ex. B02430940)"><button class="btn sm" id="np-b" type="button">Procurar ficha</button></div></div>
       <div><label>Nome do cliente</label><input id="np-n" placeholder="Nome / empresa"></div>
       <div><label>Email</label><input id="np-e" type="email" placeholder="email do cliente / contacto"></div>
       <div><label>Telefone (Contacto 1)</label><input id="np-tl" type="tel"></div>
@@ -2079,12 +2079,12 @@ function novoProjeto(){
     <div style="margin-top:8px"><label>Potencial negócio (obrigatório)</label><textarea id="np-t" rows="3" placeholder="Ex.: 12 linhas móveis com a concorrência até março; quer proposta de fibra para a nova loja"></textarea></div>
     <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="c">Cancelar</button><button class="btn pri" id="ok">Criar Projeto</button></div>`, (m,close)=>{
     m.querySelector('#c').onclick=close;
-    m.querySelector('#np-b').onclick=async()=>{ const nif=m.querySelector('#np-nif').value.replace(/\D/g,''); if(nif.length!==9) return toast('O NIF tem 9 dígitos.',true);
+    m.querySelector('#np-b').onclick=async()=>{ const nif=nifNorm(m.querySelector('#np-nif').value); if(!nifValido(nif)) return toast('NIF inválido (português: 9 dígitos; estrangeiro: ex. B02430940).',true);
       try { const f=await getDoc(doc(db,'clientesFicha',nif)); if(f.exists()&&f.data().nome){ const c=f.data(); m.querySelector('#np-n').value=c.nome; if(!m.querySelector('#np-e').value) m.querySelector('#np-e').value=c.email||c.c1email||''; if(!m.querySelector('#np-tl').value) m.querySelector('#np-tl').value=c.c1tele||c.tlmvl||c.telefone||''; toast('Ficha encontrada.'); } else toast('Sem ficha com este NIF (ou de outra carteira). Escreva o nome.'); }
       catch(e){ toast('Sem acesso a esta ficha (é de outra carteira). Escreva o nome.'); } };
-    m.querySelector('#ok').onclick=async()=>{ const nif=m.querySelector('#np-nif').value.replace(/\D/g,''), nome=m.querySelector('#np-n').value.trim(), d=m.querySelector('#np-d').value, t=m.querySelector('#np-t').value.trim();
+    m.querySelector('#ok').onclick=async()=>{ const nif=nifNorm(m.querySelector('#np-nif').value), nome=m.querySelector('#np-n').value.trim(), d=m.querySelector('#np-d').value, t=m.querySelector('#np-t').value.trim();
       const uid=stf?(m.querySelector('#np-v').value||null):S.me.uid, rl=Math.max(0,+m.querySelector('#np-r').value||0), nat=m.querySelector('#np-nat').value;
-      if(nif && nif.length!==9) return toast('O NIF tem 9 dígitos (ou deixe vazio se ainda não o sabe).',true);
+      if(nif && !nifValido(nif)) return toast('NIF inválido: português com 9 dígitos, estrangeiro como B02430940 (ou deixe vazio se ainda não o sabe).',true);
       if(!nome) return toast('Escreva o nome do cliente.',true); if(!d || d<hj) return toast('A data de alerta não pode ser no passado.',true); if(t.length<5) return toast('Descreva o potencial negócio.',true);
       const u=uid?S.users[uid]:null, ref=doc(collection(db,'projetos'));
       const pj={nif, clienteNome:nome, mes:d.slice(0,7), alertaEm:d, fimEm:'', vendedorUid:uid, vendedorNome:u?.nome||'', vendedorPHC:String(u?.vendedorPHC||''),
@@ -2259,7 +2259,19 @@ const CLI_SEC = [
 const CLI_KEYS = CLI_SEC.flatMap(s=>s[1].map(c=>c[0]));
 const CL = {q:'', nif:null, tab:'ficha', f:null, edit:false, novo:false, d:{}};
 const CLI_TABS = [['ficha','Ficha'],['fid','Fidelizações'],['rpn','RPN e PN'],['ativ','Atividades'],['proj','Projetos'],['prop','Propostas']];
-const nifValido = n => { if(!/^\d{9}$/.test(n)) return false; let t=0; for(let i=0;i<8;i++) t+=(+n[i])*(9-i); const r=t%11; return (r<2?0:11-r)===+n[8]; };
+const nifNorm = n => String(n||'').toUpperCase().replace(/[\s.\-]/g,'');
+const nifPT = n => { if(!/^\d{9}$/.test(n)) return false; let t=0; for(let i=0;i<8;i++) t+=(+n[i])*(9-i); const r=t%11; return (r<2?0:11-r)===+n[8]; };
+// Espanha: DNI (8 dígitos + letra), NIE (X/Y/Z + 7 dígitos + letra) e CIF (letra + 7 dígitos + controlo), com ou sem «ES»
+const nifES = n => { n=String(n).replace(/^ES(?=[A-Z0-9]{9}$)/,''); const L='TRWAGMYFPDXBNJZSQVHLCKE';
+  if (/^\d{8}[A-Z]$/.test(n)) return L[+n.slice(0,8)%23]===n[8];
+  if (/^[XYZ]\d{7}[A-Z]$/.test(n)) return L[+('XYZ'.indexOf(n[0])+n.slice(1,8))%23]===n[8];
+  if (/^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(n)) { let s=0; for (let i=1;i<=7;i++){ const d=+n[i]; if (i%2) { const x=d*2; s+=Math.floor(x/10)+x%10; } else s+=d; }
+    const c=(10-s%10)%10; return n[8]===String(c) || n[8]==='JABCDEFGHI'[c]; }
+  return false; };
+// outros países (UE e vizinhos): prefixo do país + número (ex.: FR12345678901)
+const NIF_PAISES = ['AT','BE','BG','CY','CZ','DE','DK','EE','EL','FI','FR','HR','HU','IE','IT','LT','LU','LV','MT','NL','PL','RO','SE','SI','SK','GB','XI','CH','NO','LI','IS','MC','AD','SM'];
+const nifValido = n => { n=nifNorm(n); if (/^\d{9}$/.test(n)) return nifPT(n); if (nifES(n)) return true;
+  return NIF_PAISES.includes(n.slice(0,2)) && /^[A-Z0-9]{4,15}$/.test(n.slice(2)) && /\d/.test(n.slice(2)); };
 const vendPHCNome = v => { v=String(v||''); if(!v) return ''; const us=Object.values(S.users).filter(u=>String(u.vendedorPHC||'')===v); return (us.find(u=>u.ativo!==false)||us[0])?.nome||''; };
 // quem altera fichas: BackOffice e Master, todas; o comercial, as da sua carteira; o Coordenador só consulta (igual à app Propostas)
 // vendedor temporário (cobre uma ausência): vê, edita e recebe os Projetos do cliente até à data indicada
@@ -2467,7 +2479,7 @@ function desenharCliente(){
     if (!f.ncont) return toast('O NIF é obrigatório.',true);
     if (novo) {
       if (/[\/.#$\[\]]/.test(f.ncont)) return toast('O NIF tem caracteres inválidos.',true);
-      if (/^\d+$/.test(f.ncont) && !nifValido(f.ncont) && !confirm(`"${f.ncont}" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?`)) return;
+      if (!nifValido(f.ncont) && !confirm(/^\d+$/.test(f.ncont)?`"${f.ncont}" não é um NIF português válido (dígito de controlo errado).\n\nGravar mesmo assim?`:`"${f.ncont}" não parece um NIF estrangeiro válido (ex.: B02430940 em Espanha, FR12345678901).\n\nGravar mesmo assim?`)) return;
     }
     f.familia=String(f.familia||'').trim();
     if (!novo && isBO() && famAntes && String(f.vendedor||'')!==vAntes && !confirm(`Este cliente pertence à família «${famAntes}». Mudar só este cliente de vendedor separa a família.\n\nPara mudar a família inteira use Carteiras. Continuar só com este cliente?`)) return;
@@ -2677,7 +2689,7 @@ function atFicha(){
   on('#t-del',()=>atEliminar());
 }
 function atValidar(r){
-  const e=[]; if(!String(r.cliente?.nome||'').trim()) e.push('cliente'); if(String(r.cliente?.nif||'').replace(/\s/g,'').length<5) e.push('NIF'); else if(!nifCampoOk(r.cliente?.nif)) e.push('NIF válido (o dígito de controlo não confere)');
+  const e=[]; if(!String(r.cliente?.nome||'').trim()) e.push('cliente'); if(String(r.cliente?.nif||'').replace(/\s/g,'').length<5) e.push('NIF'); else if(!nifCampoOk(r.cliente?.nif)) e.push('NIF válido (português com o dígito de controlo certo, ou estrangeiro: ex. B02430940, FR12345678901)');
   if(!r.assunto) e.push('assunto'); if(!r.subAssunto) e.push('sub-assunto');
   const d=String(r.descricao||'').trim(); if(d.length<10 || Object.values(AT_GUIA).includes(d)) e.push('descrição do pedido');
   if(r.assunto==='Correcção Implementação' && !String(r.pnNumero||'').trim()) e.push('PN relacionado');
@@ -2693,7 +2705,7 @@ async function atGuardar(acao, arg){
   document.querySelectorAll('#main .row .btn').forEach(b=>b.disabled=true);
   const isNew=!r.id, ref=isNew?doc(collection(db,'atividades')):doc(db,'atividades',r.id);
   const data=JSON.parse(JSON.stringify(r)); ['id','criadoEm','atualizadoEm','msgUlt','msgLido','_msgVistas'].forEach(k=>delete data[k]);
-  data.cliente={nif:String(data.cliente?.nif||'').replace(/\s/g,''), nome:String(data.cliente?.nome||'').trim(), email:String(data.cliente?.email||'').trim(), telefone:String(data.cliente?.telefone||'').trim()}; data.msisdnsL=atMsisdns(data.msisdns);
+  data.cliente={nif:nifNorm(data.cliente?.nif), nome:String(data.cliente?.nome||'').trim(), email:String(data.cliente?.email||'').trim(), telefone:String(data.cliente?.telefone||'').trim()}; data.msisdnsL=atMsisdns(data.msisdns);
   let old=null;
   try {
     await runTransaction(db, async tx=>{
