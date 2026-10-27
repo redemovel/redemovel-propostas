@@ -632,7 +632,7 @@ async function viewCarteiras(){
       <button class="btn" id="ct-geo" title="Localiza no mapa os códigos postais que ainda não foram localizados">📍 Localizar códigos postais${semGeo?` (${semGeo} por localizar)`:''}</button></div>
     <div id="ct-p" class="muted" style="font-size:12px;margin-bottom:6px"></div>
     <div class="scroll"><table id="ct-t" data-noord="1"><thead><tr><th></th><th>Vendedor</th><th class="num">NIF</th><th class="num">Famílias</th><th class="num">RLMC em vigor</th><th class="num">Móvel</th><th class="num">Fixo</th><th class="num">Linhas</th><th class="num">A acabar em 6 meses</th>${CART.sel.size&&CART.dest?'<th class="num">Simulação: NIF</th><th class="num">Simulação: RLMC</th>':''}</tr></thead><tbody>
-      ${T.map(o=>`<tr><td><input type="checkbox" data-vv="${esc(o.v)}" ${CART.vis.has(o.v)?'checked':''} title="Mostrar no mapa"> <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${cartCor(o.v)}"></span></td><td><b>${esc(nomeV(o.v))}</b></td><td class="num">${o.n}</td><td class="num">${o.fam.size}</td><td class="num">${eur(o.r)}</td><td class="num">${eur(o.m)}</td><td class="num">${eur(o.x)}</td><td class="num">${o.li}</td><td class="num">${eur(o.f6)}</td>${CART.sel.size&&CART.dest?`<td class="num" style="${o.dn?'font-weight:700;color:'+(o.dn>0?'#15803d':'var(--red-d)'):''}">${o.n+o.dn}${o.dn?` (${o.dn>0?'+':''}${o.dn})`:''}</td><td class="num" style="${o.dr?'font-weight:700':''}">${eur(o.r+o.dr)}</td>`:''}</tr>`).join('')}
+      ${T.map(o=>`<tr><td><input type="checkbox" data-vv="${esc(o.v)}" ${CART.vis.has(o.v)?'checked':''} title="Mostrar no mapa"> <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${cartCor(o.v)}"></span></td><td><b>${esc(nomeV(o.v))}</b> <button class="btn sm ghost" data-vall="${esc(o.v)}" title="Seleciona todos os clientes deste vendedor (todas as situações, com ou sem localização no mapa)">selecionar toda a carteira</button></td><td class="num">${o.n}</td><td class="num">${o.fam.size}</td><td class="num">${eur(o.r)}</td><td class="num">${eur(o.m)}</td><td class="num">${eur(o.x)}</td><td class="num">${o.li}</td><td class="num">${eur(o.f6)}</td>${CART.sel.size&&CART.dest?`<td class="num" style="${o.dn?'font-weight:700;color:'+(o.dn>0?'#15803d':'var(--red-d)'):''}">${o.n+o.dn}${o.dn?` (${o.dn>0?'+':''}${o.dn})`:''}</td><td class="num" style="${o.dr?'font-weight:700':''}">${eur(o.r+o.dr)}</td>`:''}</tr>`).join('')}
     </tbody></table></div></div>
     <div class="card"><div class="row" style="margin-bottom:8px"><b>Mapa</b><span class="muted" style="font-size:12px">círculo = cliente (maior = mais RLMC) · cor = vendedor · clique para selecionar (a família vem junta) · escolha os vendedores na tabela (caixas à esquerda)</span><span class="sp"></span>
       <button class="btn sm" id="ct-vt">Todos os vendedores</button><button class="btn sm" id="ct-vn">Nenhum</button>
@@ -660,6 +660,8 @@ async function viewCarteiras(){
   $('#ct-qa').onclick=()=>{ const l=procura(); if(!l.length) return toast('Nada encontrado.',true); l.forEach(c=>cartSel(c.n,true)); viewCarteiras(); };
   $('#ct-sv').onclick=()=>{ if (!CART.mapa) return; const bd=CART.mapa.getBounds(); let k=0; CART.cl.forEach(c=>{ const p=CART.geo?.[c.cp]; if (p && cartVe(c) && CART.vis.has(c.v) && bd.contains(p)) { cartSel(c.n,true); k++; } }); toast(`${k} cliente(s) selecionado(s).`); viewCarteiras(); };
   $('#ct-ap').onclick=()=>cartAplicar();
+  m.querySelectorAll('[data-vall]').forEach(b=>b.onclick=()=>{ const v=b.dataset.vall; let k=0; CART.cl.forEach(c=>{ if (c.v===v) { CART.sel.add(c.n); k++; } });
+    toast(`${k} cliente(s) de ${nomeV(v)} selecionados (todas as situações). Escolha em «Passar para» o vendedor de destino.`); viewCarteiras(); });
   cartMapa();
 }
 let LEAFLET=null;
@@ -697,7 +699,18 @@ async function cartAplicar(){
   try { await cartGuardarJSON('carteira', CART.cl);
     const lg=await getDoc(doc(db,'configFin','carteira_log')); const ant=lg.exists()?(lg.data().l||[]):[];
     await setDoc(doc(db,'configFin','carteira_log'),{l:[...ant, {em:new Date().toISOString(), por:S.me.nome, para:dest, n:mov.length, nifs:mov.map(x=>x.n+':'+x.de)}].slice(-200)}); } catch(e){ console.warn('registo carteiras', e); }
-  S.cli=null; CART.sel.clear(); toast(`${ok} cliente(s) mudados para ${vendPHCNome(dest)}.${falhas.length?' Falharam: '+falhas.slice(0,5).join('; '):''}`, !!falhas.length); viewCarteiras();
+  // Projetos em aberto destes clientes (Por tratar / Adiado / Em negociação): passam também para o vendedor novo, se o Master quiser
+  let nPj=0;
+  try { const uDest=Object.entries(S.users).find(([u,x])=>String(x.vendedorPHC||'')===String(dest) && x.ativo!==false) || Object.entries(S.users).find(([u,x])=>String(x.vendedorPHC||'')===String(dest));
+    const de=new Set(mov.map(x=>String(x.de||''))), uids=Object.entries(S.users).filter(([u,x])=>x.vendedorPHC && de.has(String(x.vendedorPHC))).map(([u])=>u).filter(u=>u!==uDest?.[0]), nifs=new Set(mov.map(x=>String(x.n)));
+    if (uDest && uids.length) { let pj=[];
+      for (let i=0;i<uids.length;i+=30) pj.push(...(await getDocs(query(collection(db,'projetos'), where('vendedorUid','in',uids.slice(i,i+30))))).docs);
+      pj=pj.filter(d=>nifs.has(String(d.data().nif||'')) && !['Ganho','Perdido'].includes(d.data().estado));
+      if (pj.length && confirm(`Há ${pj.length} Projeto(s) em aberto destes clientes (por tratar, adiados ou em negociação) com o vendedor anterior.\n\nPassá-los também para ${uDest[1].nome}?\n(Os RPN em curso e os PN feitos continuam com quem os fez.)`)) {
+        for (let i=0;i<pj.length;i+=400){ const bb=writeBatch(db); pj.slice(i,i+400).forEach(d=>bb.update(d.ref,{vendedorUid:uDest[0], vendedorNome:uDest[1].nome, vendedorAnterior:d.data().vendedorNome||'', mudouCarteiraEm:new Date().toISOString(), atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid})); await bb.commit(); }
+        nPj=pj.length; } } }
+  catch(e){ console.warn('projetos da carteira', e); toast('As fichas mudaram, mas não consegui passar os Projetos: '+errTxt(e), true); }
+  S.cli=null; CART.sel.clear(); toast(`${ok} cliente(s) mudados para ${vendPHCNome(dest)}${nPj?` · ${nPj} Projeto(s) em aberto também`:''}.${falhas.length?' Falharam: '+falhas.slice(0,5).join('; '):''}`, !!falhas.length); viewCarteiras();
 }
 function go(h){ if (S.dirty && !confirm('Há alterações por guardar. Continuar sem guardar?')) return false; S.dirty=false; location.hash=h; return true; }
 document.addEventListener('click', e => { const a=e.target.closest('header nav a'); if(a && S.dirty && !a.target){ e.preventDefault(); go(a.getAttribute('href')); } });
