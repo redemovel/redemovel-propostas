@@ -875,7 +875,7 @@ function perms(){
   const r = S.cur, own = r.vendedorUid===S.me.uid, nov = !r.id;
   const edCom = (own||nov) && EDIT_COM.includes(r.estado);
   // um PN está fechado: só o Master o altera
-  const boEd = isBO() && r.origem!=='PHC' && (!['PN','Concluído'].includes(r.estado) || isMaster());
+  const boEd = isBO() && (r.origem!=='PHC' || isMaster()) && (!['PN','Concluído'].includes(r.estado) || isMaster());
   return { own, nov, bo:isBO(), edit: boEd || edCom, edCom };
 }
 
@@ -1414,11 +1414,11 @@ async function guardar(opts={}){
     data.cicloData = null;
     S.cicloMudou = false;
     if (FECHADOS.includes(data.estado) && !data.fechadoEm) { data.fechadoEm=new Date().toISOString(); data.fechadoMes=mesLocal(); }
-    data.mesRef = FECHADOS.includes(data.estado) ? (data.fechadoMes||mesLocal()) : null;   // mês em que aparece na lista dos fechados
+    data.mesRef = FECHADOS.includes(data.estado) ? (data.fechadoMes||data.mesRef||mesLocal()) : null;   // mês em que aparece na lista dos fechados
     data.contratos = [...new Set([...(data.linhas||[]).map(l=>String(l.contratoVDF||'').trim()), ...(data.contratosAntigos||[])].filter(Boolean))];
     data.msisdns = [...new Set([...listaMsisdn(data.linhas), ...(data.msisdnsAntigos||[])])];
     if (!FECHADOS.includes(data.estado)) { data.fechadoEm=null; data.fechadoMes=null; }
-    let old=null, boEscolhida=null;
+    let old=null, boEscolhida=null, corrPHC=false;
     await runTransaction(db, async tx => {
       const cargaRef = doc(db,'config','cargaBO'), cntRef = doc(db,'counters','rpn');
       const cs = await tx.get(cargaRef); const cd = cs.exists() ? cs.data() : {};
@@ -1426,6 +1426,8 @@ async function guardar(opts={}){
       let numero = data.numero;
       if (isNew) { const c = await tx.get(cntRef); numero = c.exists() ? c.data().next : 1; tx.set(cntRef,{next:numero+1}); data.numero=numero; data.criadoEm=serverTimestamp(); data.criadoPor=S.me.uid; }
       else { const s = await tx.get(rpnRef); old = s.data();
+        // linha com eventos do PHC/Vodafone alterada à mão (natureza, RLMC, prazo ou tier): passa a ser calculada pela plataforma
+        (data.linhas||[]).forEach((l,i)=>{ const o=(old?.linhas||[])[i]; if (l.scorePHC!=null && o && ['natureza','rlmc','prazo','tier'].some(k=>String(l[k]??'')!==String(o[k]??''))) { delete l.scorePHC; l.eventosRecalculadosEm=new Date().toISOString(); corrPHC=true; } });
         // a BO e a conferente só mudam por atribuição automática ou realocação — nunca por um ecrã desatualizado
         data.boUid=old.boUid??null; data.boNome=old.boNome||''; data.confUid=old.confUid??null; data.confNome=old.confNome||''; }
       if ((opts.conferido||opts.devolverImpl) && old) {
@@ -1463,6 +1465,8 @@ async function guardar(opts={}){
     });
     S.cur.id = rpnRef.id; S.cur.numero = data.numero; S.cur.estado = data.estado; S.cur.boUid=data.boUid; S.cur.boNome=data.boNome; S.cur.motivos=data.motivos; S.cur.cargaContada=data.cargaContada; S.cur.fechadoEm=data.fechadoEm; S.cur.dataPN=data.dataPN||S.cur.dataPN||''; S.cur.confUid=data.confUid; S.cur.confNome=data.confNome; S.cur.confContada=data.confContada; S.cur.confNota=data.confNota||''; S.cur.conferidoPorNome=data.conferidoPorNome||''; S.cur.conferidoEm=data.conferidoEm||''; S.cur.implementadoEm=data.implementadoEm||''; S.cur.esperaMotivo=data.esperaMotivo; S.cur.esperaData=data.esperaData; S.cur.esperaDesde=data.esperaDesde; S.cur.mesRef=data.mesRef; S.cur.contratos=data.contratos; S.cur.devolucoes=data.devolucoes; S.cur.devMeses=data.devMeses; S.cur.implPorUid=data.implPorUid; S.cur.implPorNome=data.implPorNome; S.cur.fechadoMes=data.fechadoMes;
     S.dirty = false;
+    if (corrPHC) S.cur.linhas = data.linhas;
+    if (corrPHC && isFin()) setDoc(doc(db,'comissoes','pnCorrigidos'), {pns:{[r.id||rpnRef.id]:{numero:data.numero||'', em:new Date().toISOString(), por:S.me.nome, motivo:'linha corrigida à mão'}}}, {merge:true}).catch(e=>console.warn('pnCorrigidos', e));   // reimportar do PHC já não substitui estas linhas
     agDelta(old, {...(old||{}), ...data});
     if (isNew) await hist('Criado', r.propostaRef?`A partir da proposta ${r.propostaRef}`:'', rpnRef.id);
     // marca a proposta de origem (app Propostas, coleção 'propostas') com o nº do RPN
