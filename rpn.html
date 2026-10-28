@@ -3251,7 +3251,8 @@ function drawComissao(podeEscolher, vends){
   const v = versaoDe(PLANO.versoes, CM.mes), obj = objDe(CM.uid, v, CM.mes), T = trimDe(CM.mes);
   const pnMes = CM.dados.pns.filter(r=>r.mesRef===CM.mes), pnTrim = CM.dados.pns;
   const ev = eventosDe(pnMes), evCurso = eventosDe(CM.dados.curso), evTrim = eventosDe(pnTrim);
-  const c = comCalc(v, ev, obj);
+  // um só seletor (Performance, em cima): «Só PN confirmados» ou «PN + RPN em curso» — decide o número de eventos, o escalão e a comissão
+  const comRpnM = AG_RPN && Object.keys(evCurso).length>0, cPN = comCalc(v, ev, obj), c = comRpnM ? comCalc(v, somaEv(ev, evCurso), obj) : cPN;
   CM.args=[podeEscolher, vends];
   const atual = CM.mes===mesLocal(), hojeS = hojeLocal(), duF = atual ? Math.max(1, diasUteis(CM.mes, hojeS)) : diasUteis(CM.mes), duM = diasUteis(CM.mes);
   // projeção: PN do mês + RPN em curso (devem passar a PN este mês) + o ritmo de PN nos dias úteis que faltam
@@ -3259,11 +3260,11 @@ function drawComissao(podeEscolher, vends){
   const cc = comCalc(v, somaEv(ev, evCurso), obj);   // se os RPN em curso passarem a PN este mês
   const duT = T.meses.reduce((a,x)=>a+diasUteis(x),0), duTF = T.meses.filter(x=>x<CM.mes).reduce((a,x)=>a+diasUteis(x),0)+duF;
   const nome = S.users[CM.uid]?.nome || S.me.nome, eu = CM.uid===S.me.uid;
-  const comRpnT = atual && AG_RPN && Object.keys(evCurso).length>0, evTq = comRpnT ? somaEv(evTrim, evCurso) : evTrim;   // atingimento do trimestre: só PN ou PN + RPN em curso (mesmo botão da Performance)
+  const comRpnT = comRpnM, evTq = comRpnT ? somaEv(evTrim, evCurso) : evTrim;   // atingimento do trimestre: só PN ou PN + RPN em curso (mesmo botão da Performance)
   const MAXP = Math.max(130, Math.ceil(Math.max(p.pts, cc.pts)*1.1/10)*10), pc = x => Math.min(100, x/MAXP*100);
   // celebração: primeira vez que o próprio vê o escalão novo neste mês
-  let festa=false; if (eu && atual) { const kL='com-esc-'+CM.uid+'-'+CM.mes; try { const ant=+(localStorage.getItem(kL)??-1); if (c.i>ant && c.i>=0) festa = ant>=0 || c.i>0; localStorage.setItem(kL, String(c.i)); } catch(_){} }
-  const msgs = comCoach({v, ev, obj, c, p, cc, evCurso, atual, eu, duF, duM, evTrim, duT, duTF});
+  let festa=false; if (eu && atual) { const kL='com-esc-'+CM.uid+'-'+CM.mes; try { const ant=+(localStorage.getItem(kL)??-1); if (cPN.i>ant && cPN.i>=0) festa = ant>=0 || cPN.i>0; localStorage.setItem(kL, String(cPN.i)); } catch(_){} }
+  const msgs = comCoach({v, ev, obj, c, cPN, p, cc, evCurso, atual, eu, duF, duM, evTrim, duT, duTF});
   const porPN = pnMes.map(r=>{ const e=eventosDe([r]); const pts=Object.entries(e).reduce((a,[n,x])=>a+x*(v.pesos?.[n]??1),0);
       const val=c.e?Object.entries(e).reduce((a,[n,x])=>a+x*(/^Nova/.test(n)?c.e.nova:c.e.ref),0)*(1+c.maj):0; return {r, pts, val}; }).sort((a,b)=>(b.r.numero||0)-(a.r.numero||0));
   m.innerHTML = `
@@ -3302,15 +3303,15 @@ function drawComissao(podeEscolher, vends){
       <button class="btn sm" id="cm-r" title="Voltar a ler os PN">⟳ Atualizar</button>
     </div></div>
     <div class="card"><h2 style="margin-bottom:6px">Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="cm-agc muted">A carregar…</div></div>
-    ${festa?`<div class="card cm-festa"><b style="font-size:18px">🎉 Subiste para o escalão ${escTxt(v,c.i)}!</b><div>Todos os eventos de ${mesTxt(CM.mes).split(' ')[0]} passam a valer ${eur(c.e.ref)} (Refid) e ${eur(c.e.nova)} (Nova). Continua!</div></div>`:''}
+    ${festa?`<div class="card cm-festa"><b style="font-size:18px">🎉 Subiste para o escalão ${escTxt(v,cPN.i)}!</b><div>Todos os eventos de ${mesTxt(CM.mes).split(' ')[0]} passam a valer ${eur(c.e.ref)} (Refid) e ${eur(c.e.nova)} (Nova). Continua!</div></div>`:''}
     <div class="card cm-hero">
       <div>
         <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Eventos para escalão</div>
-        <div class="cm-big">${f1(c.pts)} <small>eventos</small></div>
-        <div class="cm-lad">${atual?`<div class="p" style="width:${pc(p.pts)}%"></div>`:''}${atual||cc.pts>c.pts?`<div class="c" style="width:${pc(cc.pts)}%"></div>`:''}<div class="f" style="width:${pc(c.pts)}%"></div>
+        <div class="cm-big">${f1(c.pts)} <small>eventos${comRpnM?' · PN + RPN em curso':''}</small></div>
+        <div class="cm-lad">${atual?`<div class="p" style="width:${pc(p.pts)}%"></div>`:''}${atual||cc.pts>cPN.pts?`<div class="c" style="width:${pc(cc.pts)}%"></div>`:''}<div class="f" style="width:${pc(cPN.pts)}%"></div>
           ${v.escaloes.map((x,i)=>`<span class="t ${i<=c.i?'on':''}" style="left:${pc(x.min)}%" title="Escalão ${escTxt(v,i)} · a partir de ${x.min} eventos">${escNum(i)}</span>`).join('')}</div>
         <div class="cm-leg" style="margin-bottom:6px">${[-1,...v.escaloes.map((x,i)=>i)].map(i=>`<span ${i===c.i?'style="color:var(--ink);font-weight:700"':''}>${escNum(i)} ${esc(escNome(v,i))} <span style="opacity:.7">${i<0?'&lt; '+v.escaloes[0].min:v.escaloes[i].min+'+'}</span></span>`).join('')}</div>
-        <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${!atual&&cc.pts>c.pts?`<span title="RPN ainda em curso com data deste mês: contam aqui quando passarem a PN com esta data"><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso com data deste mês (${f1(cc.pts-c.pts)})</span>`:''}${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-c.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção fim do mês (PN + RPN em curso + ritmo)</span>`:''}</div>
+        <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${!atual&&cc.pts>cPN.pts?`<span title="RPN ainda em curso com data deste mês: contam aqui quando passarem a PN com esta data"><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso com data deste mês (${f1(cc.pts-cPN.pts)})</span>`:''}${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-cPN.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção fim do mês (PN + RPN em curso + ritmo)</span>`:''}</div>
       </div>
       <div class="cm-k">
         <div class="g"><span>${atual?'Comissão atual (prevista)':'Prevista · PN do mês'}</span><b id="cm-eur">${eur(c.total)}</b></div>
@@ -3334,7 +3335,7 @@ function drawComissao(podeEscolher, vends){
     <div class="cm-two">
       <div class="card"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">${eu?'O teu treinador':'Treinador'}</div>
         ${msgs.map(([k,i,t])=>`<div class="cm-msg ${k}"><i aria-hidden="true">${i}</i><p>${t}</p></div>`).join('')}</div>
-      <div class="card scroll"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Objetivos · ${T.n}.º trimestre</div><span class="sp"></span>${atual&&CM.dados.curso.length?agRpnBotoes(AG_RPN, CM.dados.curso.length):''}</div>
+      <div class="card scroll"><div class="row" style="gap:8px;align-items:center;flex-wrap:wrap"><div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Objetivos · ${T.n}.º trimestre</div><span class="sp"></span><span class="muted" style="font-size:11px">${comRpnT?'PN + RPN em curso':'Só PN confirmados'} (escolha em cima, na Performance)</span></div>
         <div id="cm-objg" class="cm-agc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px 2px;margin:8px -8px 6px">${c.objs.map(o=>{ const tq=o.nat.reduce((a,n)=>a+(evTq[n]||0),0), real=o.trim?tq/o.trim*100:0, dec=duT?duTF/duT:1;
           const pj=o.trim ? (atual && dec<1 ? real/dec : real) : 0, rl=atual && dec<1 ? real : null;
           return `<div data-og="${esc(o.id)}" data-pj="${pj}" data-rl="${rl??''}" data-dec="${atual&&dec<1?dec:1}" data-sub="${esc(`${f1(tq)} de ${o.trim} eventos`)}" data-nm="${esc(o.nome)}" title="${rl!=null?`Ao ritmo atual fecha em ~${Math.round(pj)} % · feito ${Math.round(rl)} %`:''}"><div class="cm-g">${gaugeSVG(pj, o.nome, `${f1(tq)} de ${o.trim} eventos`, rl, {semRodape:true})}</div><div class="cm-eq" style="font-size:12px;text-align:center;margin-top:2px"></div></div>`; }).join('')}</div>
@@ -3428,7 +3429,7 @@ function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
 }
 // mensagens do «treinador»: só regras e números do próprio vendedor (nada de valores Vodafone)
 function comCoach(o){
-  const {v, ev, obj, c, p, cc, evCurso, atual, eu, duF, duM, evTrim, duT, duTF} = o, out=[], tu = eu ? '' : ' (vendedor)';
+  const {v, ev, obj, c, cPN, p, cc, evCurso, atual, eu, duF, duM, evTrim, duT, duTF} = o, out=[], tu = eu ? '' : ' (vendedor)';
   const pts = c.pts||0, pick = a => a[(new Date().getDate()+Math.round(pts))%a.length];
   if (!atual) {
     out.push(['', '📊', `Fechaste ${mesTxt(CM.mes).split(' ')[0]} com <b>${f1(pts)} eventos</b>, escalão ${escTxt(v,c.i)}, ${c.cumpridos} objetivo(s) e comissão prevista de <b>${eur(c.total)}</b>.`]);
@@ -3444,7 +3445,7 @@ function comCoach(o){
   else if (p.e) out.push(['', '📈', `A este ritmo terminas o mês com ~${Math.round(p.pts)} eventos no escalão ${escTxt(v,p.i)}: cerca de <b>${eur0(p.total)}</b>.`]);
   else if (duF>=3) out.push(['alert', '⏱️', `Ao ritmo atual não chegas ao primeiro escalão. Faltam ${duM-duF} dias úteis: um bom dia de Refidelizações muda tudo.`]);
   const nCurso = Object.values(evCurso).reduce((a,x)=>a+x,0);
-  if (nCurso>0.05) out.push(['', '🛠️', `Tens <b>${f1(cc.pts-pts)} eventos</b> em RPN em curso. ${cc.e && (!c.e || cc.e.min>c.e.min) ? `Se passarem a PN este mês, sobes para o <b>escalão ${escTxt(v,cc.i)}</b> (≈ ${eur0(cc.total)}).` : 'Acompanha-os com a BackOffice para fecharem ainda este mês.'}`]);
+  if (nCurso>0.05 && c===cPN) out.push(['', '🛠️', `Tens <b>${f1(cc.pts-pts)} eventos</b> em RPN em curso. ${cc.e && (!c.e || cc.e.min>c.e.min) ? `Se passarem a PN este mês, sobes para o <b>escalão ${escTxt(v,cc.i)}</b> (≈ ${eur0(cc.total)}).` : 'Acompanha-os com a BackOffice para fecharem ainda este mês.'}`]);
   const falt = c.objs.filter(x=>!x.ok && x.mes>0).map(x=>({x, f:x.mes-x.feito})).sort((a,b)=>a.f-b.f);
   const prxMaj = v.maj.filter(mj=>mj.n>c.cumpridos).sort((a,b)=>a.n-b.n)[0];
   if (prxMaj && falt.length) out.push(['alert','◔', `Tens ${c.cumpridos} de ${v.objetivos.length} objetivos do mês. O mais perto é <b>${esc(falt[0].x.nome)}</b>: faltam ${f1(falt[0].f)} eventos. Com ${prxMaj.n} objetivos, toda a comissão do mês sobe <b>${prxMaj.pct} %</b>.`]);
