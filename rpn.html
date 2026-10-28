@@ -1377,7 +1377,7 @@ function escolherParcial(r, abertos){
 // efetivou as fidelizações; a BO da conferência confirma; depois de PN só o Master a muda (exceção, com motivo). Nunca num mês já fechado.
 async function escolherDataPN(r, modo){
   let ate=''; try { const s=await getDoc(doc(db,'config','producao')); ate = s.exists() ? (s.data().fechadoAte||'') : ''; } catch(_){}
-  const hj=hojeLocal(), min = ate ? somaMeses(ate,1)+'-01' : '', def0 = String(r.dataPN||r.data||hj).slice(0,10), def = min && def0<min && modo!=='excecao' ? min : def0;
+  const hj=hojeLocal(), maxD=(()=>{ const [y,mm]=somaMeses(mesLocal(),2).split('-').map(Number); const d=new Date(y,mm-1,0); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })(), min = ate ? somaMeses(ate,1)+'-01' : '', def0 = String(r.dataPN||r.data||hj).slice(0,10), def = min && def0<min && modo!=='excecao' ? min : def0;
   const grupo = modo!=='excecao' && S.grupo?.lista?.length ? S.grupo.lista.filter(x=>modo==='conf'?x.estado==='Em Conferência':!['PN','Concluído','Cancelado','Reprovado','Em Conferência'].includes(x.estado)) : [];
   const defDe = x => { const d0=String(x.dataPN||x.data||hj).slice(0,10); return min && d0<min ? min : d0; };
   S.dataPNIrm = null;
@@ -1386,20 +1386,20 @@ async function escolherDataPN(r, modo){
     conf:`Confirma que conferiu a implementação na Vodafone? O RPN fica fechado como PN.${grupo.length?` Os outros RPN do grupo em conferência (${grupo.map(x=>x.numero).join(', ')}) fecham também, cada um com a sua data.`:''}<br>Confira também a <b>data do negócio</b> indicada pela BO da implementação${r.dataPN?'':' (ainda não indicada: está a data do RPN)'}.`,
     excecao:`<b>Exceção.</b> A data do negócio foi definida na implementação e confirmada na conferência. Mudar agora (por exemplo, a pedido do vendedor) fica registado com o motivo.`}[modo];
   return new Promise(res=>{ modal(`<h2 style="margin-top:0">${tit}</h2><p>${txt}</p>
-      <label>Data do negócio (data do PN)${grupo.length?` · RPN ${esc(r.numero||'')}`:''}</label><input type="date" id="dp-d" value="${def}" ${min&&modo!=='excecao'?`min="${min}"`:''} max="${hj}" style="width:200px">
+      <label>Data do negócio (data do PN)${grupo.length?` · RPN ${esc(r.numero||'')}`:''}</label><input type="date" id="dp-d" value="${def}" ${min&&modo!=='excecao'?`min="${min}"`:''} max="${maxD}" style="width:200px">
       ${grupo.length?`<div style="margin-top:10px"><label>Outros RPN do grupo que ${modo==='conf'?'fecham como PN':'seguem para conferência'} — cada um com a sua data</label>
-        <table style="margin-top:4px"><tbody>${grupo.map(x=>`<tr><td><b>${esc(x.numero)}</b> <span class="muted" style="font-size:12px">RPN de ${fmtD(String(x.data||'').slice(0,10))}</span></td><td><input type="date" data-dpi="${esc(x.id)}" value="${defDe(x)}" ${min?`min="${min}"`:''} max="${hj}" style="width:170px"></td></tr>`).join('')}</tbody></table></div>`:''}
+        <table style="margin-top:4px"><tbody>${grupo.map(x=>`<tr><td><b>${esc(x.numero)}</b> <span class="muted" style="font-size:12px">RPN de ${fmtD(String(x.data||'').slice(0,10))}</span></td><td><input type="date" data-dpi="${esc(x.id)}" value="${defDe(x)}" ${min?`min="${min}"`:''} max="${maxD}" style="width:170px"></td></tr>`).join('')}</tbody></table></div>`:''}
       ${modo==='excecao'?`<div style="margin-top:8px"><label>Motivo</label><input id="dp-m" style="width:100%" placeholder="Ex.: pedido do vendedor para fechar no mês do negócio"></div>`:''}
       <p class="muted" style="font-size:12px">É esta data que define o mês da produção do vendedor (escalão, objetivos, prémio e comissões).${ate?` A produção até ${mesTxt(ate)} está fechada (RUN finalizado)${modo==='excecao'?': só o Master pode lá pôr datas, e o que já foi pago desse mês não é recalculado':`: a data mais antiga possível é ${fmtD(min)}`}.`:''}</p>
       <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn" id="dp-c">Cancelar</button><button class="btn pri" id="dp-ok">${{impl:'Enviar para conferência', conf:'Conferido · fechar como PN', excecao:'Guardar data'}[modo]}</button></div>`, (m,close)=>{
       m.querySelector('#dp-c').onclick=()=>{ close(); res(null); };
       m.querySelector('#dp-ok').onclick=()=>{ const v=m.querySelector('#dp-d').value; if (!v) return toast('Escolha a data do negócio.', true);
         if (min && v<min && !(modo==='excecao' && isMaster())) return toast(`A produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
-        if (v>hj) return toast('A data do negócio não pode ser futura.', true);
+        if (v>maxD) return toast('A data do negócio não pode passar do fim do próximo mês.', true);
         const irm={}; for (const el of m.querySelectorAll('[data-dpi]')) { const x=el.value, n=grupo.find(g=>g.id===el.dataset.dpi)?.numero;
           if (!x) return toast(`Escolha a data do negócio do RPN ${n}.`, true);
           if (min && x<min) return toast(`RPN ${n}: a produção até ${mesTxt(ate)} está fechada. Escolha uma data a partir de ${fmtD(min)}.`, true);
-          if (x>hj) return toast(`RPN ${n}: a data do negócio não pode ser futura.`, true); irm[el.dataset.dpi]=x; }
+          if (x>maxD) return toast(`RPN ${n}: a data do negócio não pode passar do fim do próximo mês.`, true); irm[el.dataset.dpi]=x; }
         S.dataPNIrm = Object.keys(irm).length ? irm : null;
         if (modo==='excecao') { const mo=(m.querySelector('#dp-m').value||'').trim(); if (mo.length<5) return toast('Escreva o motivo da exceção.', true); S.dataPNMotivo=mo; }
         close(); res(v); }; }); });
@@ -3210,6 +3210,8 @@ const saldoTxt = (prev, pago, temPag) => { const sd=Math.round((prev-pago)*100)/
   return sd>0 ? `<span class="badge" style="background:#fff4d6;color:#8a5a00">falta ${eur(sd)}</span>` : `<span class="badge" style="background:#e0ecff;color:#1d4ed8">+${eur(-sd)} acima</span>`; };
 // ===== Painel «A minha comissão» =====
 const CM = { uid:null, mes:null, dados:null, em:0 };
+// mês em que conta um RPN ainda em curso: o da data do PN (se a BO já a definiu), senão o da data do RPN
+const mesConta = r => String(r?.dataPN||r?.data||'').slice(0,7) || mesLocal();
 async function viewComissao(){
   const m=$('#main'); if (!CM.mes) CM.mes=mesLocal();
   const podeEscolher = isFin() || perfil()==='coordenador';
@@ -3226,10 +3228,10 @@ async function viewComissao(){
       await lerPlano();
       const T = trimDe(CM.mes), meses = T.meses.filter(x=>x<=CM.mes), col=collection(db,'rpn');
       const pedidos = [getDocs(query(col, where('vendedorUid','==',CM.uid), where('mesRef','in',meses)))];
-      if (CM.mes===mesLocal()) pedidos.push(getDocs(query(col, where('vendedorUid','==',CM.uid), where('estado','in',EM_CURSO))));
+      pedidos.push(getDocs(query(col, where('vendedorUid','==',CM.uid), where('estado','in',EM_CURSO))));
       const [pS, cS] = await Promise.all(pedidos);
       const pns = pS.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN');
-      const curso = cS ? cS.docs.map(d=>({id:d.id,...d.data()})) : [];   // todos os RPN em curso, incluindo os acabados de abrir (Em Elaboração)
+      const curso = cS ? cS.docs.map(d=>({id:d.id,...d.data()})).filter(r=>mesConta(r)===CM.mes) : [];   // RPN em curso (incluindo os acabados de abrir) cuja data é deste mês
       // comissões já pagas aos PN deste mês: RUN do próprio mês e dos 6 seguintes (até hoje)
       const runs = []; for (let k=0; k<=6; k++){ const x=somaMeses(CM.mes,k); if (x<=mesLocal()) runs.push(x); }
       const pagS = await getDocs(query(collection(db,'comissoesVend'), where('uid','==',CM.uid), where('mes','in',runs))).catch(()=>null);
@@ -3295,7 +3297,7 @@ function drawComissao(podeEscolher, vends){
         <div class="muted" style="font-size:13px">${atual?`Produção (PN) até hoje · ${duF} de ${duM} dias úteis decorridos`:'Mês fechado'} · conta a data do PN</div></div>
       <span class="sp"></span>
       ${podeEscolher && isFin()?`<div><label>Vendedor</label><select id="cm-v">${vends.map(x=>`<option value="${x.uid}" ${x.uid===CM.uid?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></div>`:''}
-      <div><label>Mês</label><input type="month" id="cm-m" value="${CM.mes}" max="${mesLocal()}" style="width:160px"></div>
+      <div><label>Mês</label><input type="month" id="cm-m" value="${CM.mes}" max="${somaMeses(mesLocal(),1)}" style="width:160px" title="O mês seguinte mostra os RPN em curso que já têm data desse mês"></div>
       <button class="btn sm" id="cm-r" title="Voltar a ler os PN">⟳ Atualizar</button>
     </div></div>
     <div class="card"><h2 style="margin-bottom:6px">Performance da Redemóvel · objetivos Vodafone</h2><div id="cm-ag" class="cm-agc muted">A carregar…</div></div>
@@ -3304,10 +3306,10 @@ function drawComissao(podeEscolher, vends){
       <div>
         <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:600">Eventos para escalão</div>
         <div class="cm-big">${f1(c.pts)} <small>eventos</small></div>
-        <div class="cm-lad">${atual?`<div class="p" style="width:${pc(p.pts)}%"></div><div class="c" style="width:${pc(cc.pts)}%"></div>`:''}<div class="f" style="width:${pc(c.pts)}%"></div>
+        <div class="cm-lad">${atual?`<div class="p" style="width:${pc(p.pts)}%"></div>`:''}${atual||cc.pts>c.pts?`<div class="c" style="width:${pc(cc.pts)}%"></div>`:''}<div class="f" style="width:${pc(c.pts)}%"></div>
           ${v.escaloes.map((x,i)=>`<span class="t ${i<=c.i?'on':''}" style="left:${pc(x.min)}%" title="Escalão ${escTxt(v,i)} · a partir de ${x.min} eventos">${escNum(i)}</span>`).join('')}</div>
         <div class="cm-leg" style="margin-bottom:6px">${[-1,...v.escaloes.map((x,i)=>i)].map(i=>`<span ${i===c.i?'style="color:var(--ink);font-weight:700"':''}>${escNum(i)} ${esc(escNome(v,i))} <span style="opacity:.7">${i<0?'&lt; '+v.escaloes[0].min:v.escaloes[i].min+'+'}</span></span>`).join('')}</div>
-        <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-c.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção fim do mês (PN + RPN em curso + ritmo)</span>`:''}</div>
+        <div class="cm-leg"><span><span class="cm-sw" style="background:var(--red)"></span>PN do mês</span>${!atual&&cc.pts>c.pts?`<span title="RPN ainda em curso com data deste mês: contam aqui quando passarem a PN com esta data"><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso com data deste mês (${f1(cc.pts-c.pts)})</span>`:''}${atual?`<span><span class="cm-sw" style="background:#f6b9b9"></span>+ RPN em curso (${f1(cc.pts-c.pts)})</span><span><span class="cm-sw" style="border:1px dashed var(--red);background:#fde8e8"></span>Projeção fim do mês (PN + RPN em curso + ritmo)</span>`:''}</div>
       </div>
       <div class="cm-k">
         <div class="g"><span>${atual?'Comissão atual (prevista)':'Prevista · PN do mês'}</span><b id="cm-eur">${eur(c.total)}</b></div>
@@ -4750,7 +4752,7 @@ async function agenteDados(trim){
   let euros = {}; if (isMaster()) { try { const f=await getDoc(doc(db,'configFin','agenteObjetivos')); euros = f.exists() ? (f.data().trimestres||{}) : {}; } catch(_){} }
   tAno.forEach((t,i)=>{ if (rS[i]?.exists()) real[t]=rS[i].data(); });
   // staff: recalcula o trimestre em curso (1×/dia) e os anteriores do ano que faltem
-  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && (String(r.dia||'') < hojeLocal() || r.evRpn===undefined || r.equipaRpn===undefined || r.rpnTodos!==true || r.v!==2)) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
+  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && (String(r.dia||'') < hojeLocal() || r.evRpn===undefined || r.equipaRpn===undefined || r.rpnTodos!==true || r.v!==3)) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
     if (velho) { try { real[t] = await agenteRecalcular(t); } catch(e){ console.warn('agente', e); } } }
   return (AG_MEM = {trim, obj, euros, real, tAno, em:Date.now()});
 }
@@ -4761,7 +4763,7 @@ async function agenteRecalcular(t){
   // RPN em curso (todos, incluindo em elaboração; ainda não PN): eventos à parte, para o velocímetro poder somá-los (botão «PN + RPN em curso»)
   let evRpn = {}, nRpn = 0, rs = [];
   if (t===trimId(mesLocal())) { const sr = await getDocs(query(collection(db,'rpn'), where('estado','in', EM_CURSO)));
-    rs = sr.docs.map(d=>({id:d.id,...d.data()})); nRpn = rs.length; evRpn = eventosDe(rs); }
+    rs = sr.docs.map(d=>({id:d.id,...d.data()})).filter(r=>trimId(mesConta(r))===t); nRpn = rs.length; evRpn = eventosDe(rs); }
   // objetivos trimestrais dos vendedores: média e melhor atingimento da equipa (só agregados, sem nomes), para o painel de cada um.
   // Duas contas, como o botão do painel: só PN (equipa) e PN + todos os RPN em curso (equipaRpn), igual ao que o vendedor soma no seu painel
   const equipa = {}, equipaRpn = {}; try { await lerPlano(); const mRef = trimMeses(t)[0], v = versaoDe(PLANO.versoes, mRef);
@@ -4772,7 +4774,7 @@ async function agenteRecalcular(t){
         const f=o.nat.reduce((s2,n)=>s2+(e[n]||0),0), fr=o.nat.reduce((s2,n)=>s2+(er[n]||0),0); a.push(f/ob*100); b.push((f+fr)/ob*100); });
       const x1=est(a), x2=est(b); if (x1) equipa[o.id]=x1; if (x2) equipaRpn[o.id]=x2; });
   } catch(e){ console.warn('equipa', e); }
-  const d = {trim:t, ev, evRpn, nRpn, equipa, equipaRpn, rpnTodos:true, v:2, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
+  const d = {trim:t, ev, evRpn, nRpn, equipa, equipaRpn, rpnTodos:true, v:3, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
   await setDoc(doc(db,'agente',t), d); return d;
 }
 // velocímetro: atualização incremental durante o dia. O recálculo completo (1.º acesso da staff em cada dia) substitui tudo e corrige
@@ -4780,7 +4782,7 @@ async function agenteRecalcular(t){
 function agContrib(r){ const o={}; if (!r) return o;
   const add=(t,k,ev,n)=>{ const x=o[t]=o[t]||{ev:{},evRpn:{},nRpn:0}; Object.entries(ev).forEach(([nat,v])=>x[k][nat]=(x[k][nat]||0)+v); x.nRpn+=n; };
   if (r.estado==='PN' && r.mesRef) add(trimId(r.mesRef),'ev',eventosDe([r]),0);
-  else if (EM_CURSO.includes(r.estado)) add(trimId(mesLocal()),'evRpn',eventosDe([r]),1);
+  else if (EM_CURSO.includes(r.estado)) add(trimId(mesConta(r)),'evRpn',eventosDe([r]),1);
   return o; }
 async function agDelta(antes, depois){
   CM.dados = null; AG_MEM = null;   // o painel «A minha comissão» volta a contar já na próxima vez que for aberto
