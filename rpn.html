@@ -3229,7 +3229,7 @@ async function viewComissao(){
       if (CM.mes===mesLocal()) pedidos.push(getDocs(query(col, where('vendedorUid','==',CM.uid), where('estado','in',EM_CURSO))));
       const [pS, cS] = await Promise.all(pedidos);
       const pns = pS.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN');
-      const curso = cS ? cS.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado!=='Em Elaboração') : [];
+      const curso = cS ? cS.docs.map(d=>({id:d.id,...d.data()})) : [];   // todos os RPN em curso, incluindo os acabados de abrir (Em Elaboração)
       // comissões já pagas aos PN deste mês: RUN do próprio mês e dos 6 seguintes (até hoje)
       const runs = []; for (let k=0; k<=6; k++){ const x=somaMeses(CM.mes,k); if (x<=mesLocal()) runs.push(x); }
       const pagS = await getDocs(query(collection(db,'comissoesVend'), where('uid','==',CM.uid), where('mes','in',runs))).catch(()=>null);
@@ -4750,7 +4750,7 @@ async function agenteDados(trim){
   let euros = {}; if (isMaster()) { try { const f=await getDoc(doc(db,'configFin','agenteObjetivos')); euros = f.exists() ? (f.data().trimestres||{}) : {}; } catch(_){} }
   tAno.forEach((t,i)=>{ if (rS[i]?.exists()) real[t]=rS[i].data(); });
   // staff: recalcula o trimestre em curso (1×/dia) e os anteriores do ano que faltem
-  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && (String(r.dia||'') < hojeLocal() || r.evRpn===undefined || r.equipaRpn===undefined || r.rpnTodos!==true)) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
+  if (isStaff()) for (const t of tAno) { const r=real[t], velho = !r || (t===trimId(mesLocal()) && (String(r.dia||'') < hojeLocal() || r.evRpn===undefined || r.equipaRpn===undefined || r.rpnTodos!==true || r.v!==2)) || (t===trim && r.parcial && String(r.dia||'')<hojeLocal());
     if (velho) { try { real[t] = await agenteRecalcular(t); } catch(e){ console.warn('agente', e); } } }
   return (AG_MEM = {trim, obj, euros, real, tAno, em:Date.now()});
 }
@@ -4763,16 +4763,16 @@ async function agenteRecalcular(t){
   if (t===trimId(mesLocal())) { const sr = await getDocs(query(collection(db,'rpn'), where('estado','in', EM_CURSO)));
     rs = sr.docs.map(d=>({id:d.id,...d.data()})); nRpn = rs.length; evRpn = eventosDe(rs); }
   // objetivos trimestrais dos vendedores: média e melhor atingimento da equipa (só agregados, sem nomes), para o painel de cada um.
-  // Duas contas, como o botão do painel: só PN (equipa) e PN + RPN em curso sem os «Em Elaboração» (equipaRpn), igual ao que o vendedor soma no seu painel
+  // Duas contas, como o botão do painel: só PN (equipa) e PN + todos os RPN em curso (equipaRpn), igual ao que o vendedor soma no seu painel
   const equipa = {}, equipaRpn = {}; try { await lerPlano(); const mRef = trimMeses(t)[0], v = versaoDe(PLANO.versoes, mRef);
-    const vs = vendedoresProj().filter(x=>contaComparar(x.uid) && S.users[x.uid]?.ativo!==false), rsV = rs.filter(r=>r.estado!=='Em Elaboração');
+    const vs = vendedoresProj().filter(x=>contaComparar(x.uid) && S.users[x.uid]?.ativo!==false), rsV = rs;
     const est = (pcs) => pcs.length ? {media: Math.round(pcs.reduce((a,x)=>a+x,0)/pcs.length*10)/10, melhor: Math.round(Math.max(...pcs)*10)/10, n: pcs.length} : null;
     v.objetivos.forEach(o=>{ const a=[], b=[];
       vs.forEach(x=>{ const ob=+objDe(x.uid, v, mRef)[o.id]||0; if (!ob) return; const e=eventosDe(pnsT.filter(r=>r.vendedorUid===x.uid)), er=eventosDe(rsV.filter(r=>r.vendedorUid===x.uid));
         const f=o.nat.reduce((s2,n)=>s2+(e[n]||0),0), fr=o.nat.reduce((s2,n)=>s2+(er[n]||0),0); a.push(f/ob*100); b.push((f+fr)/ob*100); });
       const x1=est(a), x2=est(b); if (x1) equipa[o.id]=x1; if (x2) equipaRpn[o.id]=x2; });
   } catch(e){ console.warn('equipa', e); }
-  const d = {trim:t, ev, evRpn, nRpn, equipa, equipaRpn, rpnTodos:true, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
+  const d = {trim:t, ev, evRpn, nRpn, equipa, equipaRpn, rpnTodos:true, v:2, incN:0, incEm:'', dia:hojeLocal(), parcial: trimMeses(t)[2]>=mesLocal(), em:serverTimestamp(), por:S.me.nome};
   await setDoc(doc(db,'agente',t), d); return d;
 }
 // velocímetro: atualização incremental durante o dia. O recálculo completo (1.º acesso da staff em cada dia) substitui tudo e corrige
@@ -4783,6 +4783,7 @@ function agContrib(r){ const o={}; if (!r) return o;
   else if (EM_CURSO.includes(r.estado)) add(trimId(mesLocal()),'evRpn',eventosDe([r]),1);
   return o; }
 async function agDelta(antes, depois){
+  CM.dados = null; AG_MEM = null;   // o painel «A minha comissão» volta a contar já na próxima vez que for aberto
   try { const a=agContrib(antes), d=agContrib(depois), vz={ev:{},evRpn:{},nRpn:0};
     for (const t of [...new Set([...Object.keys(a), ...Object.keys(d)])]) { const A=a[t]||vz, D=d[t]||vz;
       const dif=k=>{ const o={}; new Set([...Object.keys(A[k]), ...Object.keys(D[k])]).forEach(n=>{ const v=(D[k][n]||0)-(A[k][n]||0); if (Math.abs(v)>1e-9) o[n]=v; }); return o; };
