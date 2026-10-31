@@ -2073,7 +2073,7 @@ function abrirProjeto(p, apos){
 // As fichas são as mesmas da app Propostas (clientesFicha/{NIF} + índice de pesquisa em clientes/{vendedor}_…).
 // [campo, etiqueta, tipo]  tipo: '' texto · 'ta' área de texto · 'ro' só leitura · 'vend' vendedor
 const CLI_SEC = [
-  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Score/Tipo (PHC)'],['segmento','Segmento'],['certRC','Nº Certidão Registo Comercial (código de acesso)'],['certRCVal','Validade da certidão','date'],['tipificacaoPHC','Tipificação Cliente (PHC)','ro']]],
+  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Score/Tipo (PHC)'],['segmento','Segmento'],['certRC','Certidão permanente (Registo Comercial)','cert'],['certRCVal','','skip'],['tipificacaoPHC','Tipificação Cliente (PHC)','ro']]],
   ['Morada',[['morada','Morada'],['local','Localidade'],['codpost','Código postal'],['zona','Zona'],['distrito','Distrito'],['area','Área']]],
   ['Contactos',[['telefone','Telefone'],['tlmvl','Telemóvel'],['email','Email'],['url','Site'],
     ['contacto','Contacto 1 — nome'],['c1func','Contacto 1 — função'],['c1tele','Contacto 1 — telefone'],['c1email','Contacto 1 — email'],
@@ -2235,7 +2235,10 @@ function desenharCliente(){
     const campo=([k,l,t])=>{ const v=f[k]==null?'':String(f[k]), ro=!CL.edit||t==='ro'||(k==='ncont'&&!novo), dis=ro?'disabled':'';
       if (t==='vend') { const us=Object.values(S.users).filter(u=>u.vendedorPHC && u.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome)), tem=us.some(u=>String(u.vendedorPHC)===v);
         return `<div><label>${l}</label><select data-k="${k}" ${CL.edit&&isBO()?'':'disabled'}><option value="">— Sem vendedor —</option>${us.map(u=>`<option value="${esc(u.vendedorPHC)}" ${String(u.vendedorPHC)===v?'selected':''}>${esc(u.nome)} (${esc(u.vendedorPHC)})</option>`).join('')}${v&&!tem?`<option value="${esc(v)}" selected>${esc(vn||'Vendedor '+v)}</option>`:''}</select></div>`; }
-      if (t==='date') return `<div><label>${l}</label><input type="date" data-k="${k}" value="${esc(v)}" ${CL.edit&&isBO()?'':'disabled'}></div>`;
+      if (t==='skip') return '';
+      if (t==='cert') { const vv=String(f.certRCVal||''), hj=hojeLocal(), est = !vv ? '' : vv<hj ? ' <b style="color:var(--red-d)">· expirada</b>' : '';
+        return `<div style="grid-column:span 2"><label>${l}${est}</label><div style="display:flex;gap:8px"><input data-k="certRC" value="${esc(v)}" placeholder="Código de acesso (ex.: 1234-5678-9012)" ${dis} style="flex:3;min-width:0"><span style="align-self:center;font-size:12px;color:var(--mut);white-space:nowrap">válida até</span><input type="date" data-k="certRCVal" value="${esc(vv)}" ${dis} style="flex:2;min-width:0"></div></div>`; }
+      if (t==='date') return `<div><label>${l}</label><input type="date" data-k="${k} value="${esc(v)}" ${CL.edit&&isBO()?'':'disabled'}></div>`;
       if (t==='ta') return `<div style="grid-column:1/-1"><label>${l}</label><textarea rows="3" data-k="${k}" ${dis}>${esc(v)}</textarea></div>`;
       return `<div ${k==='nome'||k==='morada'?'style="grid-column:span 2"':''}><label>${l}</label><input data-k="${k}" value="${esc(v)}" ${dis}></div>`; };
     corpo=`${!CL.edit&&pode?'<div class="row" style="margin-bottom:6px"><span class="sp"></span><button class="btn pri" id="cl-ed0">✎ Editar ficha</button></div>':''}<div id="cl-form">${CLI_SEC.filter(s=>!novo||s[0]!=='Comercial'||isBO()).map(([t,cs])=>`<h3 style="margin:16px 0 8px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em">${t}</h3><div class="grid g4">${cs.filter(c=>!novo||c[2]!=='ro').map(campo).join('')}</div>`).join('')}</div>
