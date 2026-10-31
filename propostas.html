@@ -2925,7 +2925,7 @@ window.FB = {
     const todas = {}; Object.entries(ex).forEach(([id, d]) => todas[id] = { d, w: false });
     let nNovas = 0, nSubst = 0, nMant = 0; const obsUpd = [];
     novas.forEach(f => {
-      if (ex[f.ncont]) { if (substituir) { todas[f.ncont] = { d: { ...f }, w: true }; nSubst++; } else { nMant++; const up = {}; if (f.obs != null && String(f.obs) !== String(ex[f.ncont].obs || '')) up.obs = String(f.obs); if (f.tipificacaoPHC != null && String(f.tipificacaoPHC) !== String(ex[f.ncont].tipificacaoPHC || '')) up.tipificacaoPHC = String(f.tipificacaoPHC); if (Object.keys(up).length) obsUpd.push([f.ncont, up]); } }
+      if (ex[f.ncont]) { if (substituir) { todas[f.ncont] = { d: { ...f, ...Object.fromEntries(['certRC','certRCVal','familia'].filter(k => ex[f.ncont][k] != null && f[k] == null).map(k => [k, ex[f.ncont][k]])) }, w: true }; nSubst++;   // campos só da plataforma (certidão, família) não se perdem } else { nMant++; const up = {}; if (f.obs != null && String(f.obs) !== String(ex[f.ncont].obs || '')) up.obs = String(f.obs); if (f.tipificacaoPHC != null && String(f.tipificacaoPHC) !== String(ex[f.ncont].tipificacaoPHC || '')) up.tipificacaoPHC = String(f.tipificacaoPHC); if (Object.keys(up).length) obsUpd.push([f.ncont, up]); } }
       else { todas[f.ncont] = { d: { ...f }, w: true, n: true }; nNovas++; }
     });
     const porVend = {};

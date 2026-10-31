@@ -316,7 +316,7 @@ async function contactosFicha(nif){
     const cts=[['contacto','c1func','c1tele','c1email'],['c2tacto','c2func','c2tele','c2email'],['c3tacto','c3func','c3tele','c3email']]
       .map(([n,f,te,em])=>({nome:t(c[n]), func:t(c[f]), tel:t(c[te]), email:t(c[em])})).filter(x=>x.nome||x.func||x.tel||x.email);
     const c1=cts[0]||{};
-    return (S.ctCache[nif]={email:t(c.email)||c1.email||'', tel:c1.tel||t(c.tlmvl)||t(c.telefone), nome:c1.nome||'', cts, geral:{email:t(c.email), tel:t(c.telefone), tlm:t(c.tlmvl)}});
+    return (S.ctCache[nif]={certRC:t(c.certRC), certRCVal:t(c.certRCVal), email:t(c.email)||c1.email||'', tel:c1.tel||t(c.tlmvl)||t(c.telefone), nome:c1.nome||'', cts, geral:{email:t(c.email), tel:t(c.telefone), tlm:t(c.tlmvl)}});
   } catch(e){ return null; }
 }
 // contactos da ficha: os 3 contactos (função primeiro) e os contactos gerais
@@ -326,6 +326,9 @@ function contactosHTML(x){
   const L=x.cts.map((c,i)=>`<div><b>${esc(c.func||'Contacto '+(i+1))}</b>${c.nome?` — ${esc(c.nome)}`:''}${c.tel?` · ☎ ${tl(c.tel)}`:''}${c.email?` · ✉ ${ml(c.email)}`:''}</div>`);
   const g=[x.geral.tel&&'☎ '+tl(x.geral.tel), x.geral.tlm&&'📱 '+tl(x.geral.tlm), x.geral.email&&'✉ '+ml(x.geral.email)].filter(Boolean);
   if (g.length) L.push(`<div><b>Geral</b> · ${g.join(' · ')}</div>`);
+  if (x.certRC || x.certRCVal) { const hj=hojeLocal(), v=x.certRCVal, d30=(()=>{ const d=new Date(); d.setDate(d.getDate()+30); return d.toISOString().slice(0,10); })();
+    const est = !v ? '<span class="muted">sem validade indicada</span>' : v<hj ? `<b style="color:var(--red-d)">expirada a ${fmtD(v)}</b>` : v<=d30 ? `<b style="color:#8a5a00">válida até ${fmtD(v)} (expira em breve)</b>` : `válida até ${fmtD(v)}`;
+    L.push(`<div><b>Certidão permanente</b> · ${x.certRC?esc(x.certRC):'<span class="muted">sem código</span>'} · ${est}</div>`); }
   return L.join('')||'<span class="muted">A ficha não tem contactos.</span>';
 }
 // duplo clique: ficha do cliente (NIF) ou da referência do catálogo, em qualquer sítio que os mostre
@@ -2250,7 +2253,7 @@ function abrirProjeto(p, apos){
 // As fichas são as mesmas da app Propostas (clientesFicha/{NIF} + índice de pesquisa em clientes/{vendedor}_…).
 // [campo, etiqueta, tipo]  tipo: '' texto · 'ta' área de texto · 'ro' só leitura · 'vend' vendedor
 const CLI_SEC = [
-  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Score/Tipo (PHC)'],['segmento','Segmento'],['tipificacaoPHC','Tipificação Cliente (PHC)','ro'],['tipificacao','Tipificação Cliente (atual, calculada pelos PN)','ro']]],
+  ['Identificação',[['nome','Nome'],['nome2','Nome 2'],['ncont','NIF'],['no','Nº cliente PHC','ro'],['tipo','Score/Tipo (PHC)'],['segmento','Segmento'],['certRC','Nº Certidão Registo Comercial (código de acesso)'],['certRCVal','Validade da certidão','date'],['tipificacaoPHC','Tipificação Cliente (PHC)','ro'],['tipificacao','Tipificação Cliente (atual, calculada pelos PN)','ro']]],
   ['Morada',[['morada','Morada'],['local','Localidade'],['codpost','Código postal'],['zona','Zona'],['distrito','Distrito'],['area','Área']]],
   ['Contactos',[['telefone','Telefone'],['tlmvl','Telemóvel'],['email','Email'],['url','Site'],
     ['contacto','Contacto 1 — nome'],['c1func','Contacto 1 — função'],['c1tele','Contacto 1 — telefone'],['c1email','Contacto 1 — email'],
@@ -3406,6 +3409,32 @@ const saldoTxt = (prev, pago, temPag) => { const sd=Math.round((prev-pago)*100)/
   if (pago<0) return '<span class="badge b-Cancelado">charge-back</span>';
   if (Math.abs(sd)<0.01) return '<span class="badge b-PN">✓ pago</span>';
   return sd>0 ? `<span class="badge" style="background:#fff4d6;color:#8a5a00">falta ${eur(sd)}</span>` : `<span class="badge" style="background:#e0ecff;color:#1d4ed8">+${eur(-sd)} acima</span>`; };
+// ===== Conferência das linhas do RUN pelo vendedor (conferenciasCom/{mes}_{uid}: o próprio marca; Master e BO Financeiro veem) =====
+const confPN = p => (p.linhas||[]).map((l,i)=>(p.rpnId||'premio')+'|'+i);
+const confTot = (det, conf) => { const ks=det.flatMap(confPN); return {tot:ks.length, n:ks.filter(k=>conf?.[k]).length}; };
+function conferirLinhas(so){
+  const det = CM.dados.runDet.filter(p=>!so || (p.rpnId||'premio')===so), meu = CM.uid===S.me.uid, conf = CM.dados.conf, mes = CM.mes, uid = CM.uid;
+  const linha = (p,l,i) => { const k=(p.rpnId||'premio')+'|'+i, ok=!!conf[k];
+    return `<tr><td style="width:34px"><input type="checkbox" data-ck="${esc(k)}" ${ok?'checked':''} ${meu?'':'disabled'} style="width:18px;height:18px"></td><td style="font-size:12px">${esc(l.tipo||'')}</td><td>${esc(l.pos||'')}</td><td>${esc(l.msisdn||'')}</td><td style="font-size:12px">${esc(l.desc||l.plano||'')}</td><td class="num">${l.eventos?f1(l.eventos):''}</td><td class="num" style="${l.valor<0?'color:var(--red-d)':''}"><b>${eur(l.valor)}</b></td><td class="muted" style="font-size:11px" data-cq="${esc(k)}">${ok&&typeof conf[k]==='string'?fmtD(conf[k].slice(0,10)):''}</td></tr>`; };
+  modal(`<div class="row" style="gap:10px;align-items:center"><h2 style="margin:0">${meu?'Conferir':'Linhas conferidas'} · RUN de ${mesTxt(mes)}${so&&det[0]?` · PN ${esc(det[0].numero||'')}`:''}</h2><span class="sp"></span><span id="cf-t" class="badge"></span></div>
+    <p class="muted" style="margin-top:4px">${meu?'Marque cada linha depois de a conferir. Fica gravado logo.':'Marcadas por '+esc(userNome(uid)||'vendedor')+'.'}</p>
+    <div class="scroll" style="max-height:60vh"><table><thead><tr><th></th><th>Tipo</th><th>POS</th><th>MSISDN</th><th>Descrição</th><th class="num">Eventos</th><th class="num">Valor</th><th>Conferida</th></tr></thead><tbody>
+    ${det.map(p=>`<tr style="background:var(--bg2,#f6f6f7)"><td colspan="8"><b>${esc(p.numero||'')}</b> · ${esc(p.cliente||'')}${p.mesPN?` · PN de ${p.mesPN.split('-').reverse().join('/')}`:''} · <b>${eur(p.valor)}</b>${meu?` <button class="btn sm ghost" data-ctodas="${esc(p.rpnId||'premio')}">marcar todas</button>`:''}</td></tr>${(p.linhas||[]).map((l,i)=>linha(p,l,i)).join('')}`).join('')}
+    </tbody></table></div>
+    <div class="row" style="margin-top:12px"><span class="sp"></span><button class="btn pri" id="cf-ok">Fechar</button></div>`, (mm, close) => {
+    mm.style.maxWidth='1100px'; mm.style.width='96vw';
+    const conta = () => { const ks=det.flatMap(confPN), n=ks.filter(k=>conf[k]).length; mm.querySelector('#cf-t').textContent=`☑ ${n} de ${ks.length}`; };
+    const grava = async (mud) => { const ant={}; Object.keys(mud).forEach(k=>ant[k]=conf[k]||''); Object.assign(conf, mud); conta();
+      try { await setDoc(doc(db,'conferenciasCom',mes+'_'+uid), {uid, mes, l:mud, atualizadoEm:serverTimestamp()}, {merge:true}); }
+      catch(e){ toast('Não foi possível gravar: '+errTxt(e), true); Object.assign(conf, ant); Object.keys(ant).forEach(k=>{ const c=mm.querySelector(`[data-ck="${CSS.escape(k)}"]`); if (c) c.checked=!!ant[k]; }); }
+      conta(); };
+    mm.querySelectorAll('[data-ck]').forEach(c=>c.onchange=()=>{ const v=c.checked?new Date().toISOString():''; const q=mm.querySelector(`[data-cq="${CSS.escape(c.dataset.ck)}"]`); if (q) q.textContent=v?fmtD(v.slice(0,10)):''; grava({[c.dataset.ck]:v}); });
+    mm.querySelectorAll('[data-ctodas]').forEach(b=>b.onclick=()=>{ const p=det.find(x=>(x.rpnId||'premio')===b.dataset.ctodas), mud={}, v=new Date().toISOString();
+      confPN(p).forEach(k=>{ if (!conf[k]) { mud[k]=v; const c=mm.querySelector(`[data-ck="${CSS.escape(k)}"]`); if (c) c.checked=true; const q=mm.querySelector(`[data-cq="${CSS.escape(k)}"]`); if (q) q.textContent=fmtD(v.slice(0,10)); } }); if (Object.keys(mud).length) grava(mud); });
+    conta();
+    mm.querySelector('#cf-ok').onclick=()=>{ close(); if (location.hash.startsWith('#/comissao') && CM.args) drawComissao(...CM.args); };
+  });
+}
 // ===== Painel «A minha comissão» =====
 const CM = { uid:null, mes:null, dados:null, em:0 };
 // mês em que conta um RPN ainda em curso: o da data do PN (se a BO já a definiu), senão o da data do RPN
@@ -3438,7 +3467,8 @@ async function viewComissao(){
       // prémio trimestral em pagamento neste RUN: PN do vendedor nesse trimestre (uma leitura; o trimestre em curso já veio acima)
       let premioPg = premioEmPagamento(versaoDe(PLANO.versoes, CM.mes), CM.mes);
       if (premioPg) { const mq = trimMeses(premioPg.trim); premioPg.pns = (await getDocs(query(col, where('vendedorUid','==',CM.uid), where('mesRef','in',mq))).catch(()=>null))?.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.estado==='PN') ?? null; }
-      CM.dados = {chave, pns, curso, pagas, cvDocs, runDet: runDoc?.detalhe||[], pagoRun: runDoc ? +runDoc.valor||0 : null, pagoOrigem: runDoc?.origem||'', premioPg}; CM.em = Date.now();
+      let conf = {}; if (runDoc?.detalhe?.length) { try { const cs=await getDoc(doc(db,'conferenciasCom',CM.mes+'_'+CM.uid)); conf = cs.exists() ? (cs.data().l||{}) : {}; } catch(_){} }
+      CM.dados = {conf, chave, pns, curso, pagas, cvDocs, runDet: runDoc?.detalhe||[], pagoRun: runDoc ? +runDoc.valor||0 : null, pagoOrigem: runDoc?.origem||'', premioPg}; CM.em = Date.now();
     }
     drawComissao(podeEscolher, vends);
   } catch(e){ console.error(e); m.innerHTML=`<div class="card">Erro: ${esc(errTxt(e))}</div>`; }
@@ -3548,10 +3578,10 @@ function drawComissao(podeEscolher, vends){
       <tbody>${porPN.map(x=>{ const pg=CM.dados.pagas?.[x.r.id], tem=pg!=null; return `<tr class="click" data-id="${x.r.id}"><td><b>${x.r.numero||''}</b></td><td>${esc(x.r.cliente?.nome)}</td><td class="num">${x.r.nLinhas||(x.r.linhas||[]).length}</td><td class="num">${f1(x.pts)}</td><td class="num">${eur(x.val)}</td><td class="num">${tem?eur(pg):'—'}</td><td class="num">${tem?eur(x.val-pg):'—'}</td><td>${saldoTxt(x.val, pg||0, tem)}</td></tr>`; }).join('')||'<tr><td colspan="8" class="muted">Ainda sem PN neste mês.</td></tr>'}</tbody>
       ${porPN.length?(()=>{ const tp=porPN.reduce((a,x)=>a+(CM.dados.pagas?.[x.r.id]||0),0), np=porPN.filter(x=>CM.dados.pagas?.[x.r.id]!=null).length; return `<tfoot><tr class="tot"><td colspan="3">Total · ${np} de ${porPN.length} PN com pagamento</td><td class="num">${f1(c.pts)}</td><td class="num">${eur(c.total)}</td><td class="num">${eur(tp)}</td><td class="num">${eur(c.total-tp)}</td><td>${np===porPN.length?saldoTxt(c.total,tp,true):''}</td></tr></tfoot>`; })():''}</table>
       <p class="muted" style="font-size:12px;margin-bottom:0">Previsão com o escalão e a majoração atuais. A comissão final é apurada quando a Vodafone paga cada linha (normalmente no RUN do mês seguinte) e pode incluir prémios trimestrais ou acertos. A coluna «Paga» soma o que estes PN já receberam nos RUN seguintes. Clique num PN para ver todos os pagamentos.</p></div>
-    <div class="card scroll"><h2>Comissões pagas · RUN de ${mesTxt(CM.mes)} · recibo de ${reciboTxt(CM.mes)}${CM.dados.pagoRun!=null?` · ${eur(CM.dados.pagoRun)}`:''}</h2>
-      ${CM.dados.runDet.length ? `<table><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Movimentos</th><th class="num">Pago neste RUN</th></tr></thead>
-      <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr ${p.rpnId?`class="click" data-rid="${esc(p.rpnId)}"`:''}><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr class="tot"><td colspan="4">Total pago neste RUN (inclui PN de meses anteriores e charge-backs)</td><td class="num">${eur(CM.dados.pagoRun||0)}</td></tr></tfoot></table>` : `<p class="muted" style="margin:0">Ainda não há comissões apuradas no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
+    <div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Comissões pagas · RUN de ${mesTxt(CM.mes)} · recibo de ${reciboTxt(CM.mes)}${CM.dados.pagoRun!=null?` · ${eur(CM.dados.pagoRun)}`:''}</h2><span class="sp"></span>${CM.dados.runDet.length?(()=>{ const t=confTot(CM.dados.runDet, CM.dados.conf); return `<span class="badge" style="${t.n===t.tot?'background:#e5f4ea;color:var(--ok)':''}">☑ ${t.n} de ${t.tot} linhas conferidas</span><button class="btn sm ${t.n<t.tot&&CM.uid===S.me.uid?'pri':''}" id="cm-conf">${CM.uid===S.me.uid?'Conferir linhas':'Ver linhas conferidas'}</button>`; })():''}</div>
+      ${CM.dados.runDet.length ? `<table style="margin-top:8px"><thead><tr><th>PN</th><th>Cliente</th><th>Mês do PN</th><th class="num">Movimentos</th><th class="num">Pago neste RUN</th><th>Conferido</th></tr></thead>
+      <tbody>${[...CM.dados.runDet].sort((a,b)=>String(b.mesPN||'').localeCompare(String(a.mesPN||''))||(b.valor-a.valor)).map(p=>`<tr ${p.rpnId?`class="click" data-rid="${esc(p.rpnId)}"`:''}><td><b>${esc(p.numero)}</b></td><td>${esc(p.cliente)}</td><td>${p.mesPN?p.mesPN.split('-').reverse().join('/'):''}</td><td class="num">${(p.linhas||[]).length}</td><td class="num" style="${p.valor<0?'color:var(--red-d)':''}">${eur(p.valor)}</td><td>${(()=>{ const k=confPN(p), n=k.filter(x=>CM.dados.conf[x]).length; return `<button class="btn sm ghost" data-cpn="${esc(p.rpnId||'premio')}" style="${n===k.length?'color:var(--ok)':''}">${n===k.length?'✓':'☐'} ${n}/${k.length}</button>`; })()}</td></tr>`).join('')}</tbody>
+      <tfoot><tr class="tot"><td colspan="4">Total pago neste RUN (inclui PN de meses anteriores e charge-backs)</td><td class="num">${eur(CM.dados.pagoRun||0)}</td><td></td></tr></tfoot></table><p class="muted" style="font-size:12px;margin-bottom:0">Confira cada linha com o que esperava receber e marque-a com ☑. Se alguma não estiver certa, fale com a BO Financeiro antes de o recibo ser processado.</p>` : `<p class="muted" style="margin:0">Ainda não há comissões apuradas no RUN de ${mesTxt(CM.mes)}.</p>`}</div>
     <div class="card"><h2>Ranking da equipa</h2><div id="cm-rank" class="muted">A carregar…</div></div></div>`;
   desenharAgente($('#cm-ag'), CM.mes, true);
   // comparação com a equipa (média e melhor atingimento do trimestre, sem nomes): vem do recálculo diário em agente/{trimestre}
@@ -3578,7 +3608,9 @@ function drawComissao(podeEscolher, vends){
   $('#cm-r').onclick = () => { CM.dados=null; viewComissao(); };
   $('#cm-v')?.addEventListener('change', e => { CM.uid=e.target.value; viewComissao(); });
   m.querySelectorAll('tr[data-id]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.id, CM.dados.pns.find(r=>r.id===t.dataset.id)));
-  m.querySelectorAll('tr[data-rid]').forEach(t=>t.onclick=()=>janelaComPN(t.dataset.rid, CM.dados.pns.find(r=>r.id===t.dataset.rid)));
+  m.querySelectorAll('tr[data-rid]').forEach(t=>t.onclick=e=>{ if (e.target.closest('[data-cpn]')) return; janelaComPN(t.dataset.rid, CM.dados.pns.find(r=>r.id===t.dataset.rid)); });
+  m.querySelectorAll('[data-cpn]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); conferirLinhas(b.dataset.cpn); });
+  $('#cm-conf')?.addEventListener('click',()=>conferirLinhas(null));
 }
 // cartão «Prémio trimestral» do painel: trimestre em construção + prestação em pagamento neste RUN
 function premioCard({v, obj, evTrim, T, atual, duT, duTF, eu}){
@@ -4262,10 +4294,11 @@ async function mapaPagamentos(mes){
 }
 async function cardMapa(mes, R){
   const L = await mapaPagamentos(mes); if (!L.length) return '';
+  let CF = {}; try { (await getDocs(query(collection(db,'conferenciasCom'), where('mes','==',mes)))).docs.forEach(d=>{ const x=d.data(); CF[x.uid]=Object.values(x.l||{}).filter(Boolean).length; }); } catch(_){}
   return `<div class="card scroll"><div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Mapa de pagamentos · recibo de ${reciboTxt(mes)} (RUN de ${mesTxt(mes)})</h2>${mapaPagamentos.rasc?'<span class="badge" style="background:#fff4d6;color:#8a5a00" title="Rascunho: ainda não visível aos vendedores; fica publicado ao «Finalizar RUN»">📝 rascunho</span>':''}${R?.fechado?`<span class="badge" style="background:#e5f4ea;color:var(--ok)">RUN fechado ${esc(String(R.fechado.em||'').slice(0,10).split('-').reverse().join('/'))} · ${esc(R.fechado.por||'')}</span>`:'<span class="badge">por fechar</span>'}<span class="sp"></span><button class="btn sm" id="mp-x">Descarregar Excel</button></div>
-    <table style="margin-top:8px"><thead><tr><th>Colaborador</th><th>Nº PHC</th><th>Tipo</th><th>Categoria</th><th class="num">PN · linhas</th><th class="num">Comissão do RUN</th><th class="num">Prémio trimestral</th><th class="num">Total a pagar</th><th></th></tr></thead>
-    <tbody>${L.map(x=>`<tr style="${x.inativo?'background:#fff4d6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Utilizador inativo: os incentivos cessam com o fim do vínculo">inativo</span>':''}${x.orig==='PHC'?' <span class="badge" title="Valor importado do PHC (o que foi pago)">PHC</span>':''}</td><td>${esc(x.phc)}</td><td>${x.cat}</td><td>${esc(x.categoria)}</td><td class="num" style="font-size:12px">${x.gid?`${x.nPN} · ${x.nLin}`:''}</td><td class="num">${eur(x.com)}</td><td class="num">${x.premio?eur(x.premio):'—'}</td><td class="num"><b>${eur(x.total)}</b></td><td>${x.gid?`<button class="btn sm" data-gv="${esc(x.gid)}" title="Detalhe PN a PN do que está gravado">Ver PN</button>`:''}</td></tr>`).join('')}</tbody>
-    <tfoot><tr class="tot"><td colspan="5">Total</td><td class="num">${eur(L.reduce((a,x)=>a+x.com,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.premio,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.total,0))}</td><td></td></tr></tfoot></table>
+    <table style="margin-top:8px"><thead><tr><th>Colaborador</th><th>Nº PHC</th><th>Tipo</th><th>Categoria</th><th class="num">PN · linhas</th><th class="num">Comissão do RUN</th><th class="num">Prémio trimestral</th><th class="num">Total a pagar</th><th title="Linhas que o vendedor marcou como conferidas em «A minha comissão»">Conferido pelo vendedor</th><th></th></tr></thead>
+    <tbody>${L.map(x=>`<tr style="${x.inativo?'background:#fff4d6':''}"><td><b>${esc(x.nome)}</b>${x.inativo?' <span class="badge" title="Utilizador inativo: os incentivos cessam com o fim do vínculo">inativo</span>':''}${x.orig==='PHC'?' <span class="badge" title="Valor importado do PHC (o que foi pago)">PHC</span>':''}</td><td>${esc(x.phc)}</td><td>${x.cat}</td><td>${esc(x.categoria)}</td><td class="num" style="font-size:12px">${x.gid?`${x.nPN} · ${x.nLin}`:''}</td><td class="num">${eur(x.com)}</td><td class="num">${x.premio?eur(x.premio):'—'}</td><td class="num"><b>${eur(x.total)}</b></td><td style="font-size:12px">${x.gid&&x.cat!=='BackOffice'?(()=>{ const n=Math.min(CF[x.uid]||0, x.nLin); return `<span style="${n>=x.nLin&&x.nLin?'color:var(--ok);font-weight:600':n?'':'color:var(--mut)'}">${n>=x.nLin&&x.nLin?'✓ ':''}${n} de ${x.nLin}</span>`; })():''}</td><td>${x.gid?`<button class="btn sm" data-gv="${esc(x.gid)}" title="Detalhe PN a PN do que está gravado">Ver PN</button>`:''}</td></tr>`).join('')}</tbody>
+    <tfoot><tr class="tot"><td colspan="5">Total</td><td class="num">${eur(L.reduce((a,x)=>a+x.com,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.premio,0))}</td><td class="num">${eur(L.reduce((a,x)=>a+x.total,0))}</td><td></td><td></td></tr></tfoot></table>
     <p class="muted" style="font-size:12px;margin-bottom:0">A pagar no recibo de ${reciboTxt(mes)}. Valores gravados para o RUN de ${mesTxt(mes)} (comissões dos vendedores com charge-backs, prestação do prémio trimestral e parte de cada BO na Produção BO). Valores negativos = a descontar.</p></div>`;
 }
 async function descarregarMapa(mes){
