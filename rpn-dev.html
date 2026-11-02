@@ -3161,7 +3161,7 @@ async function simularUniao(){
 function editarRef(p, modelo){   // modelo = referência a duplicar: abre como nova, já preenchida, só falta escrever a referência
   const nova=!p; p=p||(modelo?{...modelo, ref:''}:{ref:'',designacao:'',subfamilia:'GSM',tier:'Gold',pricingPlan:'',descontinuado:false});
   modal(`<h2>${nova?(modelo?'Duplicar '+esc(modelo.ref):'Nova referência'):'Editar '+esc(p.ref)}</h2>${modelo?`<p class="muted" id="e-dup" style="margin-top:0">Cópia de <b>${esc(modelo.ref)}</b>. Escreva a nova referência e altere o que for diferente.</p>`:''}<div class="grid g2">
-    <div><label>Referência</label><input id="e-ref" value="${esc(p.ref)}" ${nova?'':'disabled'} maxlength="18" style="text-transform:uppercase"></div>
+    <div><label>Referência</label><input id="e-ref" value="${esc(p.ref)}" ${nova?'':'disabled'} maxlength="30" style="text-transform:uppercase"></div>
     <div><label>Sub-família</label><select id="e-sub">${[...new Set([...SUBFAMS,p.subfamilia||'GSM'])].map(x=>`<option ${x===(p.subfamilia||'GSM')?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
     <div style="grid-column:1/-1"><label>Designação</label><input id="e-des" value="${esc(p.designacao)}"></div>
     <div><label>Tier</label><select id="e-tier">${['Gold','Silver','Bronze','Estanho',''].map(x=>`<option ${x===(p.tier||'')?'selected':''}>${x}</option>`).join('')}</select></div>
