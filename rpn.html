@@ -143,6 +143,10 @@ function normEspera(r){ if (r && r.estado==='A aguardar ciclo') { r.estado='A ag
 const diasDesde = iso => iso ? Math.max(0, Math.floor((new Date(hoje()) - new Date(String(iso).slice(0,10))) / 864e5)) : 0;
 const esperaVencida = r => r.estado==='A aguardar' && r.esperaData && r.esperaData < hoje();
 const esperaTxt = r => { const m = ESPERA_TXT[r.esperaMotivo]||'A aguardar'; return r.esperaData ? `${m} · ${esperaVencida(r)?'verificar, passou ':'até '}${fmtD(r.esperaData)}` : `${m} · há ${diasDesde(r.esperaDesde)} dia(s)`; };
+const CARGA_EST = ['Submetido','Em Implementação'];   // contam para a carga da BO (o que depende dela)
+const REC_DIAS = 4;   // desempate: linhas recebidas nos últimos 4 dias
+function recAdd(cd, uid, n){ if (!cd || !uid || !n) return cd?.rec; const hj=hojeLocal(); cd.rec=cd.rec||{}; const m=cd.rec[uid]=cd.rec[uid]||{}; m[hj]=(m[hj]||0)+n; return cd.rec; }
+const recSoma = (cd, uid) => { const lim=somaDias(hojeLocal(),-(REC_DIAS-1)); return Object.entries((cd?.rec||{})[uid]||{}).reduce((a,[d,v])=>a+(d>=lim?(+v||0):0),0); };
 const ABERTOS  = ['Submetido','Em Implementação','Pendente Comercial','Pendente Documentos','A aguardar','A aguardar ciclo'];   // contam para a carga da BO
 const estTxt = e => e==='Em Conferência' ? 'Concluído' : (e||'');   // na base de dados continua «Em Conferência»
 const DIAS_CONCLUIDO = 8;   // dias em que um processo concluído ainda aparece na lista do comercial
@@ -1110,10 +1114,11 @@ function validarSubmissao(r){
   return e;
 }
 // aus = BackOffices ausentes (config/cargaBO.ausentes); excl = uids a excluir
-function escolherBO(carga, aus={}, excl=[]){
+function escolherBO(carga, aus={}, excl=[], cd=null){
   const lista = bos().filter(b=>!aus[b.uid] && !excl.includes(b.uid)); if(!lista.length) throw new Error('Não há BackOffices ativas configuradas para receber RPNs (Administração → Utilizadores → “Recebe RPN”).');
   const min = Math.min(...lista.map(b=>carga[b.uid]||0));
-  const cand = lista.filter(b=>(carga[b.uid]||0)===min);
+  let cand = lista.filter(b=>(carga[b.uid]||0)===min);
+  if (cd && cand.length>1) { const mr=Math.min(...cand.map(b=>recSoma(cd,b.uid))); cand = cand.filter(b=>recSoma(cd,b.uid)===mr); }
   return cand[Math.floor(Math.random()*cand.length)];
 }
 // conferência: mesma regra (menos linhas em conferência), nunca quem implementou; devolve null se não houver ninguém
@@ -1133,9 +1138,9 @@ async function realocarTx(id, tipo, uidNovo, motivo){
     const upd={atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid};
     if (tipo==='bo') {
       if (!ABERTOS.includes(r.estado)) throw new Error('Este RPN já não está em implementação.');
-      const novo = uidNovo ? {uid:uidNovo, nome:userNome(uidNovo)} : escolherBO(carga, aus, [r.boUid]);
+      const novo = uidNovo ? {uid:uidNovo, nome:userNome(uidNovo)} : escolherBO(carga, aus, [r.boUid], cd);
       if (novo.uid===r.boUid) throw new Error('Já está atribuído a essa BackOffice.');
-      const cnt=r.cargaContada||0, nc=r.nLinhas||0;
+      const cnt=r.cargaContada||0, nc=CARGA_EST.includes(r.estado)?(r.nLinhas||0):0; recAdd(cd, novo.uid, r.nLinhas||0);
       if (r.boUid && cnt) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-cnt);
       if (nc) carga[novo.uid]=(carga[novo.uid]||0)+nc;
       upd.boUid=novo.uid; upd.boNome=novo.nome; upd.cargaContada=nc; realocarTx.uid=novo.uid;
@@ -1153,7 +1158,7 @@ async function realocarTx(id, tipo, uidNovo, motivo){
       upd.confUid=novo.uid; upd.confNome=novo.nome; upd.confContada=nc; realocarTx.uid=novo.uid;
       txt=`Conferência: ${r.confNome||'em fila'} → ${novo.nome}`;
     }
-    tx.set(cargaRef,{carga,conf,atualizadoEm:serverTimestamp()},{merge:true});
+    tx.set(cargaRef,{carga,conf,...(cd.rec?{rec:cd.rec}:{}),atualizadoEm:serverTimestamp()},{merge:true});
     tx.update(ref,upd);
   });
   await hist('Realocado', `${txt}. Razão: ${motivo}`, id);
@@ -1260,7 +1265,7 @@ async function guardar(opts={}){
         if (old.confUid!==S.me.uid && !isMaster()) throw new Error('A conferência deste RPN está atribuída a '+(old.confNome||'outra BackOffice')+'.');
       }
       if (opts.submeter && !data.boUid && String(data.data||'').slice(0,10) > hojeLocal()) { data.agendadoPara=String(data.data).slice(0,10); data.boUid=null; data.boNome=''; }
-      else if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga, aus); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; data.agendadoPara=null; }
+      else if (opts.submeter && !data.boUid) { boEscolhida = escolherBO(carga, aus, [], cd); recAdd(cd, boEscolhida.uid, data.nLinhas||0); data.boUid=boEscolhida.uid; data.boNome=boEscolhida.nome; data.agendadoPara=null; }
       if (!opts.submeter && !data.boUid && data.agendadoPara && ABERTOS.includes(data.estado)) { const d0=String(data.data||'').slice(0,10); data.agendadoPara = d0>hojeLocal() ? d0 : hojeLocal(); }   // a BO mudou a data de um agendado
       if (opts.conferencia && opts.confPref && !data.confUid && opts.confPref!==data.boUid && !aus[opts.confPref] && bos().some(b=>b.uid===opts.confPref)) { data.confUid=opts.confPref; data.confNome=userNome(opts.confPref); }
       if (data.estado==='Em Conferência' && (!data.confUid || data.confUid===data.boUid || aus[data.confUid])) {
@@ -1274,7 +1279,7 @@ async function guardar(opts={}){
         data.devMeses = [...new Set([...data.devMeses, mesLocal()])];
       }
       const oldBo=old?.boUid||null, oldCnt=old?.cargaContada||0;
-      const newCnt = (ABERTOS.includes(data.estado) && data.boUid) ? data.nLinhas : 0;
+      const newCnt = (CARGA_EST.includes(data.estado) && data.boUid) ? data.nLinhas : 0;
       if (oldBo && oldCnt) carga[oldBo] = Math.max(0,(carga[oldBo]||0) - oldCnt);
       if (data.boUid && newCnt) carga[data.boUid] = (carga[data.boUid]||0) + newCnt;
       data.cargaContada = newCnt;
@@ -1283,7 +1288,7 @@ async function guardar(opts={}){
       if (oldCf && oldCfCnt) conf[oldCf] = Math.max(0,(conf[oldCf]||0) - oldCfCnt);
       if (data.confUid && newCfCnt) conf[data.confUid] = (conf[data.confUid]||0) + newCfCnt;
       data.confContada = newCfCnt;
-      if (oldCnt || newCnt || oldCfCnt || newCfCnt) tx.set(cargaRef,{carga, conf, atualizadoEm:serverTimestamp()},{merge:true});
+      if (oldCnt || newCnt || oldCfCnt || newCfCnt || boEscolhida) tx.set(cargaRef,{carga, conf, ...(boEscolhida&&cd.rec?{rec:cd.rec}:{}), atualizadoEm:serverTimestamp()},{merge:true});
       data.atualizadoEm = serverTimestamp(); data.atualizadoPor = S.me.uid;
       if (isNew) tx.set(rpnRef, data); else tx.set(rpnRef, data, {merge:true});
     });
@@ -1350,7 +1355,7 @@ async function aplicarNoIrmao(id, tipo, L, nota){
         devolucoes:[...(o.devolucoes||[]), {em:agora, mes:mesLocal(), porUid:S.me.uid, porNome:S.me.nome, aUid:o.implPorUid||o.boUid, aNome:o.implPorNome||o.boNome||'', linhas:o.nLinhas||0, motivo:nota||'', anulada:false}]}); }
     else return;
     u.estado=estado;
-    const n=o.nLinhas||0, nc=(ABERTOS.includes(estado)&&bo)?n:0, ncf=(estado==='Em Conferência'&&cf)?n:0;
+    const n=o.nLinhas||0, nc=(CARGA_EST.includes(estado)&&bo)?n:0, ncf=(estado==='Em Conferência'&&cf)?n:0;
     if (o.boUid && o.cargaContada) carga[o.boUid]=Math.max(0,(carga[o.boUid]||0)-o.cargaContada);
     if (bo && nc) carga[bo]=(carga[bo]||0)+nc;
     if (o.confUid && o.confContada) conf[o.confUid]=Math.max(0,(conf[o.confUid]||0)-o.confContada);
@@ -1463,7 +1468,7 @@ function separarLinhas(){
         Object.assign(d,{linhas:vao, motivos:[], confUid:null, confNome:'', confContada:0, confNota:'', mesRef:null, fechadoEm:null, fechadoMes:null, devolucoes:[], devMeses:[], implementadoEm:'', separadoDe:S.cur.numero});
         if (!ABERTOS.includes(d.estado)) d.estado='Em Implementação';
         if (esp) Object.assign(d,{estado:'A aguardar', esperaMotivo:esp, esperaData:'', esperaDesde:hoje(), cicloDia:''});
-        totais(d); d.cargaContada=d.boUid?d.nLinhas:0;
+        totais(d); d.cargaContada=d.boUid&&CARGA_EST.includes(d.estado)?d.nLinhas:0;
         const nref=doc(collection(db,'rpn'));
         await runTransaction(db, async tx=>{ const cr=doc(db,'counters','rpn'), cg=doc(db,'config','cargaBO'), c=await tx.get(cr), cs=await tx.get(cg);
           d.numero=c.exists()?c.data().next:1; const carga={...((cs.exists()?cs.data():{}).carga||{})};
@@ -2317,6 +2322,7 @@ function desenharCliente(){
 // Coleção atividades/{id} (+ anexos, mensagens, historico). Mesma filosofia do RPN, sem linhas nem Score: a BO trata e fecha (não há conferência).
 const AT_ESTADOS = ['Em Elaboração','Agendada','Submetido','Em tratamento','Pendente Comercial','A aguardar','Concluído','Cancelado','Recusado'];
 const AT_CURSO   = ['Em Elaboração','Agendada','Submetido','Em tratamento','Pendente Comercial','A aguardar'];
+const AT_CARGA = ['Submetido','Em tratamento'];   // contam 1 para a carga da BO
 const AT_ABERTAS = ['Submetido','Em tratamento','Pendente Comercial','A aguardar'];   // contam 1 para a carga da BO
 const AT_FECHADAS = ['Concluído','Cancelado','Recusado'];
 const AT_PONTUAM = ['Concluído','Recusado'];   // contam para a Produção BO (a BO tratou o pedido)
@@ -2540,7 +2546,7 @@ async function atGuardar(acao, arg){
       if (acao==='submeter' || acao==='submeterJa') { if(!(de==='Em Elaboração' || (de==='Agendada' && acao==='submeterJa'))) throw new Error('Esta Atividade já foi submetida.');
         if (acao==='submeter' && String(data.dataEfetiva||'') > hojeLocal()) { data.estado='Agendada'; data.agendadaEm=agora; data.boUid=null; data.boNome=''; }
         else { data.estado='Submetido'; data.submetidoEm=agora;
-          if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus); data.boUid=b.uid; data.boNome=b.nome; } } }
+          if (!data.boUid || aus[data.boUid]) { const b=escolherBO(carga, aus, [], cd); recAdd(cd, b.uid, 1); data.boUid=b.uid; data.boNome=b.nome; } } }
       else if (acao==='resolvido') { if(de!=='Pendente Comercial') throw new Error('Esta Atividade já não está pendente.'); data.estado='Em tratamento'; data.motivo=''; }
       else if (acao==='tratar') { data.estado='Em tratamento'; data.motivo=''; }
       else if (acao==='pendente') { data.estado='Pendente Comercial'; data.motivo=arg||''; }
@@ -2549,11 +2555,11 @@ async function atGuardar(acao, arg){
         data.fechadoEm=agora; data.fechadoMes=mesLocal(); data.mesRef=mesLocal(); data.fechadoPorUid=S.me.uid; data.fechadoPorNome=S.me.nome; }
       else if (acao==='reabrir') { data.estado='Em tratamento'; data.fechadoEm=null; data.fechadoMes=null; data.mesRef=null; data.motivo=''; }
       if (acao && !['submeter','submeterJa','resolvido'].includes(acao) && !isBO()) throw new Error('Sem permissão para esta operação.');
-      const oc=old?.cargaContada||0, nc=(AT_ABERTAS.includes(data.estado)&&data.boUid)?1:0;
+      const oc=old?.cargaContada||0, nc=(AT_CARGA.includes(data.estado)&&data.boUid)?1:0;
       if (old?.boUid && oc) carga[old.boUid]=Math.max(0,(carga[old.boUid]||0)-oc);
       if (data.boUid && nc) carga[data.boUid]=(carga[data.boUid]||0)+nc;
       data.cargaContada=nc;
-      if (oc||nc) tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+      if (oc||nc) tx.set(cargaRef,{carga, ...(cd.rec?{rec:cd.rec}:{}), atualizadoEm:serverTimestamp()},{merge:true});
       if (prox!=null) tx.set(cRef,{next:prox},{merge:true});
       data.atualizadoEm=serverTimestamp(); data.atualizadoPor=S.me.uid;
       if (isNew) { data.criadoEm=serverTimestamp(); data.criadoPor=S.me.uid; tx.set(ref,data); } else tx.set(ref,data,{merge:true});
@@ -2583,9 +2589,9 @@ async function rpnAgendadosDistribuir(ids){
       try { await runTransaction(db, async tx=>{ const ref=doc(db,'rpn',x.id), cargaRef=doc(db,'config','cargaBO'); const sn=await tx.get(ref), cs=await tx.get(cargaRef); bo=null; if(!sn.exists()) return; const o=sn.data();
           if (!o.agendadoPara) return; num=o.numero; de=o.agendadoPara;
           if (o.boUid || !ABERTOS.includes(o.estado)) { tx.update(ref,{agendadoPara:null}); return; }
-          const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, g=o.grupoId, b=(g&&gB[g]) || escolherBO(carga, cd.ausentes||{}), nl=o.nLinhas||0;
-          carga[b.uid]=(carga[b.uid]||0)+nl; if (g) gB[g]=b;
-          tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+          const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, g=o.grupoId, b=(g&&gB[g]) || escolherBO(carga, cd.ausentes||{}, [], cd), nl=o.nLinhas||0;
+          carga[b.uid]=(carga[b.uid]||0)+nl; if (g) gB[g]=b; recAdd(cd, b.uid, nl);
+          tx.set(cargaRef,{carga, ...(cd.rec?{rec:cd.rec}:{}), atualizadoEm:serverTimestamp()},{merge:true});
           tx.update(ref,{boUid:b.uid, boNome:b.nome, cargaContada:nl, agendadoPara:null, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); bo=b.nome; });
         if (bo) { n++; await hist('Entregue à BackOffice', ids?`Enviado antes da data agendada (${fmtD(de)}) por ${S.me.nome}: atribuído a ${bo}`:`Chegou a data agendada (${fmtD(de)}): atribuído a ${bo} (distribuição automática)`, x.id); }
       } catch(e){ console.warn('rpnAgendados', x.id, e); if (ids) toast(errTxt(e),true); }
@@ -2600,9 +2606,9 @@ async function atAgendadasDistribuir(){
     const sn = await getDocs(q), hj = hojeLocal(), prontas = sn.docs.filter(d=>String(d.data().dataEfetiva||'') <= hj);
     for (const d of prontas) { let bo='';
       try { await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',d.id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef);
-          if (!s.exists() || s.data().estado!=='Agendada') return; const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, b=escolherBO(carga, cd.ausentes||{});
-          carga[b.uid]=(carga[b.uid]||0)+1; bo=b.nome;
-          tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true});
+          if (!s.exists() || s.data().estado!=='Agendada') return; const cd=cs.exists()?cs.data():{}, carga={...(cd.carga||{})}, b=escolherBO(carga, cd.ausentes||{}, [], cd);
+          carga[b.uid]=(carga[b.uid]||0)+1; bo=b.nome; recAdd(cd, b.uid, 1);
+          tx.set(cargaRef,{carga, ...(cd.rec?{rec:cd.rec}:{}), atualizadoEm:serverTimestamp()},{merge:true});
           tx.update(ref,{estado:'Submetido', submetidoEm:new Date().toISOString(), boUid:b.uid, boNome:b.nome, cargaContada:1, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid}); });
         if (bo) { await atHist(d.id,'Submetida',`Chegou a data agendada (${fmtD(d.data().dataEfetiva)}): atribuída a ${bo} (distribuição automática)`); await atAviso(d.id, {...d.data(), boNome:bo}, 'Agendada', 'Submetido'); }
       } catch(e){ console.warn('agendada', d.id, e); } }
@@ -2628,10 +2634,10 @@ async function atRealocarTx(id, motivo){
   let txt='';
   await runTransaction(db, async tx=>{ const ref=doc(db,'atividades',id), cargaRef=doc(db,'config','cargaBO'); const s=await tx.get(ref), cs=await tx.get(cargaRef); const r=s.data(), cd=cs.exists()?cs.data():{};
     if (!AT_ABERTAS.includes(r.estado)) throw new Error('Já não está em aberto.');
-    const carga={...(cd.carga||{})}, novo=escolherBO(carga, cd.ausentes||{}, [r.boUid]); atRealocarTx.ant=r; atRealocarTx.uid=novo.uid;
+    const carga={...(cd.carga||{})}, novo=escolherBO(carga, cd.ausentes||{}, [r.boUid], cd); atRealocarTx.ant=r; recAdd(cd, novo.uid, 1); atRealocarTx.uid=novo.uid;
     if (r.boUid && r.cargaContada) carga[r.boUid]=Math.max(0,(carga[r.boUid]||0)-r.cargaContada);
-    carga[novo.uid]=(carga[novo.uid]||0)+1;
-    tx.set(cargaRef,{carga, atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,{boUid:novo.uid, boNome:novo.nome, cargaContada:1, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
+    const ncA=AT_CARGA.includes(r.estado)?1:0; if (ncA) carga[novo.uid]=(carga[novo.uid]||0)+1;
+    tx.set(cargaRef,{carga, ...(cd.rec?{rec:cd.rec}:{}), atualizadoEm:serverTimestamp()},{merge:true}); tx.update(ref,{boUid:novo.uid, boNome:novo.nome, cargaContada:ncA, atualizadoEm:serverTimestamp(), atualizadoPor:S.me.uid});
     txt=`De ${r.boNome||'—'} para ${novo.nome}. ${motivo||''}`; });
   await atHist(id,'Realocada',txt);
   await avisoBO('atividades', id, atRealocarTx.ant, `BackOffice alterada por ${S.me.nome}\n${txt}`, [atRealocarTx.uid]);
@@ -5215,7 +5221,7 @@ function admCat(el){
 async function admCarga(el){
   const [cs,cn] = await Promise.all([getDoc(doc(db,'config','cargaBO')), getDoc(doc(db,'counters','rpn'))]);
   const carga = cs.data()?.carga||{}, conf = cs.data()?.conf||{}, aus = cs.data()?.ausentes||{};
-  el.innerHTML = `<div class="card"><h2>Carga atual das BackOffices</h2><p class="muted" style="margin-top:0">Implementação: linhas em RPNs abertos (Submetido, Em Implementação, Pendentes). Conferência: linhas em RPNs “Em Conferência”. Cada RPN vai para a BO presente com menor carga; em empate, sorteio. Quem implementou nunca confere. As ausências marcam-se na lista de RPN, em “Ausências · redistribuir”.</p>
+  el.innerHTML = `<div class="card"><h2>Carga atual das BackOffices</h2><p class="muted" style="margin-top:0">Implementação: linhas em RPNs Submetidos ou Em Implementação (o que depende da BO; pendentes do comercial e «a aguardar» não contam) e 1 por Atividade Submetida ou Em tratamento. Conferência: linhas em RPNs “Em Conferência”. Cada RPN vai para a BO presente com menor carga; em empate, para a que recebeu menos linhas nos últimos 4 dias; depois, sorteio. Quem implementou nunca confere. As ausências marcam-se na lista de RPN, em “Ausências · redistribuir”.</p>
     <table style="max-width:680px"><thead><tr><th>BackOffice</th><th class="num">A implementar</th><th class="num">A conferir</th><th>Situação</th></tr></thead><tbody>${bos().map(b=>`<tr><td>${esc(b.nome)}</td><td class="num">${carga[b.uid]||0}</td><td class="num">${conf[b.uid]||0}</td><td>${aus[b.uid]?'Ausente':'Presente'}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Nenhuma BO marcada com “Recebe RPN”.</td></tr>'}</tbody></table>
     <button class="btn" id="rc" style="margin-top:12px">Recalcular a partir dos RPN</button></div>
     <div class="card"><h2>Numeração</h2><div class="row"><div style="width:200px"><label>Próximo nº de RPN</label><input type="number" id="nx" value="${cn.data()?.next||1}"></div><button class="btn" id="nxs" style="align-self:end">Guardar</button></div>
@@ -5223,11 +5229,11 @@ async function admCarga(el){
   $('#nxs').onclick=async()=>{ const v=parseInt($('#nx').value); if(!(v>0)) return; try{ await setDoc(doc(db,'counters','rpn'),{next:v}); toast('Numeração atualizada.'); }catch(e){ toast(errTxt(e),true); } };
   $('#rc').onclick=async()=>{ try{ const s=await getDocs(query(collection(db,'rpn'), where('estado','in',EM_CURSO))); const c={}, cf={}; const b=writeBatch(db); let n=0;   // economia de leituras: só os processos em curso
       Object.keys(S.users).forEach(u=>{ c[u]=0; cf[u]=0; });
-      s.forEach(d=>{ const r=d.data(); const cnt=(ABERTOS.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt;
+      s.forEach(d=>{ const r=d.data(); const cnt=(CARGA_EST.includes(r.estado)&&r.boUid)?(r.nLinhas||0):0; if(cnt) c[r.boUid]=(c[r.boUid]||0)+cnt;
         const cc=(r.estado==='Em Conferência'&&r.confUid)?(r.nLinhas||0):0; if(cc) cf[r.confUid]=(cf[r.confUid]||0)+cc;
         if(((r.cargaContada||0)!==cnt || (r.confContada||0)!==cc) && n<450){ b.update(d.ref,{cargaContada:cnt,confContada:cc}); n++; }
       });
-      (await getDocs(query(collection(db,'atividades'), where('estado','in',AT_CURSO)))).forEach(d=>{ const a=d.data(), cnt=(AT_ABERTAS.includes(a.estado)&&a.boUid)?1:0; if(cnt) c[a.boUid]=(c[a.boUid]||0)+1;
+      (await getDocs(query(collection(db,'atividades'), where('estado','in',AT_CURSO)))).forEach(d=>{ const a=d.data(), cnt=(AT_CARGA.includes(a.estado)&&a.boUid)?1:0; if(cnt) c[a.boUid]=(c[a.boUid]||0)+1;
         if((a.cargaContada||0)!==cnt && n<450){ b.update(d.ref,{cargaContada:cnt}); n++; } });
       b.set(doc(db,'config','cargaBO'),{carga:c,conf:cf,atualizadoEm:serverTimestamp()},{merge:true}); await b.commit(); toast('Carga recalculada.'); admCarga(el); }catch(e){ toast(errTxt(e),true); } };
 }
