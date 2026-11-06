@@ -4006,12 +4006,12 @@ async function fecharRun(mes, fechar, casa){
   if (fechar && casa) {   // fotografia da imputação: [i, PN, nº, cliente, vendedor, mês do PN, comissão, escalão, majoração, vendedor PHC (nome), nº PHC, manual, por MSISDN]
     const L = casa.map(x=>JSON.stringify([x.i, x.r?.id||'', x.r?.numero||'', x.r?.cliente?.nome||'', x.uid||'', x.mesPN||'', x.com||0, x.t?.esc||'', x.t?.maj||0, x.r?.vendedorNome||'', x.r?.vendedorPHC||'', x.manual?1:0, x.porMsisdn?1:0, x.t?.pts??null]));
     for (let k=0; k*1500<L.length; k++) b.set(doc(db,'runs',mes,'calc',String(k)), {linhas:L.slice(k*1500,(k+1)*1500)});
-    b.set(doc(db,'runs',mes), {fechado:{em:new Date().toISOString(), por:S.me.nome}, calcN:L.length, calcEm:new Date().toISOString()}, {merge:true});
-    await b.commit(); b = writeBatch(db);
+    await b.commit(); b = writeBatch(db);   // (o RUN só fica marcado como fechado no fim, depois de tudo gravado)
     // rentabilidade de cada PN (confidencial: comissoes/pn_<id>, só Master e BO Financeiro): tudo o que a Vodafone pagou, incluindo PRM
     const porPN = {}; casa.filter(x=>x.r?.id).forEach(x=>{ const o=porPN[x.r.id]=porPN[x.r.id]||{rec:0, prm:0, com:0, linhas:[]}; const v=x.l[RL.val]||0;
-      o.rec=r2(o.rec+v); if (x.prm) o.prm=r2(o.prm+v); o.com=r2(o.com+(x.com||0)); o.linhas.push([x.l[RL.cod], x.l[RL.pos], x.l[RL.msisdn], v, x.com||0, descVDF(x.l)]); });
+      o.rec=r2(o.rec+v); if (x.prm) o.prm=r2(o.prm+v); o.com=r2(o.com+(x.com||0)); o.linhas.push({...[x.l[RL.cod]??'', x.l[RL.pos]??'', x.l[RL.msisdn]??'', v, x.com||0, descVDF(x.l)]}); });   // objeto {0:…,5:…}: o Firestore não aceita listas dentro de listas
     let n=0; for (const [id,o] of Object.entries(porPN)) { b.set(doc(db,'comissoes','pn_'+id), {rpnId:id, runs:{[mes]:o}}, {merge:true}); if (++n>=400) { await b.commit(); b=writeBatch(db); n=0; } }
+    b.set(doc(db,'runs',mes), {fechado:{em:new Date().toISOString(), por:S.me.nome}, calcN:L.length, calcEm:new Date().toISOString()}, {merge:true});
   } else { b.set(doc(db,'runs',mes), {fechado:null, calcN:null, calcEm:null}, {merge:true});
     // reabrir: a produção desse mês volta a aceitar PN (se era o último mês fechado)
     try { const p = await getDoc(doc(db,'config','producao')); if (p.exists() && p.data().fechadoAte===mes) b.set(doc(db,'config','producao'), {fechadoAte: somaMeses(mes,-1), atualizadoEm:serverTimestamp(), por:S.me.nome}, {merge:true}); } catch(_){} }
